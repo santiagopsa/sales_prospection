@@ -85,6 +85,7 @@ const STEPS = [
 function router() {
   const hash = location.hash || '#/';
   document.querySelectorAll('nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === hash));
+  if (hash.startsWith('#/deal/')) return renderDealDetail(hash.split('/')[2]);
   if (hash === '#/deals') return renderDeals();
   if (hash === '#/wishlist') return renderWishlist();
   return renderWizard();
@@ -593,14 +594,15 @@ async function renderDeals() {
   if (!r.length) { h(`<h1>Historial</h1><p class="muted">Todavía no hay deals guardados.</p>`); return; }
   h(`
     <h1>Historial de deals</h1>
+    <p class="muted">Haz clic en una fila para ver el detalle completo de lo que se registró.</p>
     <div class="card">
       <table>
         <thead><tr>
           <th>#</th><th>Empresa</th><th>Ejecutivo</th><th>Segmento</th><th>ATS</th>
-          <th>Fund.</th><th>NTH</th><th>Fecha</th>
+          <th>Fund.</th><th>NTH</th><th>Fecha</th><th></th>
         </tr></thead>
         <tbody>
-          ${r.map(d => `<tr>
+          ${r.map(d => `<tr class="clickable" data-open="${d.id}">
             <td>${d.id}</td>
             <td>${esc(d.company||'—')}</td>
             <td>${esc(d.executive||'—')}</td>
@@ -609,11 +611,164 @@ async function renderDeals() {
             <td>${barCell(d.score_fundamentals)}</td>
             <td>${barCell(d.score_nice_to_have)}</td>
             <td>${new Date(d.created_at).toLocaleString()}</td>
+            <td style="text-align:right;white-space:nowrap;">
+              <button class="btn ghost btn-sm" data-view="${d.id}">Ver</button>
+              <button class="btn ghost btn-sm danger" data-del="${d.id}" title="Eliminar">🗑</button>
+            </td>
           </tr>`).join('')}
         </tbody>
       </table>
     </div>
   `);
+  el.querySelectorAll('[data-open], [data-view]').forEach(node => node.addEventListener('click', e => {
+    const id = node.getAttribute('data-open') || node.getAttribute('data-view');
+    // No navegar si el clic vino del botón eliminar
+    if (e.target.closest('[data-del]')) return;
+    location.hash = `#/deal/${id}`;
+  }));
+  el.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async e => {
+    e.stopPropagation();
+    await deleteDeal(b.getAttribute('data-del'), renderDeals);
+  }));
+}
+
+// ---------- Detalle de un deal ----------
+async function renderDealDetail(id) {
+  h(`<h1>Detalle del deal</h1><p class="muted">Cargando...</p>`);
+  const row = await fetch(`/api/deals/${id}`).then(r => r.ok ? r.json() : null).catch(() => null);
+  if (!row) { h(`<h1>Detalle del deal</h1><p class="muted">No se encontró el deal #${esc(id)}.</p><a href="#/deals">← Volver al historial</a>`); return; }
+
+  // El campo data contiene el objeto completo que se registró
+  const d = row.data || {};
+  const s = localScore(d);
+  const seg = d.segment || row.segment || '';
+  const faltantesFund = Object.entries(s.fund).filter(([_, v]) => !v).map(([k]) => s.labels[k]);
+  const faltantesNth = Object.entries(s.nth).filter(([_, v]) => !v).map(([k]) => s.labels[k]);
+
+  const q = d.qualif || {};
+  const ideal = Array.isArray(d.idealRequests) ? d.idealRequests.filter(x => x && x.text) : [];
+
+  // Helper para mostrar un campo (resalta si está vacío)
+  const field = (label, val) => {
+    const empty = !val || !String(val).trim();
+    return `<div class="detail-field ${empty ? 'empty' : ''}">
+      <div class="detail-label">${label}</div>
+      <div class="detail-value">${empty ? '<span class="pill bad">Sin completar</span>' : esc(val)}</div>
+    </div>`;
+  };
+
+  h(`
+    <div class="split">
+      <h1>Deal #${row.id} · ${esc(d.company || row.company || '—')}</h1>
+      ${seg ? `<span class="segment-badge ${seg}">Segmento ${seg}</span>` : ''}
+    </div>
+    <p class="muted">
+      Ejecutivo: <strong>${esc(d.executive || row.executive || '—')}</strong> ·
+      Guardado: <strong>${new Date(row.created_at).toLocaleString()}</strong>
+    </p>
+
+    <div class="card">
+      <h2>Resumen de calidad del proceso</h2>
+      <div class="score-grid" style="margin-top: 6px;">
+        <div class="card compact score-card">
+          <div class="muted">Fundamentales</div>
+          <div class="num">${s.fundamentalsPct}%</div>
+          <div class="progress"><span style="width:${s.fundamentalsPct}%"></span></div>
+        </div>
+        <div class="card compact score-card">
+          <div class="muted">Nice-to-have</div>
+          <div class="num">${s.niceToHavePct}%</div>
+          <div class="progress"><span style="width:${s.niceToHavePct}%"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>⚠ Campos importantes que no se completaron</h2>
+      ${faltantesFund.length ? `
+        <h3>Fundamentales pendientes</h3>
+        <ul class="list-clean">
+          ${faltantesFund.map(x => `<li><span>${x}</span><span class="pill bad">Falta</span></li>`).join('')}
+        </ul>
+      ` : `<p class="pill good">✓ Todos los fundamentales fueron completados</p>`}
+      ${faltantesNth.length ? `
+        <h3>Nice-to-have pendientes</h3>
+        <ul class="list-clean">
+          ${faltantesNth.map(x => `<li><span class="muted">${x}</span><span class="pill warn">Sugerido</span></li>`).join('')}
+        </ul>
+      ` : ''}
+    </div>
+
+    <div class="card">
+      <h2>Fase 1 · Construcción</h2>
+      ${field('Contrato previo', d.contratoPrevio)}
+      ${field('Vínculo / rapport', d.vinculo)}
+    </div>
+
+    <div class="card">
+      <h2>Calificación rápida</h2>
+      ${field('Volumen de contratación', q.volumen)}
+      ${field('Equipo de reclutamiento', q.equipoRrhh)}
+      ${field('Perfiles que contratan', q.perfiles)}
+      ${field('Herramienta actual', q.herramienta)}
+      ${field('Quién decide la compra', q.decisor_quien)}
+      ${field('¿Tiene ATS?', d.hasAts ? 'Sí' : 'No')}
+      ${d.hasAts ? field('ATS / uso', d.atsName) : ''}
+    </div>
+
+    <div class="card">
+      <h2>Fase 2 · Dolor</h2>
+      ${field('Dolor principal', d.dolor)}
+      ${field('Impacto económico', d.impactoEconomico)}
+      ${field('Consecuencias emocionales', d.consecuenciasEmocionales)}
+      ${field('Cómo miden hoy', d.medicion)}
+      ${seg === 'C' ? field('Integraciones / API', d.integraciones) : ''}
+    </div>
+
+    <div class="card">
+      <h2>Presupuesto y decisión</h2>
+      ${field('Presupuesto', d.presupuesto)}
+      ${field('Decisor / decisores', d.decisor)}
+      ${field('Proceso de decisión', d.procesoDecision)}
+    </div>
+
+    <div class="card">
+      <h2>Lo que pidió el cliente en su ideal</h2>
+      ${ideal.length ? `
+        <ul class="list-clean">
+          ${ideal.map(p => `<li><span>${esc(p.text)}</span>${p.weHave ? '<span class="pill good">Lo tenemos</span>' : '<span class="pill warn">Construir</span>'}</li>`).join('')}
+        </ul>
+      ` : `<p class="muted">No se registraron pedidos del cliente.</p>`}
+    </div>
+
+    <div class="card">
+      <h2>Fase 3 · Cierre</h2>
+      ${field('Plan post-venta', d.postVenta)}
+      ${field('Próximo paso acordado', d.proximoPaso)}
+    </div>
+
+    <div class="btn-row">
+      <a class="btn ghost" href="#/deals">← Volver al historial</a>
+      <button class="btn green danger-solid" data-del-detail="${row.id}">🗑 Eliminar este deal</button>
+    </div>
+  `);
+  el.querySelector('[data-del-detail]').addEventListener('click', async () => {
+    await deleteDeal(row.id, () => { location.hash = '#/deals'; });
+  });
+}
+
+// ---------- Eliminar deal ----------
+async function deleteDeal(id, onDone) {
+  if (!confirm(`¿Eliminar el deal #${id}? Esta acción no se puede deshacer.`)) return;
+  try {
+    const r = await fetch(`/api/deals/${id}`, { method: 'DELETE' });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.ok) {
+      if (typeof onDone === 'function') onDone();
+    } else {
+      alert('No se pudo eliminar: ' + (j.error || r.statusText));
+    }
+  } catch (e) { alert('Error: ' + e.message); }
 }
 function barCell(pct) {
   const p = pct||0;

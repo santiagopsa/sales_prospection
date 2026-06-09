@@ -1,4 +1,5 @@
 // Peaku Sandler - Server
+// (Historial: detalle de deal, eliminación de registros, campos faltantes)
 const express = require('express');
 const path = require('path');
 const { Pool } = require('pg');
@@ -146,8 +147,30 @@ app.get('/api/deals/:id', async (req, res) => {
     }
     const d = memory.deals.find(x => x.id === Number(req.params.id));
     if (!d) return res.status(404).json({ error: 'not found' });
-    return res.json(d);
+    return res.json({ id: d.id, executive: d.executive, company: d.company, segment: d.segment, has_ats: d.hasAts, created_at: d.createdAt, data: d });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Eliminar un deal (y sus pedidos del wishlist)
+app.delete('/api/deals/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ ok: false, error: 'id inválido' });
+    if (pool) {
+      await pool.query(`DELETE FROM wishlist WHERE deal_id=$1`, [id]);
+      const r = await pool.query(`DELETE FROM deals WHERE id=$1 RETURNING id`, [id]);
+      if (!r.rows.length) return res.status(404).json({ ok: false, error: 'not found' });
+      return res.json({ ok: true, id });
+    }
+    const idx = memory.deals.findIndex(x => x.id === id);
+    if (idx === -1) return res.status(404).json({ ok: false, error: 'not found' });
+    memory.deals.splice(idx, 1);
+    memory.wishlist = memory.wishlist.filter(w => w.dealId !== id);
+    return res.json({ ok: true, id });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // Wishlist agregado por segmento
