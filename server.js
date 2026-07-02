@@ -13,10 +13,27 @@ app.use(express.static(path.join(__dirname, 'public')));
 // --- DB ---
 const useDb = !!process.env.DATABASE_URL;
 let pool = null;
+let dbReady = false; // se pone true cuando initSchema termina OK
+let dbLastError = null;
+
 if (useDb) {
+  // Render Postgres: interno no requiere SSL, externo sí. Detectamos por hostname.
+  const url = process.env.DATABASE_URL || '';
+  const isRenderInternal = /\.internal(:\d+)?\//.test(url) || url.includes('.oregon-postgres.') === false && url.includes('render.com') === false && url.includes('.internal');
+  // Regla simple: si la URL trae sslmode=require, dejamos que pg lo maneje.
+  // Si no, forzamos SSL con rejectUnauthorized:false en producción.
+  const forceSsl = process.env.PGSSL === '1' || (process.env.NODE_ENV === 'production' && !isRenderInternal);
   pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    connectionString: url,
+    ssl: forceSsl ? { rejectUnauthorized: false } : false,
+    // Timeouts para que las queries no se cuelguen para siempre
+    connectionTimeoutMillis: 8000,
+    idleTimeoutMillis: 30000,
+    max: 5,
+  });
+  pool.on('error', (err) => {
+    dbLastError = err.message;
+    console.error('[db] pool error:', err.message);
   });
 }
 
@@ -49,6 +66,7 @@ async function initSchema() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+  dbReady = true;
   console.log('[db] schema ready');
 }
 
@@ -198,15 +216,35 @@ app.get('/api/wishlist', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, db: !!pool }));
+// Health real: prueba una consulta trivial con timeout
+app.get('/api/health', async (_req, res) => {
+  const out = { ok: true, poolExists: !!pool, dbReady, lastError: dbLastError };
+  if (!pool) return res.json({ ...out, db: false });
+  try {
+    const q = pool.query('SELECT 1 AS ping');
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('db timeout 5s')), 5000));
+    const r = await Promise.race([q, timeout]);
+    out.db = !!(r && r.rows && r.rows[0] && r.rows[0].ping === 1);
+    res.json(out);
+  } catch (e) {
+    dbLastError = e.message;
+    res.status(500).json({ ...out, db: false, error: e.message });
+  }
+});
 
 // SPA fallback
 app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-initSchema().catch(e => console.error('schema error', e)).finally(() => {
-  app.listen(PORT, () => {
-    console.log(`Peaku Sandler escuchando en :${PORT} (db=${!!pool})`);
+initSchema()
+  .catch(e => {
+    dbLastError = e.message;
+    console.error('[db] schema error:', e.message);
+    console.error('[db] DATABASE_URL host:', (process.env.DATABASE_URL || '').replace(/:\/\/[^@]*@/, '://***:***@').split('/')[2]);
+  })
+  .finally(() => {
+    app.listen(PORT, () => {
+      console.log(`Peaku Sandler escuchando en :${PORT} (poolExists=${!!pool}, dbReady=${dbReady})`);
+    });
   });
-});
