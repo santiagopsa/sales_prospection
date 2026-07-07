@@ -36,13 +36,18 @@ function newDraft() {
   return {
     executive: '',
     company: '',
+    lineaNegocio: '',      // SaaS / Headhunting / EOR
+    // Ficha previa SDR (contrato previo Nº 1) — obligatoria para agendar demo
+    fichaCargos: '',        // cargos requeridos por el cliente
+    fichaCosto: '',         // costo estimado de la vacante abierta
+    fichaHerramientas: '',  // herramientas actuales
     // Fase 1 - Construcción
     contratoPrevio: '',
     vinculo: '',
     // Calificación rápida
     qualif: {
-      volumen: '',         // contrataciones/mes
-      equipoRrhh: '',      // tamaño equipo
+      volumen: '',
+      equipoRrhh: '',
       perfiles: '',
       herramienta: '',
       decisor_quien: '',
@@ -50,8 +55,11 @@ function newDraft() {
     hasAts: false,
     atsName: '',
     segment: '',           // A | B | C
-    // Fase 2 - Calificación / Dolor
-    dolor: '',
+    // Fase 2 - Dolor + EMBUDO DEL DOLOR
+    dolor: '',                    // dolor principal identificado
+    dolorCuantificar: '',         // ¿cuánto cuesta al mes?
+    dolorHistoria: '',            // ¿qué han intentado y por qué no funcionó?
+    dolorImpacto: '',             // ¿qué pasa con el cliente/equipo?
     impactoEconomico: '',
     consecuenciasEmocionales: '',
     medicion: '',
@@ -60,9 +68,13 @@ function newDraft() {
     presupuesto: '',
     decisor: '',
     procesoDecision: '',
+    fechaLimiteDecision: '',      // YYYY-MM-DD (contrato previo Nº 2)
     // Lo que el cliente pidió en su ideal
-    idealRequests: [],     // [{ text, weHave }]
+    idealRequests: [],
     // Cierre
+    proximoPasoTipo: '',          // 'piloto' | 'cotizacion' | 'nutricion'
+    pilotoCargo: '',              // vacante que se publicará esta semana
+    pilotoFechaRevision: '',      // fecha de revisión de resultados
     postVenta: '',
     proximoPaso: '',
   };
@@ -71,15 +83,41 @@ function newDraft() {
 let state = loadDraft() || newDraft();
 let stepIdx = 0;
 const STEPS = [
-  { key: 'intro',     label: '0 · Construcción' },
-  { key: 'qualif',    label: '1 · Calificación' },
-  { key: 'segment',   label: '2 · Segmento' },
-  { key: 'discovery', label: '3 · Dolor' },
-  { key: 'budget',    label: '4 · Presupuesto / Decisión' },
-  { key: 'ideal',     label: '5 · Pedidos del cliente' },
-  { key: 'close',     label: '6 · Cierre' },
-  { key: 'result',    label: '7 · Resultado' },
+  { key: 'ficha',     label: '0 · Ficha previa (SDR)' },
+  { key: 'intro',     label: '1 · Construcción' },
+  { key: 'qualif',    label: '2 · Calificación' },
+  { key: 'segment',   label: '3 · Segmento' },
+  { key: 'discovery', label: '4 · Embudo del dolor' },
+  { key: 'budget',    label: '5 · Presupuesto / Decisión' },
+  { key: 'ideal',     label: '6 · Pedidos del cliente' },
+  { key: 'close',     label: '7 · Cierre + Piloto' },
+  { key: 'result',    label: '8 · Calificación Sandler' },
 ];
+
+// ---------- Helpers de calificación ----------
+function has(s) { return !!(s && String(s).trim()); }
+function painFunnel(d) {
+  const c = has(d.dolorCuantificar);
+  const h = has(d.dolorHistoria);
+  const i = has(d.dolorImpacto);
+  const n = [c, h, i].filter(Boolean).length;
+  return { c, h, i, count: n, ok: n >= 2 };
+}
+function calificacion(d) {
+  const pf = painFunnel(d);
+  const items = {
+    dolor: pf.ok,
+    presupuesto: has(d.presupuesto),
+    decision: has(d.decisor) && has(d.procesoDecision),
+    fecha: has(d.fechaLimiteDecision),
+  };
+  const done = Object.values(items).filter(Boolean).length;
+  let label = 'No califica';
+  if (done >= 4) label = 'Completa';
+  else if (done >= 2) label = 'Parcial';
+  return { label, done, of: 4, pf, items };
+}
+function daysBetween(a, b) { return Math.floor((new Date(b).getTime() - new Date(a).getTime()) / 86400000); }
 
 // ---------- Router ----------
 function router() {
@@ -181,6 +219,7 @@ function flashSaved(btn) {
 // ---------- Steps ----------
 function renderWizard() {
   const s = STEPS[stepIdx].key;
+  if (s === 'ficha')     return stepFicha();
   if (s === 'intro')     return stepIntro();
   if (s === 'qualif')    return stepQualif();
   if (s === 'segment')   return stepSegment();
@@ -191,6 +230,54 @@ function renderWizard() {
   if (s === 'result')    return stepResult();
 }
 
+// ---------- 0 · Ficha previa (SDR) ----------
+function stepFicha() {
+  const fichaOk = has(state.fichaCargos) && has(state.fichaCosto) && has(state.fichaHerramientas) && has(state.lineaNegocio);
+  h(`
+    ${stepHeader()}
+    <div class="card">
+      <h1>Ficha previa · Contrato previo Nº 1</h1>
+      <p class="muted"><strong>Regla del proceso:</strong> el demo solo se agenda con esta ficha llena por prospección. Sin ficha, no hay demo.</p>
+
+      <div class="row">
+        <div>
+          <label>Tu nombre ${tip('Ejecutivo comercial que llevará el demo.')}</label>
+          <input type="text" data-field="executive" value="${esc(state.executive)}" placeholder="Ej. Santiago Pérez" />
+        </div>
+        <div>
+          <label>Empresa / Cliente ${tip('Razón social del cliente prospecto.\n\nEj.: "Lean Solutions S.A."')}</label>
+          <input type="text" data-field="company" value="${esc(state.company)}" placeholder="Ej. Lean Solutions" />
+        </div>
+      </div>
+
+      <label>Línea de negocio ${tip('Determina qué se le va a mostrar y qué comparativos usar.\n\n• SaaS: la plataforma de sourcing + IA.\n• Headhunting: servicio de reclutamiento a la medida.\n• EOR: employer of record.')}</label>
+      <div class="chips">
+        ${['SaaS', 'Headhunting', 'EOR'].map(k => `
+          <div class="chip ${state.lineaNegocio === k ? 'selected' : ''}" data-pick-linea="${k}">${k}</div>
+        `).join('')}
+      </div>
+
+      <h3 style="margin-top: 22px;">Datos que dio prospección</h3>
+      <label>Cargos requeridos que el cliente necesita cubrir ${tip('Vacantes reales del cliente hoy. Sin esto no calificamos el demo.\n\nEj.: "3 devs full-stack senior, 1 líder de operaciones, 5 SDRs bilingües."')}</label>
+      <textarea data-field="fichaCargos" placeholder="Ej. 3 devs senior full-stack, 1 líder de ops, 5 SDRs bilingües.">${esc(state.fichaCargos)}</textarea>
+
+      <label>Costo estimado de la vacante abierta ${tip('Cuánto le cuesta al mes tener esa vacante abierta (o cuánto valen las agencias que están pagando). Es el ancla del precio en el demo.\n\nEj.: "Perder al dev senior = 3-5M COP/mes en oportunidad. Pagan 8M COP por cabeza a agencias."')}</label>
+      <textarea data-field="fichaCosto" placeholder="Ej. Vacante técnica abierta = 4M/mes en oportunidad; agencias les cobran 8M/cabeza.">${esc(state.fichaCosto)}</textarea>
+
+      <label>Herramientas actuales del cliente ${tip('Todo lo que usan hoy para reclutar. Determina si es sourcing manual, con bolsas, con ATS.\n\nEj.: "Computrabajo + LinkedIn Recruiter + Excel"')}</label>
+      <textarea data-field="fichaHerramientas" placeholder="Ej. Computrabajo + LinkedIn Recruiter + Excel">${esc(state.fichaHerramientas)}</textarea>
+
+      ${fichaOk ? '<div class="hint" style="margin-top:14px;background:#e8f6f0;border-left-color:var(--peaku-green);">✓ Ficha completa. Puedes agendar el demo.</div>' : '<div class="hint" style="margin-top:14px;background:#fdecec;border-left-color:var(--bad);color:var(--bad);"><strong>Ficha incompleta.</strong> Sin los 4 campos (línea + 3 datos) no debería haber demo agendado.</div>'}
+    </div>
+    ${navButtons({ prevHidden: true })}
+  `);
+  bindForm();
+  el.querySelectorAll('[data-pick-linea]').forEach(c => c.addEventListener('click', () => {
+    state.lineaNegocio = c.getAttribute('data-pick-linea');
+    saveDraft(); renderWizard();
+  }));
+}
+
 function stepIntro() {
   h(`
     ${stepHeader()}
@@ -198,16 +285,7 @@ function stepIntro() {
       <h1>Fase 1 · Construcción de confianza</h1>
       <p class="muted">Antes de meter preguntas, escribe el contrato previo de la reunión y cómo está la relación. <strong>Escucha 70%, habla 30%.</strong></p>
 
-      <div class="row">
-        <div>
-          <label>Tu nombre ${tip('Tu nombre como ejecutivo comercial. Sirve para reportería por persona después.\n\nEj.: "Santiago Pérez"')}</label>
-          <input type="text" data-field="executive" value="${esc(state.executive)}" placeholder="Ej. Santiago Pérez" />
-        </div>
-        <div>
-          <label>Empresa / Cliente ${tip('Razón social del cliente prospecto. Si todavía no lo sabes, ponle un alias y lo cambias después.\n\nEj.: "Constructora Bolívar S.A."')}</label>
-          <input type="text" data-field="company" value="${esc(state.company)}" placeholder="Ej. Constructora Bolívar S.A." />
-        </div>
-      </div>
+      <p class="muted" style="margin-bottom:14px;font-size:13px;">Ficha previa lista ✓ · Ejecutivo: <strong>${esc(state.executive) || '—'}</strong> · Cliente: <strong>${esc(state.company) || '—'}</strong></p>
 
       <label>Contrato previo acordado ${tip('FUNDAMENTAL Sandler. Acuerdo explícito al inicio: duración, agenda, qué buscan ambos, y el permiso para que cualquiera diga "no" si no hay ajuste.\n\nEj.: "Acordamos 30 min. Yo entiendo su proceso actual y sus dolores; ellos deciden al final si tiene sentido una segunda reunión. Acordado que pueden decir que no sin problema."')}<span class="opt">(tiempo, agenda, permiso para decir "no")</span></label>
       <textarea data-field="contratoPrevio" placeholder="Ej. 30 min, entiendo su proceso y dolores; al final ellos deciden si avanzamos. Acordado que pueden decir 'no'.">${esc(state.contratoPrevio)}</textarea>
@@ -215,7 +293,7 @@ function stepIntro() {
       <label>Vínculo / rapport inicial ${tip('Nice-to-have. Cómo rompiste el hielo y generaste relación par a par. Ayuda a contextualizar el deal.\n\nEj.: "Hablamos 5 min de su expansión a Cali, ambos conocemos al gerente de RRHH del Grupo Éxito. Tono cálido, conversación par a par."')}<span class="opt">(opcional, nice-to-have)</span></label>
       <textarea data-field="vinculo" placeholder="Ej. hablamos de su expansión, conocemos personas en común, tono cálido.">${esc(state.vinculo)}</textarea>
     </div>
-    ${navButtons({ prevHidden: true })}
+    ${navButtons()}
   `);
   bindForm();
 }
@@ -315,11 +393,16 @@ function stepDiscovery() {
     '¿Tienen forma de medir su proceso (fuentes, conversión, tiempos)?',
   ];
 
+  const pf = painFunnel(state);
+  const badge = pf.ok
+    ? `<span class="pill good">Embudo del dolor OK · ${pf.count}/3</span>`
+    : `<span class="pill bad">Embudo incompleto · ${pf.count}/3 (mín. 2)</span>`;
+
   h(`
     ${stepHeader()}
     <div class="card">
-      <h1>Fase 2 · Diagnóstico del dolor <span class="segment-badge ${seg}">Segmento ${seg}</span></h1>
-      <p class="muted">Investiga profundo. Documenta lo más textual posible lo que diga el cliente.</p>
+      <div class="split"><h1>Embudo del dolor <span class="segment-badge ${seg}">Segmento ${seg}</span></h1>${badge}</div>
+      <p class="muted"><strong>Regla del proceso:</strong> cuando el cliente menciona un dolor, la conversación se detiene ahí. <strong>Mínimo 2 de estas 3 preguntas</strong> antes de continuar. Un dolor sin desarrollar no ancla ni demo ni precio ni urgencia.</p>
 
       <div class="hint">
         <strong>Preguntas guía para este segmento:</strong>
@@ -328,21 +411,31 @@ function stepDiscovery() {
         </ul>
       </div>
 
-      <label>Dolor principal ${tip('FUNDAMENTAL. El problema concreto y específico que el cliente tiene HOY. No abstracto. Documenta lo más textual posible lo que diga el cliente.\n\nMal: "tienen problemas para contratar"\nBien: "Llevan 6 semanas tratando de cubrir 3 vacantes de devs senior y han perdido el contrato con un cliente porque no pudieron arrancar el proyecto a tiempo."')}<span class="opt">(qué problema concreto tiene)</span></label>
-      <textarea data-field="dolor" placeholder="Ej. llevan 45 días con 3 vacantes técnicas abiertas, perdieron un contrato por no poder arrancar a tiempo.">${esc(state.dolor)}</textarea>
+      <label>Dolor principal identificado ${tip('El problema concreto y textual que confesó el cliente. NO lo parafrasees — cópialo tal cual, en sus palabras.\n\nMal: "problemas contratando"\nBien (Lean Solutions, MIN 17:29): "Encontrar profesionales bilingües especializados en logística se complica porque somos los más grandes del sector."')}<span class="opt">(cópialo textual)</span></label>
+      <textarea data-field="dolor" placeholder="Textual, en las palabras del cliente.">${esc(state.dolor)}</textarea>
 
-      <label>Impacto económico ${tip('FUNDAMENTAL. Cuánto le cuesta NO resolver el dolor. En horas, en plata o en oportunidad perdida. Es lo que justifica nuestra inversión vs. su statu quo.\n\nEj.: "Reclutadora gasta 60 hrs/mes en screening = 1.8M COP/mes. Pagan 8M COP por cada vacante a agencias y este año van 12 vacantes (96M anuales). Perdieron un contrato de 200M por no llenar las vacantes a tiempo."')}<span class="opt">(horas / $ que cuesta no resolverlo)</span></label>
-      <textarea data-field="impactoEconomico" placeholder="Ej. 60 hrs/mes en screening (~1.8M COP), 8M COP por agencia x 12 vacantes = 96M anuales.">${esc(state.impactoEconomico)}</textarea>
+      <h3 style="margin-top: 24px;">Embudo del dolor · las 3 preguntas de proceso</h3>
 
-      <label>Consecuencias emocionales ${tip('Nice-to-have pero MUY potente para el cierre. El dolor humano detrás del número. Frustración, miedo, presión del jefe.\n\nEj.: "La líder de RRHH está quemada, ya pidió un asistente y no se lo dieron. Su jefa la regañó la última junta por los tiempos. Siente que no va a poder con la meta de Q3."')}<span class="opt">(nice-to-have, potente)</span></label>
-      <textarea data-field="consecuenciasEmocionales" placeholder="Ej. líder de RRHH quemada, regañada por su jefa, miedo de no cumplir meta de Q3.">${esc(state.consecuenciasEmocionales)}</textarea>
+      <label>1. Cuantificar ${tip('🎯 La MÁS importante. La respuesta se convierte en el ancla del precio: "esto les cuesta X al mes; nuestra solución cuesta Y."\n\nPregunta al cliente: "¿Cuánto les cuesta al mes tener abierta una vacante así?" o "¿Cuántas requisiciones como esta se les vencen?"\n\nEj. respuesta: "Cada vacante técnica abierta pierde ~5M COP/mes en proyectos que no arrancan. Este año llevamos 4 vacantes vencidas."')}<span class="opt">(¿cuánto cuesta al mes?)</span></label>
+      <textarea data-field="dolorCuantificar" placeholder="Ej. 5M COP/mes en oportunidad por vacante; 4 vacantes vencidas este año = 20M COP.">${esc(state.dolorCuantificar)}</textarea>
 
-      <label>¿Cómo miden el proceso hoy? ${tip('Si no miden, es una oportunidad para vender analítica. Si miden, te dice qué dolores son visibles para ellos.\n\nEj.: "Solo miden tiempo de llenado de vacante en Excel manual; no miden fuentes ni conversión por etapa. No saben cuál fuente les funciona mejor."')}</label>
+      <label>2. Historia ${tip('Qué ya intentaron y por qué no funcionó. Te dice contra qué compites y qué NO volver a proponer.\n\nPregunta al cliente: "¿Qué han intentado para resolverlo y por qué no ha funcionado?"\n\nEj. respuesta: "Probaron 2 agencias, cobran 15% del salario pero traen candidatos mediocres. Contrataron un reclutador in-house pero renunció en 3 meses."')}<span class="opt">(¿qué intentaron y por qué no funcionó?)</span></label>
+      <textarea data-field="dolorHistoria" placeholder="Ej. 2 agencias caras y con calidad baja; reclutador in-house que renunció.">${esc(state.dolorHistoria)}</textarea>
+
+      <label>3. Impacto ${tip('Qué pasa con el cliente final, con el equipo o con el negocio cuando el dolor no se resuelve. La consecuencia emocional/humana potencia el cierre.\n\nPregunta al cliente: "¿Qué pasa con el cliente final — o con el equipo — cuando ese cargo no aparece a tiempo?"\n\nEj. respuesta: "Pierdo el contrato con Ecopetrol si no arrancamos en 2 semanas. El equipo actual ya hace horas extra y renunciaron 2 en el último mes por burnout."')}<span class="opt">(¿qué pasa con el cliente / equipo?)</span></label>
+      <textarea data-field="dolorImpacto" placeholder="Ej. perdemos contrato Ecopetrol si no arrancamos en 2 sem; equipo quemado, 2 renuncias.">${esc(state.dolorImpacto)}</textarea>
+
+      <h3 style="margin-top: 24px;">Extras (nice-to-have)</h3>
+
+      <label>Consecuencias emocionales adicionales ${tip('Frustración específica del decisor, presión de su jefe, riesgo personal.\n\nEj.: "La gerente de RRHH está bajo revisión de desempeño por esto."')}<span class="opt">(opcional)</span></label>
+      <textarea data-field="consecuenciasEmocionales" placeholder="Ej. gerente RRHH bajo revisión de desempeño por los tiempos.">${esc(state.consecuenciasEmocionales)}</textarea>
+
+      <label>¿Cómo miden el proceso hoy? ${tip('Si no miden, es venta de analítica. Si miden, entiendes qué dolores les son visibles.')}<span class="opt">(opcional)</span></label>
       <textarea data-field="medicion" placeholder="Ej. miden time-to-fill manualmente; no miden fuentes ni conversión.">${esc(state.medicion)}</textarea>
 
       ${isC ? `
-        <label>Integraciones / API del ATS ${tip('Crítico para Segmento C. Define si podemos posicionarnos como capa sobre el ATS o si hay fricción técnica.\n\nEj.: "SAP SF tiene API REST documentada. El año pasado integraron Outmatch para assessments. El IT acepta integraciones que pasen su revisión de seguridad (~3 semanas)."')}</label>
-        <textarea data-field="integraciones" placeholder="Ej. SAP SF con API REST, ya han integrado Outmatch antes. IT revisa seguridad.">${esc(state.integraciones)}</textarea>
+        <label>Integraciones / API del ATS ${tip('Solo Segmento C. Define si podemos ser capa sobre el ATS.')}<span class="opt">(solo Segmento C)</span></label>
+        <textarea data-field="integraciones" placeholder="Ej. SAP SF con API REST; IT revisa seguridad ~3 semanas.">${esc(state.integraciones)}</textarea>
       ` : ''}
     </div>
     ${navButtons()}
@@ -351,20 +444,32 @@ function stepDiscovery() {
 }
 
 function stepBudget() {
+  const cal = calificacion(state);
+  const anclaBase = state.dolorCuantificar || state.fichaCosto || '';
   h(`
     ${stepHeader()}
     <div class="card">
       <h1>Presupuesto y decisión</h1>
-      <p class="muted">No avances al cierre sin esto.</p>
+      <p class="muted"><strong>Regla del proceso:</strong> este bloque es contrato previo Nº 2. Sin fecha límite acordada con el cliente, no hay cotización.</p>
 
-      <label>Presupuesto ${tip('FUNDAMENTAL. ¿Tiene presupuesto asignado? ¿Cuánto? ¿Comparado con qué alternativa? Si no hay plata, no hay venta.\n\nMal: "creo que tienen plata"\nBien: "Tienen 50M COP/año asignados al stack de RRHH; hoy gastan 30M en agencias. Si les demostramos ROI vs. esa partida actual, pueden aprobarlo en este Q. Comparan precio contra Bumeran."')}</label>
-      <textarea data-field="presupuesto" placeholder="Ej. 50M COP/año asignados; hoy gastan 30M en agencias. Comparan con Bumeran.">${esc(state.presupuesto)}</textarea>
+      ${anclaBase ? `<div class="hint"><strong>Ancla del dolor cuantificado:</strong> "${esc(anclaBase)}"<br/>Úsalo aquí para presentar precio: <em>"si esto les cuesta X al mes, la modalidad de Peaku que resuelve esto arranca en Y."</em></div>` : `<div class="hint" style="background:#fef3e2;border-left-color:var(--warn);"><strong>⚠ No tienes ancla cuantificada.</strong> Sin número de dolor, cualquier precio se evalúa como gasto puro. Vuelve al embudo del dolor.</div>`}
 
-      <label>Decisor / decisores ${tip('FUNDAMENTAL. Nombres y roles concretos. ¿Hay comité? ¿Pasa por compras? ¿Quién firma realmente?\n\nEj.: "Decide el comité: María (líder TA, champion nuestra), Carlos (gerente RRHH, aprueba), Lucía (compras, valida proceso). El que firma es Carlos. Compras puede demorar 2 semanas adicionales."')}</label>
-      <textarea data-field="decisor" placeholder="Ej. María (TA, champion), Carlos (gte RRHH, aprueba), Lucía (compras valida).">${esc(state.decisor)}</textarea>
+      <label>Presupuesto ${tip('¿Tiene presupuesto asignado? ¿Cuánto? ¿Comparado con qué alternativa?\n\nEj.: "50M COP/año en stack RRHH; hoy gastan 30M en agencias. Comparan con Bumeran."')}</label>
+      <textarea data-field="presupuesto" placeholder="Ej. 50M COP/año asignados; hoy gastan 30M en agencias.">${esc(state.presupuesto)}</textarea>
 
-      <label>Proceso de decisión ${tip('FUNDAMENTAL. Pasos internos exactos, plazos y criterios. Te dice cuándo cerrará y qué tienes que entregar para que avance.\n\nEj.: "Próxima semana presento a Carlos. Si aprueba, pasa a compras (2 sem). Necesitan: 1) propuesta comercial, 2) caso de éxito sector, 3) plan de implementación a 90 días. Criterios: ROI demostrable y soporte 24/7."')}</label>
-      <textarea data-field="procesoDecision" placeholder="Ej. próximo paso con Carlos. Si aprueba, compras 2 sem. Necesitan propuesta + caso éxito + plan 90d.">${esc(state.procesoDecision)}</textarea>
+      <label>Decisor / decisores ${tip('Nombres y roles. ¿Hay comité? ¿Pasa por compras? ¿Quién firma realmente?\n\nEj.: "María (TA, champion), Carlos (gte RRHH, aprueba), Lucía (compras)."')}</label>
+      <textarea data-field="decisor" placeholder="Ej. María (TA, champion), Carlos (gte RRHH, aprueba), Lucía (compras).">${esc(state.decisor)}</textarea>
+
+      <label>Proceso de decisión ${tip('Pasos internos, plazos, criterios. Te dice cuándo cerrará y qué tienes que entregar.')}</label>
+      <textarea data-field="procesoDecision" placeholder="Ej. próximo paso con Carlos; si aprueba, compras 2 sem; necesitan propuesta + caso éxito.">${esc(state.procesoDecision)}</textarea>
+
+      <label>Fecha límite de decisión ${tip('🔑 CRÍTICO. Fecha acordada con el cliente en el demo: "¿para cuándo necesitan esto resuelto?"\n\nRegla del proceso:\n• Máximo 14 días desde la cotización.\n• Sin esta fecha NO se envía cotización.\n• Después del día 14 el cierre baja dramáticamente; día 30 va a breakup.')}<span class="opt">(contrato previo Nº 2)</span></label>
+      <input type="date" data-field="fechaLimiteDecision" value="${esc(state.fechaLimiteDecision)}" />
+
+      <div style="margin-top:14px;">
+        <strong style="font-size:13px;color:var(--peaku-gray);">Estado de calificación Sandler:</strong>
+        <span class="pill ${cal.label === 'Completa' ? 'good' : (cal.label === 'Parcial' ? 'warn' : 'bad')}">${cal.label} · ${cal.done}/${cal.of}</span>
+      </div>
     </div>
     ${navButtons()}
   `);
@@ -409,67 +514,128 @@ function stepIdeal() {
 }
 
 function stepClose() {
+  const cal = calificacion(state);
+  const califica = cal.label === 'Completa';
+  const tipoAct = state.proximoPasoTipo || (califica ? 'piloto' : 'nutricion');
   h(`
     ${stepHeader()}
     <div class="card">
-      <h1>Fase 3 · Cierre</h1>
-      <p class="muted">Recordatorio: la presentación de la plataforma resuelve EXCLUSIVAMENTE los dolores que ya identificaste.</p>
+      <h1>Fase 3 · Cierre + Piloto</h1>
+      <p class="muted"><strong>Regla del proceso:</strong> los próximos pasos los propones tú (nunca el cliente los dicta). La cotización viaja de anexo del piloto, nunca al revés.</p>
 
-      <label>Post-venta / cómo evitamos remordimiento del comprador ${tip('Sandler dice: hay que sentar las bases para que no se eche para atrás después de firmar. Y para abrir la puerta a referencias.\n\nEj.: "Sesión de onboarding en semana 1. Reunión de seguimiento a los 30 días con métricas. Acordamos que si en 60 días no hay ROI demostrable, podemos parar sin penalidad. Pedir referencia formal a los 90 días si están contentos."')}<span class="opt">(nice-to-have)</span></label>
-      <textarea data-field="postVenta" placeholder="Ej. onboarding sem 1, seguimiento 30d con métricas, cláusula 60d sin penalidad.">${esc(state.postVenta)}</textarea>
+      <div style="margin: 8px 0 14px;">
+        <strong style="font-size:13px;color:var(--peaku-gray);">Calificación Sandler:</strong>
+        <span class="pill ${cal.label === 'Completa' ? 'good' : (cal.label === 'Parcial' ? 'warn' : 'bad')}">${cal.label} · ${cal.done}/${cal.of}</span>
+        ${!califica ? '<div style="margin-top:8px;color:var(--bad);font-size:13px;">⚠ Deal no califica completo — la ruta correcta es <strong>Nutrición</strong>, no cotización.</div>' : ''}
+      </div>
 
-      <label>Próximo paso concreto acordado ${tip('Crítico para que el deal avance. Tiene que ser específico: día, hora, qué entregable, con quién.\n\nMal: "le envío más información"\nBien: "Demo técnica el martes 4 de junio, 10am, con María (TA) y el CTO. Yo envío la propuesta comercial el lunes antes de mediodía con caso de éxito de constructora similar."')}<span class="opt">(nice-to-have pero crítico)</span></label>
-      <textarea data-field="proximoPaso" placeholder="Ej. demo martes 10am con María + CTO. Envío propuesta + caso éxito el lunes 12pm.">${esc(state.proximoPaso)}</textarea>
+      <h3>¿Cuál es la ruta del deal?</h3>
+      <div class="chips">
+        <div class="chip ${tipoAct === 'piloto' ? 'selected' : ''} ${!califica ? 'muted' : ''}" data-pick-tipo="piloto" ${!califica ? 'style="opacity:.5;cursor:not-allowed;"' : ''}>
+          <strong>🚀 Piloto esta semana</strong> <span class="opt">(solo si califica completo)</span>
+        </div>
+        <div class="chip ${tipoAct === 'cotizacion' ? 'selected' : ''} ${!califica ? 'muted' : ''}" data-pick-tipo="cotizacion" ${!califica ? 'style="opacity:.5;cursor:not-allowed;"' : ''}>
+          <strong>📄 Cotización</strong> <span class="opt">(si el piloto no aplica)</span>
+        </div>
+        <div class="chip ${tipoAct === 'nutricion' ? 'selected' : ''}" data-pick-tipo="nutricion">
+          <strong>🌱 Nutrición</strong> <span class="opt">(sin cotización, sin follow-up de cierre)</span>
+        </div>
+      </div>
+
+      ${tipoAct === 'piloto' ? `
+        <div class="card compact" style="margin-top:14px;background:var(--panel-2);">
+          <h3 style="margin-top:0;">Piloto esta semana</h3>
+          <p class="muted" style="font-size:13px;">Ofrécele: "Antes de que evalúen una propuesta en frío, publiquemos esta semana [el cargo del dolor]. El [día pactado] revisamos juntos los resultados y la cotización completa, con esa evidencia sobre la mesa."</p>
+
+          <label>Cargo que vamos a publicar ${tip('Idealmente el cargo que el cliente confesó no poder llenar (el dolor identificado). Cabe en la autoridad de quien asistió al demo — sin comité.')}<span class="opt">(el cargo del dolor)</span></label>
+          <input type="text" data-field="pilotoCargo" value="${esc(state.pilotoCargo)}" placeholder="Ej. Dev full-stack senior — el mismo que el cliente confesó no poder cubrir." />
+
+          <label>Fecha de revisión de resultados ${tip('El día que se revisa el piloto Y se presenta la cotización con evidencia real. Máximo 7 días desde hoy.\n\nEj.: viernes 12 de julio 10am con María y Carlos.')}</label>
+          <input type="date" data-field="pilotoFechaRevision" value="${esc(state.pilotoFechaRevision)}" />
+        </div>
+      ` : ''}
+
+      ${tipoAct === 'cotizacion' ? `
+        <div class="card compact" style="margin-top:14px;background:var(--panel-2);">
+          <h3 style="margin-top:0;">Cotización</h3>
+          <p class="muted" style="font-size:13px;">Regla: la cotización se envía el mismo día del demo, y con la próxima reunión en el calendario antes de colgar: "Para revisar el presupuesto con su equipo, abramos agendas de una vez — ¿jueves 9:00 am o viernes 3:00 pm?" <strong>Prohibido despedirse con "le envío la propuesta para que la revise".</strong></p>
+        </div>
+      ` : ''}
+
+      ${tipoAct === 'nutricion' ? `
+        <div class="card compact" style="margin-top:14px;background:#fef3e2;border:1px solid #f8d7a5;">
+          <h3 style="margin-top:0;color:var(--warn);">Nutrición</h3>
+          <p class="muted" style="font-size:13px;">Sin cotización, sin consultoría gratis, sin follow-ups de cierre. Se le manda material y se revisa en 30 días si el dolor apareció. En Sandler la presentación es el premio que el prospecto gana al calificar.</p>
+        </div>
+      ` : ''}
+
+      <label>Próximo paso concreto acordado ${tip('Específico: día, hora, entregable, con quién. NUNCA "le envío info".\n\nEj.: "Piloto arranca lunes, publicamos dev senior; revisión viernes 10am con María y Carlos."')}</label>
+      <textarea data-field="proximoPaso" placeholder="Ej. piloto lunes; revisión viernes 10am con María + Carlos.">${esc(state.proximoPaso)}</textarea>
+
+      <label>Post-venta / cómo evitamos remordimiento ${tip('Base para que no se eche para atrás y para abrir referidos.')}<span class="opt">(nice-to-have)</span></label>
+      <textarea data-field="postVenta" placeholder="Ej. onboarding sem 1, seguimiento 30d, cláusula 60d sin penalidad, referencia a los 90d.">${esc(state.postVenta)}</textarea>
     </div>
     <div class="btn-row">
       <button class="btn ghost" data-act="prev">← Atrás</button>
       <div style="display:flex;gap:10px;">
         <button class="btn secondary" data-act="save">Guardar borrador</button>
-        <button class="btn" data-act="finish">Generar resultado →</button>
+        <button class="btn" data-act="next">Ver calificación →</button>
       </div>
     </div>
   `);
   bindForm();
+  el.querySelectorAll('[data-pick-tipo]').forEach(c => c.addEventListener('click', () => {
+    const val = c.getAttribute('data-pick-tipo');
+    if ((val === 'piloto' || val === 'cotizacion') && !califica) return;
+    state.proximoPasoTipo = val;
+    saveDraft(); renderWizard();
+  }));
 }
 
-// Calcula score local (mismo cálculo que server)
+// Calcula score local (mismo cálculo que server, actualizado al nuevo proceso)
 function localScore(d) {
+  const pf = painFunnel(d);
   const fund = {
-    contratoPrevio: !!(d.contratoPrevio && d.contratoPrevio.trim()),
+    contratoPrevio: has(d.contratoPrevio),
+    fichaPrevia: has(d.fichaCargos) || has(d.fichaCosto) || has(d.fichaHerramientas),
     segmentacion: !!d.segment,
-    dolor: !!(d.dolor && d.dolor.trim()),
-    impactoEconomico: !!(d.impactoEconomico && d.impactoEconomico.trim()),
-    presupuesto: !!(d.presupuesto && d.presupuesto.trim()),
-    decisor: !!(d.decisor && d.decisor.trim()),
-    procesoDecision: !!(d.procesoDecision && d.procesoDecision.trim()),
+    dolorDesarrollado: pf.ok,
+    presupuesto: has(d.presupuesto),
+    decisor: has(d.decisor),
+    procesoDecision: has(d.procesoDecision),
+    fechaLimiteDecision: has(d.fechaLimiteDecision),
   };
   const nth = {
-    vinculo: !!(d.vinculo && d.vinculo.trim()),
-    consecuenciasEmocionales: !!(d.consecuenciasEmocionales && d.consecuenciasEmocionales.trim()),
-    medicion: !!(d.medicion && d.medicion.trim()),
-    integraciones: !!(d.integraciones && d.integraciones.trim()),
-    postVenta: !!(d.postVenta && d.postVenta.trim()),
-    proximoPaso: !!(d.proximoPaso && d.proximoPaso.trim()),
+    vinculo: has(d.vinculo),
+    consecuenciasEmocionales: has(d.consecuenciasEmocionales),
+    medicion: has(d.medicion),
+    integraciones: has(d.integraciones),
+    postVenta: has(d.postVenta),
+    proximoPaso: has(d.proximoPaso),
+    piloto: has(d.pilotoCargo) && has(d.pilotoFechaRevision),
   };
   const labels = {
-    contratoPrevio: 'Contrato previo',
+    contratoPrevio: 'Contrato previo Nº 1',
+    fichaPrevia: 'Ficha previa (SDR)',
     segmentacion: 'Segmentación',
-    dolor: 'Dolor identificado',
-    impactoEconomico: 'Impacto económico',
+    dolorDesarrollado: 'Dolor desarrollado (embudo 2/3)',
     presupuesto: 'Presupuesto',
     decisor: 'Decisor',
     procesoDecision: 'Proceso de decisión',
+    fechaLimiteDecision: 'Fecha límite (contrato Nº 2)',
     vinculo: 'Vínculo / rapport',
     consecuenciasEmocionales: 'Consecuencias emocionales',
     medicion: 'Métricas actuales',
     integraciones: 'Integraciones / API',
     postVenta: 'Plan post-venta',
     proximoPaso: 'Próximo paso acordado',
+    piloto: 'Piloto agendado',
   };
   const fundOk = Object.values(fund).filter(Boolean).length;
   const nthOk = Object.values(nth).filter(Boolean).length;
+  const cal = calificacion(d);
   return {
-    fund, nth, labels,
+    fund, nth, labels, pf, cal,
     fundamentalsPct: Math.round(fundOk / Object.keys(fund).length * 100),
     niceToHavePct: Math.round(nthOk / Object.keys(nth).length * 100),
   };
@@ -488,18 +654,39 @@ function stepResult() {
   const peticionesNoTenemos = (state.idealRequests || []).filter(x => x.text && !x.weHave);
   const peticionesTenemos = (state.idealRequests || []).filter(x => x.text && x.weHave);
 
+  const cal = s.cal;
+  const califica = cal.label === 'Completa';
+  const gateColor = califica ? 'var(--peaku-green)' : (cal.label === 'Parcial' ? 'var(--warn)' : 'var(--bad)');
+  const gateBg = califica ? '#e8f6f0' : (cal.label === 'Parcial' ? '#fef3e2' : '#fdecec');
+  const rutaSug = califica ? 'Cotización el mismo día · piloto como próximo paso' : (cal.label === 'Parcial' ? 'Cerrar el gap (fecha límite y/o embudo del dolor) antes de cotizar' : 'Nutrición · sin cotización, sin follow-ups de cierre');
+
   h(`
     ${stepHeader()}
-    <div class="card">
+
+    <div class="card" style="border-left:6px solid ${gateColor}; background:${gateBg};">
       <div class="split">
-        <h1>Resultado del proceso</h1>
+        <div>
+          <div style="font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:${gateColor};">Calificación Sandler</div>
+          <h1 style="color:${gateColor};font-size:36px;margin:6px 0;">${cal.label}</h1>
+          <p class="muted" style="margin:0;">${cal.done} de ${cal.of} check-points cerrados · Ruta sugerida: <strong>${rutaSug}</strong></p>
+        </div>
         <span class="segment-badge ${seg}">Segmento ${seg} · ${SEGMENTS[seg].short}</span>
       </div>
-      <p class="muted">Empresa: <strong>${esc(state.company) || '—'}</strong> · Ejecutivo: <strong>${esc(state.executive) || '—'}</strong></p>
+
+      <ul class="list-clean" style="margin-top:14px;">
+        <li><span>Dolor desarrollado (embudo 2/3)</span><span class="pill ${cal.items.dolor ? 'good' : 'bad'}">${cal.items.dolor ? '✓' : 'Falta'}</span></li>
+        <li><span>Presupuesto</span><span class="pill ${cal.items.presupuesto ? 'good' : 'bad'}">${cal.items.presupuesto ? '✓' : 'Falta'}</span></li>
+        <li><span>Decisión (decisor + proceso)</span><span class="pill ${cal.items.decision ? 'good' : 'bad'}">${cal.items.decision ? '✓' : 'Falta'}</span></li>
+        <li><span>Fecha límite de decisión (contrato Nº 2)</span><span class="pill ${cal.items.fecha ? 'good' : 'bad'}">${cal.items.fecha ? '✓' : 'Falta'}</span></li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="split"><h1>Detalles del proceso</h1><span class="muted" style="font-size:13px;">Empresa: <strong>${esc(state.company) || '—'}</strong> · ${esc(state.executive) || '—'} · Línea: <strong>${esc(state.lineaNegocio || '—')}</strong></span></div>
 
       <div class="score-grid" style="margin-top: 14px;">
         <div class="card compact score-card">
-          <div class="muted">Fundamentales</div>
+          <div class="muted">Fundamentales del proceso</div>
           <div class="num">${s.fundamentalsPct}%</div>
           <div class="progress"><span style="width:${s.fundamentalsPct}%"></span></div>
         </div>
@@ -588,29 +775,66 @@ async function submitDeal() {
 }
 
 // ---------- Historial ----------
+function windowCell(d) {
+  // ventana 14 días — desde created_at (o quoted_at si existe)
+  const start = d.quoted_at || d.created_at;
+  if (!start) return '<span class="muted">—</span>';
+  const days = daysBetween(start, new Date().toISOString());
+  if (d.outcome === 'won') return `<span class="pill good">Ganada · día ${days}</span>`;
+  if (d.outcome === 'lost') return `<span class="pill bad">Perdida · día ${days}</span>`;
+  if (days <= 2) return `<span class="pill good">48h · llamar</span>`;
+  if (days <= 14) return `<span class="pill" style="background:#e6f8ff;border-color:var(--peaku-blue);color:var(--peaku-blue-dark);">Activa · día ${days}/14</span>`;
+  if (days <= 19) return `<span class="pill warn">Última llamada · día ${days}</span>`;
+  if (days <= 30) return `<span class="pill warn">Zona muerta · día ${days}</span>`;
+  return `<span class="pill bad">Breakup · día ${days}</span>`;
+}
+function calCell(cal) {
+  if (!cal) return '<span class="muted">—</span>';
+  if (cal === 'Completa') return `<span class="pill good">${cal}</span>`;
+  if (cal === 'Parcial') return `<span class="pill warn">${cal}</span>`;
+  return `<span class="pill bad">${cal}</span>`;
+}
+
 async function renderDeals() {
   h(`<h1>Historial de deals</h1><p class="muted">Cargando...</p>`);
   const r = await fetch('/api/deals').then(r=>r.json()).catch(() => []);
   if (!r.length) { h(`<h1>Historial</h1><p class="muted">Todavía no hay deals guardados.</p>`); return; }
+
+  // Métrica rápida — 41% → &lt;20% "lead sin valor"
+  const closed = r.filter(x => x.outcome === 'won' || x.outcome === 'lost');
+  const lost = r.filter(x => x.outcome === 'lost');
+  const sinValor = lost.filter(x => x.outcome_reason && /lead sin valor|no calific/i.test(x.outcome_reason));
+  const pctSinValor = lost.length ? Math.round(sinValor.length / lost.length * 100) : null;
+  const cierreRate = closed.length ? Math.round(r.filter(x => x.outcome === 'won').length / closed.length * 100) : null;
+
   h(`
     <h1>Historial de deals</h1>
-    <p class="muted">Haz clic en una fila para ver el detalle completo de lo que se registró.</p>
-    <div class="card">
+    <p class="muted">Haz clic en una fila para ver el detalle. Ventana de 14 días desde la cotización.</p>
+
+    <div class="score-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+      <div class="card compact score-card"><div class="muted">Total deals</div><div class="num">${r.length}</div></div>
+      <div class="card compact score-card"><div class="muted">Cierre</div><div class="num" style="color:${cierreRate>=25?'var(--peaku-green)':'var(--peaku-gray)'};">${cierreRate === null ? '—' : cierreRate + '%'}</div><div class="muted" style="font-size:11px;">${r.filter(x=>x.outcome==='won').length} de ${closed.length}</div></div>
+      <div class="card compact score-card"><div class="muted">"Lead sin valor" (meta &lt;20%)</div><div class="num" style="color:${pctSinValor!==null && pctSinValor<20?'var(--peaku-green)':'var(--bad)'};">${pctSinValor === null ? '—' : pctSinValor + '%'}</div><div class="muted" style="font-size:11px;">${sinValor.length} de ${lost.length} perdidas</div></div>
+      <div class="card compact score-card"><div class="muted">Abiertos</div><div class="num">${r.filter(x=>!x.outcome || x.outcome==='open').length}</div></div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
       <table>
         <thead><tr>
-          <th>#</th><th>Empresa</th><th>Ejecutivo</th><th>Segmento</th><th>ATS</th>
-          <th>Fund.</th><th>NTH</th><th>Fecha</th><th></th>
+          <th>#</th><th>Empresa</th><th>Ejecutivo</th><th>Línea</th><th>Seg.</th>
+          <th>Calificación</th><th>Fund.</th><th>Ventana 14d</th><th>Fecha</th><th></th>
         </tr></thead>
         <tbody>
           ${r.map(d => `<tr class="clickable" data-open="${d.id}">
             <td>${d.id}</td>
             <td>${esc(d.company||'—')}</td>
             <td>${esc(d.executive||'—')}</td>
+            <td>${esc(d.linea_negocio||'—')}</td>
             <td><span class="segment-badge ${d.segment||''}">${d.segment||'—'}</span></td>
-            <td>${d.has_ats ? '✓' : '—'}</td>
+            <td>${calCell(d.calificacion_sandler)}</td>
             <td>${barCell(d.score_fundamentals)}</td>
-            <td>${barCell(d.score_nice_to_have)}</td>
-            <td>${new Date(d.created_at).toLocaleString()}</td>
+            <td>${windowCell(d)}</td>
+            <td>${new Date(d.created_at).toLocaleDateString()}</td>
             <td style="text-align:right;white-space:nowrap;">
               <button class="btn ghost btn-sm" data-view="${d.id}">Ver</button>
               <button class="btn ghost btn-sm danger" data-del="${d.id}" title="Eliminar">🗑</button>
@@ -622,7 +846,6 @@ async function renderDeals() {
   `);
   el.querySelectorAll('[data-open], [data-view]').forEach(node => node.addEventListener('click', e => {
     const id = node.getAttribute('data-open') || node.getAttribute('data-view');
-    // No navegar si el clic vino del botón eliminar
     if (e.target.closest('[data-del]')) return;
     location.hash = `#/deal/${id}`;
   }));
@@ -700,6 +923,14 @@ async function renderDealDetail(id) {
     </div>
 
     <div class="card">
+      <h2>Ficha previa (SDR) · Contrato Nº 1</h2>
+      ${field('Línea de negocio', d.lineaNegocio || row.linea_negocio)}
+      ${field('Cargos requeridos', d.fichaCargos)}
+      ${field('Costo estimado de vacante abierta', d.fichaCosto)}
+      ${field('Herramientas actuales', d.fichaHerramientas)}
+    </div>
+
+    <div class="card">
       <h2>Fase 1 · Construcción</h2>
       ${field('Contrato previo', d.contratoPrevio)}
       ${field('Vínculo / rapport', d.vinculo)}
@@ -717,9 +948,11 @@ async function renderDealDetail(id) {
     </div>
 
     <div class="card">
-      <h2>Fase 2 · Dolor</h2>
-      ${field('Dolor principal', d.dolor)}
-      ${field('Impacto económico', d.impactoEconomico)}
+      <h2>Embudo del dolor</h2>
+      ${field('Dolor principal (textual)', d.dolor)}
+      ${field('1. Cuantificar (ancla del precio)', d.dolorCuantificar)}
+      ${field('2. Historia (qué intentaron)', d.dolorHistoria)}
+      ${field('3. Impacto (cliente/equipo)', d.dolorImpacto)}
       ${field('Consecuencias emocionales', d.consecuenciasEmocionales)}
       ${field('Cómo miden hoy', d.medicion)}
       ${seg === 'C' ? field('Integraciones / API', d.integraciones) : ''}
@@ -730,6 +963,7 @@ async function renderDealDetail(id) {
       ${field('Presupuesto', d.presupuesto)}
       ${field('Decisor / decisores', d.decisor)}
       ${field('Proceso de decisión', d.procesoDecision)}
+      ${field('Fecha límite de decisión (contrato Nº 2)', d.fechaLimiteDecision)}
     </div>
 
     <div class="card">
@@ -742,10 +976,15 @@ async function renderDealDetail(id) {
     </div>
 
     <div class="card">
-      <h2>Fase 3 · Cierre</h2>
+      <h2>Fase 3 · Cierre + Piloto</h2>
+      ${field('Ruta del deal', d.proximoPasoTipo || '—')}
+      ${field('Cargo para piloto', d.pilotoCargo)}
+      ${field('Fecha de revisión piloto', d.pilotoFechaRevision)}
       ${field('Plan post-venta', d.postVenta)}
       ${field('Próximo paso acordado', d.proximoPaso)}
     </div>
+
+    ${renderOutcomeSection(row)}
 
     <div class="btn-row">
       <a class="btn ghost" href="#/deals">← Volver al historial</a>
@@ -755,6 +994,87 @@ async function renderDealDetail(id) {
   el.querySelector('[data-del-detail]').addEventListener('click', async () => {
     await deleteDeal(row.id, () => { location.hash = '#/deals'; });
   });
+  // Bindings del panel de outcome
+  const wonBtn = el.querySelector('[data-outcome="won"]');
+  const lostBtn = el.querySelector('[data-outcome="lost"]');
+  const reasonSel = el.querySelector('[data-outcome-reason-sel]');
+  const reasonTxt = el.querySelector('[data-outcome-reason]');
+  const saveBtn = el.querySelector('[data-save-outcome]');
+  if (wonBtn) wonBtn.addEventListener('click', () => setOutcomeMode('won'));
+  if (lostBtn) lostBtn.addEventListener('click', () => setOutcomeMode('lost'));
+  function setOutcomeMode(mode) {
+    el.querySelector('#outcome-panel').setAttribute('data-mode', mode);
+    el.querySelectorAll('[data-outcome]').forEach(b => b.classList.toggle('selected-outcome', b.getAttribute('data-outcome') === mode));
+    // Cambiar opciones según won/lost
+    if (mode === 'lost') {
+      reasonSel.innerHTML = `
+        <option value="">— Selecciona motivo real —</option>
+        <option>Lead sin valor (no calificaba)</option>
+        <option>Precio / presupuesto</option>
+        <option>Se fueron con competidor</option>
+        <option>Timing / no era el momento</option>
+        <option>Decisión interna quedó frenada</option>
+        <option>Cliente no respondió (breakup día 30)</option>
+        <option>Otro</option>
+      `;
+    } else {
+      reasonSel.innerHTML = `
+        <option value="">— Selecciona motivo de éxito —</option>
+        <option>Dolor bien desarrollado y demo enfocada</option>
+        <option>Ancla de precio funcionó (ROI vs statu quo)</option>
+        <option>Piloto validó la solución</option>
+        <option>Champion interno empujó la decisión</option>
+        <option>Otro</option>
+      `;
+    }
+    reasonSel.style.display = ''; reasonTxt.style.display = ''; saveBtn.style.display = '';
+  }
+  if (saveBtn) saveBtn.addEventListener('click', async () => {
+    const mode = el.querySelector('#outcome-panel').getAttribute('data-mode');
+    const motivo = [reasonSel.value, reasonTxt.value.trim()].filter(Boolean).join(' — ');
+    if (!mode || !motivo) { alert('Elige motivo y comentario.'); return; }
+    const r = await fetch(`/api/deals/${row.id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ outcome: mode, outcome_reason: motivo })
+    });
+    const j = await r.json();
+    if (j.ok) { alert(`Deal marcado como ${mode.toUpperCase()}.`); location.hash = '#/deals'; }
+    else alert('Error: ' + (j.error || ''));
+  });
+}
+
+// Panel Won/Lost — sección al final del detalle
+function renderOutcomeSection(row) {
+  const isClosed = row.outcome === 'won' || row.outcome === 'lost';
+  if (isClosed) {
+    return `
+      <div class="card" style="border-left:6px solid ${row.outcome === 'won' ? 'var(--peaku-green)' : 'var(--bad)'};">
+        <h2>Resultado del deal</h2>
+        <div class="split">
+          <div>
+            <span class="pill ${row.outcome === 'won' ? 'good' : 'bad'}" style="font-size:14px;padding:6px 14px;">${row.outcome === 'won' ? '🏆 GANADO' : '❌ PERDIDO'}</span>
+            <p class="muted" style="margin-top:8px;">Motivo: <strong>${esc(row.outcome_reason || '—')}</strong></p>
+          </div>
+          <div class="muted" style="font-size:12px;">Cerrado el ${row.closed_at ? new Date(row.closed_at).toLocaleString() : '—'}</div>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="card" id="outcome-panel" data-mode="">
+      <h2>Cerrar deal con motivo real</h2>
+      <p class="muted">"Un no limpio vale más que un quizás eterno." Al cerrar, el motivo alimenta la métrica <strong>"Lead sin valor" (meta: bajar de 41% a &lt;20%)</strong>.</p>
+      <div class="chips" style="margin-bottom:14px;">
+        <div class="chip" data-outcome="won">🏆 Marcar como GANADO</div>
+        <div class="chip" data-outcome="lost">❌ Marcar como PERDIDO</div>
+      </div>
+      <label style="display:block;">Motivo (categoría)</label>
+      <select data-outcome-reason-sel style="display:none;"></select>
+      <label style="display:block;margin-top:8px;">Detalle adicional (contexto real)</label>
+      <textarea data-outcome-reason placeholder="Ej. presentaron cotización a comité sin nosotros; se decidieron por Bumeran por precio." style="display:none;min-height:70px;"></textarea>
+      <div style="margin-top:12px;"><button class="btn green" data-save-outcome style="display:none;">Guardar resultado</button></div>
+    </div>
+  `;
 }
 
 // ---------- Eliminar deal ----------
