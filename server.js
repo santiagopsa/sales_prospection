@@ -65,6 +65,8 @@ async function initSchema() {
     `ALTER TABLE deals ADD COLUMN IF NOT EXISTS outcome TEXT`,                 // open / won / lost
     `ALTER TABLE deals ADD COLUMN IF NOT EXISTS outcome_reason TEXT`,          // motivo real ganada/perdida
     `ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ`,
+    `ALTER TABLE deals ADD COLUMN IF NOT EXISTS canal_adquisicion TEXT`,   // freelancer / sdr_interno / inbound / referido / evento / outbound / otro
+    `ALTER TABLE deals ADD COLUMN IF NOT EXISTS freelancer_nombre TEXT`,   // quién específicamente lo trajo
   ];
   for (const q of alters) {
     try { await pool.query(q); } catch (e) { console.error('[db] migration warn:', e.message); }
@@ -337,7 +339,6 @@ app.get('*', (_req, res) => {
 initSchema()
   .catch(e => {
     dbLastError = e.message;
-    console.error('[db] schema error:', e.message);
     console.error('[db] DATABASE_URL host:', (process.env.DATABASE_URL || '').replace(/:\/\/[^@]*@/, '://***:***@').split('/')[2]);
   })
   .finally(() => {

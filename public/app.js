@@ -34,14 +34,22 @@ const DONT_SHOW_BY_SEGMENT = {
 // Defaults
 function newDraft() {
   return {
-    executive: '',
-    company: '',
-    lineaNegocio: '',      // SaaS / Headhunting / EOR
-    // Ficha previa SDR (contrato previo Nº 1) — obligatoria para agendar demo
-    fichaCargos: '',        // cargos requeridos por el cliente
-    fichaCosto: '',         // costo estimado de la vacante abierta
-    fichaHerramientas: '',  // herramientas actuales
-    // Fase 1 - Construcción
+    // --- Vista 0: Datos iniciales del deal ---
+    executive: '',              // ejecutivo comercial de Peaku
+    company: '',                // empresa cliente
+    lineaNegocio: '',           // SaaS / Headhunting / EOR
+    canalAdquisicion: '',       // Freelancer(SDR) / Inbound (correo/web) / Referido / Evento / Outbound interno / Otro
+    freelancerNombre: '',       // si viene de freelancer/SDR, nombre de quien lo trajo
+    // --- Vista 1: Prospección (data que debe traer quien adquirió, VARÍA por canal) ---
+    prospActitud: '',           // qué expresó / cómo llegó / interés inicial
+    prospOrigen: '',            // canal específico (qué correo, qué evento, qué referido)
+    prospUrgencia: '',          // ¿por qué ahora?
+    // Ficha previa SDR (contrato previo Nº 1) — obligatoria si canal = Freelancer/SDR/Outbound
+    fichaCargos: '',            // cargos requeridos por el cliente
+    fichaCosto: '',             // costo estimado de la vacante abierta
+    fichaHerramientas: '',      // herramientas actuales
+    fichaAdicional: '',         // notas extras del SDR
+    // --- Vista 2: Construcción de confianza (contrato previo Nº 1 con el cliente en el demo) ---
     contratoPrevio: '',
     vinculo: '',
     // Calificación rápida
@@ -83,15 +91,56 @@ function newDraft() {
 let state = loadDraft() || newDraft();
 let stepIdx = 0;
 const STEPS = [
-  { key: 'ficha',     label: '0 · Ficha previa (SDR)' },
-  { key: 'intro',     label: '1 · Construcción' },
-  { key: 'qualif',    label: '2 · Calificación' },
-  { key: 'segment',   label: '3 · Segmento' },
-  { key: 'discovery', label: '4 · Embudo del dolor' },
-  { key: 'budget',    label: '5 · Presupuesto / Decisión' },
-  { key: 'ideal',     label: '6 · Pedidos del cliente' },
-  { key: 'close',     label: '7 · Cierre + Piloto' },
-  { key: 'result',    label: '8 · Calificación Sandler' },
+  {
+    key: 'inicio', label: '0 · Datos iniciales',
+    goal: 'Registrar quién dentro de Peaku es dueño del deal y por qué canal llegó el cliente. Es la primera vez que existe el deal en el CRM (etapa "Demo agendado" en Brevo).',
+    rule: 'Sin canal de adquisición asignado, no se puede evaluar qué canales convierten mejor. Sin ejecutivo, no hay dueño.',
+  },
+  {
+    key: 'prosp', label: '1 · Prospección',
+    goal: 'Recibir del canal (freelancer/SDR/inbound/referido) los datos que EL CLIENTE dio antes del demo. Determina si el demo se agenda con calidad o si toca reciclar.',
+    rule: 'La info varía según el canal: un freelancer trae ficha completa; un inbound solo trae lo que el cliente escribió. Sin esta ficha por canal, el demo empieza a ciegas.',
+  },
+  {
+    key: 'intro', label: '2 · Construcción',
+    goal: 'Al inicio del demo, establecer el contrato previo Nº 1 con el cliente (tiempo, agenda, permiso para decir "no") y generar vínculo par a par.',
+    rule: 'Escuchar 70%, hablar 30%. El "no" es un resultado válido — declararlo en el contrato previo desbloquea que el cliente sea honesto.',
+  },
+  {
+    key: 'qualif', label: '3 · Calificación',
+    goal: 'En menos de 3 min ubicar al cliente en segmento (Micro / PyME / Grande) y detectar si tiene ATS. Todo lo demás depende de esto.',
+    rule: 'No mostrar la plataforma antes de calificar. La demo se adapta al segmento — no al revés.',
+  },
+  {
+    key: 'segment', label: '4 · Segmento',
+    goal: 'Confirmar el segmento detectado. Cambia el guion, los módulos que muestras y la objeción a manejar.',
+    rule: 'Segmento C (Grande con ATS): posiciónate como CAPA de sourcing+IA. Nunca ataques el ATS de frente.',
+  },
+  {
+    key: 'discovery', label: '5 · Embudo del dolor',
+    goal: 'Convertir el dolor mencionado por el cliente en un problema desarrollado: cuantificado ($), con historia (qué intentaron) y con impacto (a quién le duele). Es el ancla del precio.',
+    rule: 'Cuando el cliente menciona un dolor, la conversación se detiene ahí. Mínimo 2 de 3 preguntas antes de continuar. Sin cuantificación, el precio se evalúa como gasto puro.',
+  },
+  {
+    key: 'budget', label: '6 · Presupuesto / Decisión',
+    goal: 'Confirmar que hay plata, saber quiénes deciden y ACORDAR fecha límite de decisión con el cliente (contrato previo Nº 2).',
+    rule: 'Sin fecha límite acordada, no se envía cotización. Máximo 14 días desde hoy — históricamente ninguna venta cerró después del día 19.',
+  },
+  {
+    key: 'ideal', label: '7 · Pedidos del cliente',
+    goal: 'Capturar todo lo que el cliente pidió como "ideal". Marca si lo tenemos o no. Alimenta el ranking por segmento para roadmap.',
+    rule: 'Escribir textual, un pedido por línea. No parafrasear.',
+  },
+  {
+    key: 'close', label: '8 · Cierre + Piloto',
+    goal: 'Proponer TÚ los próximos pasos (nunca los dicta el cliente). El piloto — publicar el cargo del dolor esta semana — es el próximo paso principal si el deal califica completo.',
+    rule: 'La cotización viaja de anexo del piloto, nunca al revés. Si no califica, va a Nutrición: sin cotización, sin follow-ups de cierre.',
+  },
+  {
+    key: 'result', label: '9 · Calificación Sandler',
+    goal: 'Ver el veredicto final: Completa / Parcial / No califica. Es la decisión operativa de si se cotiza el mismo día o el deal va a Nutrición.',
+    rule: 'Solo se cotiza si Calificación = Completa. Es el filtro para bajar el 41% de "lead sin valor" a menos del 20%.',
+  },
 ];
 
 // ---------- Helpers de calificación ----------
@@ -171,7 +220,11 @@ function h(html) { el.innerHTML = html; }
 
 function stepHeader() {
   return `<div class="steps">
-    ${STEPS.map((s,i) => `<span class="step ${i===stepIdx?'active':''} ${i<stepIdx?'done':''}">${s.label}</span>`).join('')}
+    ${STEPS.map((s,i) => {
+      const cls = i === stepIdx ? 'active' : (i < stepIdx ? 'done' : '');
+      const tipText = `${s.label.replace(/^\d+ · /, '')}\n\nOBJETIVO: ${s.goal}\n\nREGLA: ${s.rule}`;
+      return `<span class="step ${cls}">${s.label} ${tip(tipText)}</span>`;
+    }).join('')}
   </div>`;
 }
 function navButtons({ prevHidden=false, nextLabel='Siguiente', onNext='next' } = {}) {
@@ -219,7 +272,8 @@ function flashSaved(btn) {
 // ---------- Steps ----------
 function renderWizard() {
   const s = STEPS[stepIdx].key;
-  if (s === 'ficha')     return stepFicha();
+  if (s === 'inicio')    return stepInicio();
+  if (s === 'prosp')     return stepProsp();
   if (s === 'intro')     return stepIntro();
   if (s === 'qualif')    return stepQualif();
   if (s === 'segment')   return stepSegment();
@@ -230,45 +284,162 @@ function renderWizard() {
   if (s === 'result')    return stepResult();
 }
 
-// ---------- 0 · Ficha previa (SDR) ----------
-function stepFicha() {
-  const fichaOk = has(state.fichaCargos) && has(state.fichaCosto) && has(state.fichaHerramientas) && has(state.lineaNegocio);
+// Componente reutilizable: bloque de "Objetivo + regla" para cada vista
+function viewIntro(idx) {
+  const st = STEPS[idx];
+  return `
+    <div class="hint" style="background:#f0fbff;border-left-color:var(--peaku-blue);">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--peaku-blue-dark);margin-bottom:6px;">Objetivo de esta etapa</div>
+      <div style="margin-bottom:8px;">${st.goal}</div>
+      <div style="font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--peaku-gray);margin-bottom:4px;">Regla del proceso</div>
+      <div>${st.rule}</div>
+    </div>
+  `;
+}
+
+// ---------- Definición de líneas de negocio ----------
+// SaaS: cliente USA la plataforma para adquisición (sourcing), IA (ranking) o pruebas.
+// Headhunting: PEAKU busca y trae el talento para el cliente.
+// EOR: cliente YA identificó al candidato; Peaku lo contrata legalmente a su nombre.
+const LINEAS = {
+  SaaS: {
+    label: 'SaaS',
+    resumen: 'Cliente usa nuestra plataforma para sourcing, IA de ranking o pruebas de candidatos. Autoservicio.',
+    quienBusca: 'el cliente (con nuestra plataforma)',
+    dolorEje: 'ineficiencia en su proceso de reclutamiento (tiempo, calidad, costo)',
+    ficha: {
+      titulo: 'Datos del proceso de reclutamiento del cliente',
+      cargosLabel: 'Vacantes abiertas hoy (que resolverá con la plataforma)',
+      cargosPh: 'Ej. 3 devs full-stack, 2 SDRs bilingües — llevan semanas leyendo hojas de vida.',
+      costoLabel: 'Costo actual del proceso (horas / dinero)',
+      costoPh: 'Ej. reclutadora gasta 60 hrs/mes en screening; agencias 8M/vacante; time-to-fill 45 días.',
+      herramLabel: 'Herramientas actuales de reclutamiento',
+      herramPh: 'Ej. Computrabajo + LinkedIn Recruiter + Excel. Sin ATS.',
+    },
+    dolorPh: 'Ej. reclutadora gasta 60hrs/mes leyendo CVs; time-to-fill 45 días; perdieron cliente por vacante no cubierta.',
+    qualif: {
+      volumen: '¿Cuántas vacantes abren al mes / al año?',
+      equipo: '¿Cuántas personas en RRHH manejan reclutamiento?',
+      perfiles: '¿Qué perfiles buscan más (operativos/técnicos/profesionales)?',
+      herramienta: '¿Con qué herramientas manejan reclutamiento hoy?',
+      decisor: '¿Quién decide la compra de una plataforma como esta?',
+    },
+  },
+  Headhunting: {
+    label: 'Headhunting',
+    resumen: 'Peaku busca y trae el talento (search a la medida). El cliente NO usa la plataforma — nos entrega la búsqueda.',
+    quienBusca: 'Peaku (por encargo del cliente)',
+    dolorEje: 'una o varias posiciones críticas que el cliente no puede llenar solo',
+    ficha: {
+      titulo: 'Posiciones que el cliente necesita que Peaku busque',
+      cargosLabel: 'Perfil/posición a buscar',
+      cargosPh: 'Ej. VP de Producto con 10 años en fintech, bilingüe, base Bogotá. Salario 20-25M COP.',
+      costoLabel: 'Costo de tener la posición vacía + qué han intentado',
+      costoPh: 'Ej. VP vacía = 30M COP/mes en oportunidad; ya probaron 2 firmas de HH sin traer perfil.',
+      herramLabel: '¿Cómo lo han buscado hasta ahora?',
+      herramPh: 'Ej. 2 firmas de HH externas, LinkedIn Recruiter, referidos internos — sin resultado.',
+    },
+    dolorPh: 'Ej. llevan 6 meses buscando VP de Producto; 2 firmas de HH sin traer perfil; el CEO está cubriendo el rol y está quemado.',
+    qualif: {
+      volumen: '¿Cuántas búsquedas de HH tercerizan al año? (o cuántas quisieran)',
+      equipo: '¿Tienen equipo interno de TA que ya intentó estas posiciones?',
+      perfiles: '¿Qué seniority buscan (C-level, gerencia, especialista senior)?',
+      herramienta: '¿Con qué firma o método las están intentando hoy?',
+      decisor: '¿Quién decide contratar servicio de HH y quién aprueba al candidato?',
+    },
+  },
+  EOR: {
+    label: 'EOR',
+    resumen: 'El cliente YA encontró al candidato. Peaku lo contrata legalmente a nuestro nombre (Employer of Record) en el país que aplique.',
+    quienBusca: 'el cliente ya encontró — no buscamos',
+    dolorEje: 'no pueden contratar directamente al candidato encontrado (por país, entidad legal, régimen fiscal)',
+    ficha: {
+      titulo: 'Candidatos ya identificados por el cliente',
+      cargosLabel: 'Candidato(s) ya identificado(s) y país donde vive',
+      cargosPh: 'Ej. Juan Pérez (Argentina) — Senior Backend; María Ríos (México) — Product Manager.',
+      costoLabel: 'Salario acordado + fecha de arranque + urgencia',
+      costoPh: 'Ej. Juan: USD 6.500/mes, arranca 1 ago; María: USD 7.200, arranca 15 ago. Ambos ya firmaron oferta condicionada.',
+      herramLabel: '¿Cómo han contratado talento internacional antes?',
+      herramPh: 'Ej. Deel para Argentina; Remote.com para México; en Colombia contratan directo. Buscan consolidar en un solo EOR.',
+    },
+    dolorPh: 'Ej. tienen a Juan (Argentina) firmado para arrancar en 3 semanas; hoy lo contratarían como freelancer pero quieren payroll formal sin riesgo fiscal.',
+    qualif: {
+      volumen: '¿Cuántas contrataciones internacionales hacen al año?',
+      equipo: '¿Tienen equipo legal/RRHH que maneja compliance internacional?',
+      perfiles: '¿Qué países y qué tipo de contrato (indefinido/temporal, remoto/hybrido)?',
+      herramienta: '¿Con qué EOR trabajan hoy? (Deel, Remote.com, Papaya, contratación directa)',
+      decisor: '¿Quién aprueba una contratación internacional? (RRHH + finanzas + legal)',
+    },
+  },
+};
+function linea() { return LINEAS[state.lineaNegocio] || LINEAS.SaaS; }
+
+// ---------- 0 · Datos iniciales del deal ----------
+const CANALES = [
+  { key: 'freelancer',  label: 'Freelancer / SDR externo', desc: 'Prospector externo que agenda demos a comisión.' },
+  { key: 'sdr_interno', label: 'SDR interno', desc: 'Prospección hecha por el equipo interno de Peaku.' },
+  { key: 'inbound',     label: 'Inbound (correo / web)',   desc: 'El cliente llegó solo — escribió por la web o mandó un correo pidiendo reunión.' },
+  { key: 'referido',    label: 'Referido',                 desc: 'Otro cliente o contacto nos lo pasó explícitamente.' },
+  { key: 'evento',      label: 'Evento / networking',      desc: 'Salió de una charla, feria o reunión presencial.' },
+  { key: 'outbound',    label: 'Outbound del ejecutivo',   desc: 'El mismo ejecutivo comercial contactó al prospecto.' },
+  { key: 'otro',        label: 'Otro',                     desc: 'Otro canal — describe abajo.' },
+];
+
+function stepInicio() {
   h(`
     ${stepHeader()}
-    <div class="card">
-      <h1>Ficha previa · Contrato previo Nº 1</h1>
-      <p class="muted"><strong>Regla del proceso:</strong> el demo solo se agenda con esta ficha llena por prospección. Sin ficha, no hay demo.</p>
+    <h1>Datos iniciales del deal</h1>
+    ${viewIntro(stepIdx)}
 
+    <div class="card">
+      <h3>Dueño y cliente</h3>
       <div class="row">
         <div>
-          <label>Tu nombre ${tip('Ejecutivo comercial que llevará el demo.')}</label>
+          <label>Tu nombre ${tip('Ejecutivo comercial de Peaku que llevará este deal de punta a punta.\n\nSirve para reportería por persona y para asignar tareas de seguimiento.\n\nEj.: "Santiago Pérez"')}</label>
           <input type="text" data-field="executive" value="${esc(state.executive)}" placeholder="Ej. Santiago Pérez" />
         </div>
         <div>
-          <label>Empresa / Cliente ${tip('Razón social del cliente prospecto.\n\nEj.: "Lean Solutions S.A."')}</label>
+          <label>Empresa / Cliente ${tip('Razón social del cliente prospecto. Si aún no la sabes con exactitud, ponle un alias y la ajustas después.\n\nEj.: "Lean Solutions S.A."')}</label>
           <input type="text" data-field="company" value="${esc(state.company)}" placeholder="Ej. Lean Solutions" />
         </div>
       </div>
 
-      <label>Línea de negocio ${tip('Determina qué se le va a mostrar y qué comparativos usar.\n\n• SaaS: la plataforma de sourcing + IA.\n• Headhunting: servicio de reclutamiento a la medida.\n• EOR: employer of record.')}</label>
+      <label>Línea de negocio ${tip('CRÍTICO: define TODO el guion del demo, no solo el precio. Cada línea es un producto distinto con dolor distinto.\n\n• SaaS — cliente usa la plataforma él mismo (sourcing, IA, pruebas).\n• Headhunting — Peaku busca y trae el talento por él.\n• EOR — cliente ya tiene el candidato; Peaku lo contrata legalmente.\n\nSi mezclas líneas, la calificación no aplica y la venta se enreda.')}</label>
+      <div class="chips" style="flex-direction:column;align-items:stretch;gap:8px;">
+        ${Object.keys(LINEAS).map(k => `
+          <div class="chip ${state.lineaNegocio === k ? 'selected' : ''}" data-pick-linea="${k}" style="text-align:left;">
+            <strong>${LINEAS[k].label}</strong>
+            <div class="opt" style="margin-top:3px;">${esc(LINEAS[k].resumen)}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Canal de adquisición</h3>
+      <p class="muted" style="font-size:13px;margin:0 0 10px;">Cómo llegó este deal a Peaku. La info que trae ya prospección cambia según el canal.</p>
       <div class="chips">
-        ${['SaaS', 'Headhunting', 'EOR'].map(k => `
-          <div class="chip ${state.lineaNegocio === k ? 'selected' : ''}" data-pick-linea="${k}">${k}</div>
+        ${CANALES.map(c => `
+          <div class="chip ${state.canalAdquisicion === c.key ? 'selected' : ''}" data-pick-canal="${c.key}" title="${esc(c.desc)}">
+            ${c.label}
+          </div>
         `).join('')}
       </div>
 
-      <h3 style="margin-top: 22px;">Datos que dio prospección</h3>
-      <label>Cargos requeridos que el cliente necesita cubrir ${tip('Vacantes reales del cliente hoy. Sin esto no calificamos el demo.\n\nEj.: "3 devs full-stack senior, 1 líder de operaciones, 5 SDRs bilingües."')}</label>
-      <textarea data-field="fichaCargos" placeholder="Ej. 3 devs senior full-stack, 1 líder de ops, 5 SDRs bilingües.">${esc(state.fichaCargos)}</textarea>
-
-      <label>Costo estimado de la vacante abierta ${tip('Cuánto le cuesta al mes tener esa vacante abierta (o cuánto valen las agencias que están pagando). Es el ancla del precio en el demo.\n\nEj.: "Perder al dev senior = 3-5M COP/mes en oportunidad. Pagan 8M COP por cabeza a agencias."')}</label>
-      <textarea data-field="fichaCosto" placeholder="Ej. Vacante técnica abierta = 4M/mes en oportunidad; agencias les cobran 8M/cabeza.">${esc(state.fichaCosto)}</textarea>
-
-      <label>Herramientas actuales del cliente ${tip('Todo lo que usan hoy para reclutar. Determina si es sourcing manual, con bolsas, con ATS.\n\nEj.: "Computrabajo + LinkedIn Recruiter + Excel"')}</label>
-      <textarea data-field="fichaHerramientas" placeholder="Ej. Computrabajo + LinkedIn Recruiter + Excel">${esc(state.fichaHerramientas)}</textarea>
-
-      ${fichaOk ? '<div class="hint" style="margin-top:14px;background:#e8f6f0;border-left-color:var(--peaku-green);">✓ Ficha completa. Puedes agendar el demo.</div>' : '<div class="hint" style="margin-top:14px;background:#fdecec;border-left-color:var(--bad);color:var(--bad);"><strong>Ficha incompleta.</strong> Sin los 4 campos (línea + 3 datos) no debería haber demo agendado.</div>'}
+      ${(state.canalAdquisicion === 'freelancer' || state.canalAdquisicion === 'sdr_interno') ? `
+        <label style="margin-top:16px;">Nombre del freelancer / SDR ${tip('Quién específicamente hizo la prospección. Sirve para reportería por freelancer y para cerrar el loop cuando cae un deal (o cuando el deal fue basura).')}</label>
+        <input type="text" data-field="freelancerNombre" value="${esc(state.freelancerNombre)}" placeholder="Ej. Andrea Ramírez (freelancer)" />
+      ` : ''}
+      ${state.canalAdquisicion === 'referido' ? `
+        <label style="margin-top:16px;">¿Quién refirió? ${tip('Nombre y contexto de quien nos refirió. Un referido calienta el arranque del demo — vale la pena mencionarlo temprano.')}</label>
+        <input type="text" data-field="freelancerNombre" value="${esc(state.freelancerNombre)}" placeholder="Ej. Juan Osorio (cliente actual, gerente de RRHH en Alkosto)" />
+      ` : ''}
+      ${state.canalAdquisicion === 'evento' ? `
+        <label style="margin-top:16px;">¿Qué evento y a quién conociste ahí? ${tip('Evento + persona con la que hablaste. Ayuda a retomar el contexto que se dio.')}</label>
+        <input type="text" data-field="freelancerNombre" value="${esc(state.freelancerNombre)}" placeholder="Ej. HR Summit Bogotá, hablé con la gerente de TA de Bavaria" />
+      ` : ''}
     </div>
+
     ${navButtons({ prevHidden: true })}
   `);
   bindForm();
@@ -276,21 +447,90 @@ function stepFicha() {
     state.lineaNegocio = c.getAttribute('data-pick-linea');
     saveDraft(); renderWizard();
   }));
+  el.querySelectorAll('[data-pick-canal]').forEach(c => c.addEventListener('click', () => {
+    state.canalAdquisicion = c.getAttribute('data-pick-canal');
+    saveDraft(); renderWizard();
+  }));
+}
+
+// ---------- 1 · Prospección (ficha por canal) ----------
+function stepProsp() {
+  const canal = state.canalAdquisicion || '';
+  const canalLabel = (CANALES.find(c => c.key === canal) || {}).label || 'sin definir';
+  const necesitaFicha = ['freelancer', 'sdr_interno', 'outbound'].includes(canal);
+  const fichaOk = has(state.fichaCargos) && has(state.fichaCosto) && has(state.fichaHerramientas);
+
+  h(`
+    ${stepHeader()}
+    <h1>Prospección · lo que trajo <em>${esc(canalLabel)}</em></h1>
+    ${viewIntro(stepIdx)}
+
+    ${!canal ? `
+      <div class="card" style="background:#fdecec;border-left:6px solid var(--bad);">
+        <strong>Falta el canal de adquisición.</strong> Devuélvete al paso 0 y elígelo.
+      </div>
+    ` : ''}
+
+    <div class="card">
+      <h3>Contexto de cómo llegó el cliente</h3>
+      <label>¿Cómo llegó específicamente? ${tip('Detalle del canal.\n\n• Freelancer/SDR: qué le dijo el prospector para que aceptara el demo.\n• Inbound: qué escribió el cliente en el correo o formulario.\n• Referido: qué le contó la persona que refirió.\n• Evento: qué hablaron ahí que llevó al demo.\n• Outbound: qué gancho usaste tú.')}</label>
+      <textarea data-field="prospOrigen" placeholder="${canal === 'inbound' ? 'Ej. escribió al correo diciendo: nos interesa Peaku porque estamos abriendo operación en Colombia.' : canal === 'referido' ? 'Ej. Juan (Alkosto) me mandó un WhatsApp: hablá con Diana de Bavaria, están buscando lo mismo que ustedes hicieron con nosotros.' : 'Ej. le vendí el demo diciendo que teníamos un caso similar a su empresa.'}">${esc(state.prospOrigen)}</textarea>
+
+      <label>Actitud / interés que expresó ${tip('Qué tan enganchado llegó al demo. Alta / media / baja + una frase que lo capture.\n\nEj.: "Muy interesado — dice que llevan 3 meses buscando esto sin resolver."')}</label>
+      <textarea data-field="prospActitud" placeholder="Ej. muy interesado, ya tienen dolor identificado; o tibio, solo quería ver qué hacemos.">${esc(state.prospActitud)}</textarea>
+
+      <label>¿Por qué AHORA? ${tip('El gatillo que hizo que el cliente aceptara reunirse ahora, no en 6 meses. Sin gatillo, la venta suele diluirse.\n\nEj.: "Perdieron a su recruiter senior el mes pasado y tienen 4 vacantes urgentes." o "Van a expandir a Perú en agosto y necesitan un stack de RRHH escalable."')}</label>
+      <textarea data-field="prospUrgencia" placeholder="Ej. perdieron reclutadora y tienen 4 vacantes urgentes.">${esc(state.prospUrgencia)}</textarea>
+    </div>
+
+    ${necesitaFicha ? `
+      <div class="card">
+        <h3>${esc(linea().ficha.titulo)} <span class="opt">(obligatoria en freelancer / SDR / outbound)</span></h3>
+        <p class="muted" style="font-size:13px;">Línea de negocio: <strong>${esc(linea().label)}</strong> · ${esc(linea().resumen)}<br/>Info que el prospector DEBIÓ preguntar antes de agendar el demo. Si viene incompleta, el demo empieza a ciegas — reporta esto al canal.</p>
+
+        <label>${esc(linea().ficha.cargosLabel)} ${tip('Es el disparador del demo — sin esto no hay caso concreto.\n\nEjemplo para ' + linea().label + ':\n' + linea().ficha.cargosPh)}</label>
+        <textarea data-field="fichaCargos" placeholder="${esc(linea().ficha.cargosPh)}">${esc(state.fichaCargos)}</textarea>
+
+        <label>${esc(linea().ficha.costoLabel)} ${tip('Es el ANCLA del precio en el demo. Sin número, el precio se evalúa como gasto puro.\n\nEjemplo para ' + linea().label + ':\n' + linea().ficha.costoPh)}</label>
+        <textarea data-field="fichaCosto" placeholder="${esc(linea().ficha.costoPh)}">${esc(state.fichaCosto)}</textarea>
+
+        <label>${esc(linea().ficha.herramLabel)} ${tip('Qué usan hoy. Define contra qué compites y qué guion usar.\n\nEjemplo para ' + linea().label + ':\n' + linea().ficha.herramPh)}</label>
+        <textarea data-field="fichaHerramientas" placeholder="${esc(linea().ficha.herramPh)}">${esc(state.fichaHerramientas)}</textarea>
+
+        <label>Notas adicionales del prospector ${tip('Cualquier otra info — tamaño empresa, urgencia, contactos, restricciones ya mencionadas.')}<span class="opt">(opcional)</span></label>
+        <textarea data-field="fichaAdicional" placeholder="Ej. empresa 400 empleados en Medellín; contacto directo con la gerente de TA (Diana).">${esc(state.fichaAdicional)}</textarea>
+
+        <div style="margin-top:14px;">${fichaOk ? '<span class="pill good">✓ Ficha completa · demo bien agendado</span>' : '<span class="pill bad">Ficha incompleta · el demo empieza a ciegas — devuelve al canal</span>'}</div>
+      </div>
+    ` : `
+      <div class="card">
+        <h3>Ficha previa <span class="opt">(opcional para este canal)</span></h3>
+        <p class="muted" style="font-size:13px;">Como este deal vino por <strong>${esc(canalLabel)}</strong>, no exigimos ficha llena — el cliente vino solo. Pero si tienes algún dato adicional que te dio, ponlo aquí.</p>
+        <label>Cargos / dolor que mencionó el cliente ${tip('Cualquier vacante o problema específico que el cliente mencionó al escribir/pedir la reunión.')}<span class="opt">(opcional)</span></label>
+        <textarea data-field="fichaCargos" placeholder="Ej. mencionaron que necesitan cubrir 2 vacantes técnicas urgentes.">${esc(state.fichaCargos)}</textarea>
+        <label>Notas del cliente ${tip('Cualquier otro detalle textual que dio el cliente.')}<span class="opt">(opcional)</span></label>
+        <textarea data-field="fichaAdicional" placeholder="Ej. escribió a las 11pm — parece tener urgencia.">${esc(state.fichaAdicional)}</textarea>
+      </div>
+    `}
+
+    ${navButtons()}
+  `);
+  bindForm();
 }
 
 function stepIntro() {
   h(`
     ${stepHeader()}
+    <h1>Construcción de confianza · dentro del demo</h1>
+    ${viewIntro(stepIdx)}
+
     <div class="card">
-      <h1>Fase 1 · Construcción de confianza</h1>
-      <p class="muted">Antes de meter preguntas, escribe el contrato previo de la reunión y cómo está la relación. <strong>Escucha 70%, habla 30%.</strong></p>
+      <p class="muted" style="margin:0 0 14px;font-size:13px;">Ejecutivo: <strong>${esc(state.executive) || '—'}</strong> · Cliente: <strong>${esc(state.company) || '—'}</strong> · Canal: <strong>${esc((CANALES.find(c => c.key === state.canalAdquisicion) || {}).label || '—')}</strong></p>
 
-      <p class="muted" style="margin-bottom:14px;font-size:13px;">Ficha previa lista ✓ · Ejecutivo: <strong>${esc(state.executive) || '—'}</strong> · Cliente: <strong>${esc(state.company) || '—'}</strong></p>
+      <label>Contrato previo acordado con el cliente ${tip('FUNDAMENTAL Sandler. Antes de meter preguntas, hazlo explícito con el cliente:\n\n1. Duración de la reunión\n2. Qué buscan ambos\n3. Permiso para decir "no" si no hay ajuste\n\nEj.: "Tenemos 30 min. Yo entiendo su proceso actual y sus dolores; al final decidimos juntos si tiene sentido cotizar. Está totalmente bien que ustedes digan que no si esto no es para ustedes."\n\nSin esto, el cliente se pone a la defensiva y no confiesa dolores reales.')}<span class="opt">(tiempo, agenda, permiso para el "no")</span></label>
+      <textarea data-field="contratoPrevio" placeholder="Ej. 30 min, entiendo proceso y dolores; al final decidimos juntos. Acordado que pueden decir 'no'.">${esc(state.contratoPrevio)}</textarea>
 
-      <label>Contrato previo acordado ${tip('FUNDAMENTAL Sandler. Acuerdo explícito al inicio: duración, agenda, qué buscan ambos, y el permiso para que cualquiera diga "no" si no hay ajuste.\n\nEj.: "Acordamos 30 min. Yo entiendo su proceso actual y sus dolores; ellos deciden al final si tiene sentido una segunda reunión. Acordado que pueden decir que no sin problema."')}<span class="opt">(tiempo, agenda, permiso para decir "no")</span></label>
-      <textarea data-field="contratoPrevio" placeholder="Ej. 30 min, entiendo su proceso y dolores; al final ellos deciden si avanzamos. Acordado que pueden decir 'no'.">${esc(state.contratoPrevio)}</textarea>
-
-      <label>Vínculo / rapport inicial ${tip('Nice-to-have. Cómo rompiste el hielo y generaste relación par a par. Ayuda a contextualizar el deal.\n\nEj.: "Hablamos 5 min de su expansión a Cali, ambos conocemos al gerente de RRHH del Grupo Éxito. Tono cálido, conversación par a par."')}<span class="opt">(opcional, nice-to-have)</span></label>
+      <label>Vínculo / rapport inicial ${tip('Cómo rompiste el hielo y generaste relación par a par. Ayuda a contextualizar el deal después.\n\nEj.: "Hablamos 5 min de la expansión que tienen a Cali; conozco al líder de RRHH del Grupo Éxito y le mencioné. Tono cálido, conversación par a par."')}<span class="opt">(nice-to-have)</span></label>
       <textarea data-field="vinculo" placeholder="Ej. hablamos de su expansión, conocemos personas en común, tono cálido.">${esc(state.vinculo)}</textarea>
     </div>
     ${navButtons()}
@@ -301,24 +541,26 @@ function stepIntro() {
 function stepQualif() {
   h(`
     ${stepHeader()}
+    <h1>Calificación rápida</h1>
+    ${viewIntro(stepIdx)}
+
     <div class="card">
-      <h1>Calificación rápida</h1>
-      <p class="muted">5 preguntas en menos de 3 minutos para saber en qué segmento está.</p>
+      <p class="muted" style="margin:0 0 6px;">Línea: <strong>${esc(linea().label)}</strong> · Preguntas adaptadas a esta línea. En menos de 3 minutos ubicas segmento (Micro / PyME / Grande) y detectas si tiene ATS.</p>
 
-      <label>1. ¿Cuántas personas contratan al mes / al año? ${tip('Determina volumen del segmento. Indica si es Micro (pocas al año), PyME (varias al mes) o Grande (alto volumen continuo).\n\nEjemplos:\n• Micro: "2-3 al año, esporádicas"\n• PyME: "10-15 al mes, vacantes varias"\n• Grande: "200+ al mes, continuo"')}</label>
-      <input type="text" data-field="qualif.volumen" value="${esc(state.qualif.volumen)}" placeholder="Ej. 10 al mes, 50 al año, esporádicas..." />
+      <label>1. ${esc(linea().qualif.volumen)} ${tip('Determina volumen del segmento (Micro / PyME / Grande).\n\nPara ' + linea().label + ', ejemplos:\n• Micro: pocas al año\n• PyME: varias al mes\n• Grande: alto volumen continuo')}</label>
+      <input type="text" data-field="qualif.volumen" value="${esc(state.qualif.volumen)}" placeholder="Ej. 10 al mes; 50 al año; esporádicas..." />
 
-      <label>2. ¿Cuántas personas en el equipo se dedican a reclutar / seleccionar? ${tip('Tamaño del equipo de Talent Acquisition.\n\nEjemplos:\n• Micro: "el dueño mismo, no hay equipo"\n• PyME: "2-3 personas en RRHH"\n• Grande: "área de TA estructurada con 8 reclutadores + líder"')}</label>
-      <input type="text" data-field="qualif.equipoRrhh" value="${esc(state.qualif.equipoRrhh)}" placeholder="Ej. el dueño, 2 personas, área estructurada..." />
+      <label>2. ${esc(linea().qualif.equipo)} ${tip('Tamaño del equipo que hoy manejaría este proceso.')}</label>
+      <input type="text" data-field="qualif.equipoRrhh" value="${esc(state.qualif.equipoRrhh)}" placeholder="Ej. el dueño; 2-3 personas; área estructurada..." />
 
-      <label>3. ¿Qué tipo de perfiles contratan más? ${tip('Determina si el dolor está en sourcing masivo o screening de perfiles especializados.\n\nEjemplos:\n• "Mayormente operativos: meseros, despachadores, vendedores"\n• "Técnicos: desarrolladores, data engineers"\n• "Profesionales: gerentes, analistas senior"')}<span class="opt">(operativos/masivos, técnicos, profesionales)</span></label>
-      <input type="text" data-field="qualif.perfiles" value="${esc(state.qualif.perfiles)}" placeholder="Ej. mayormente operativos masivos; algunos técnicos" />
+      <label>3. ${esc(linea().qualif.perfiles)} ${tip('Ubica el TIPO de perfil que buscan. Cambia si es sourcing masivo o especializado.')}</label>
+      <input type="text" data-field="qualif.perfiles" value="${esc(state.qualif.perfiles)}" placeholder="Ej. operativos masivos; técnicos; C-level; internacional..." />
 
-      <label>4. ¿Con qué herramienta manejan hoy el reclutamiento? ${tip('🔑 PREGUNTA LLAVE. Define dramáticamente el segmento y si tienen ATS.\n\nEjemplos:\n• Micro: "Excel + WhatsApp + LinkedIn manual"\n• PyME: "Computrabajo + LinkedIn Recruiter + hoja de cálculo"\n• Grande: "SAP SuccessFactors para gestión, sourcing manual con agencias"')}<span class="opt">(define mucho el segmento)</span></label>
-      <input type="text" data-field="qualif.herramienta" value="${esc(state.qualif.herramienta)}" placeholder="Excel, LinkedIn, bolsas, SAP SuccessFactors, Workday..." />
+      <label>4. ${esc(linea().qualif.herramienta)} ${tip('🔑 PREGUNTA LLAVE. Define contra qué compites y el segmento.')}</label>
+      <input type="text" data-field="qualif.herramienta" value="${esc(state.qualif.herramienta)}" placeholder="Ej. Excel; LinkedIn; SAP SF; Deel; agencias externas..." />
 
-      <label>5. ¿Quién decide la compra de una herramienta así? ${tip('Identifica el decisor temprano para no perder tiempo. Diferencia entre dueño, jefe de RRHH solo, o comité con compras.\n\nEjemplos:\n• "El dueño, decide ya"\n• "El jefe de RRHH propone, gerencia general aprueba"\n• "Comité: líder de TA + finanzas + compras. Toma 6-8 semanas"')}</label>
-      <input type="text" data-field="qualif.decisor_quien" value="${esc(state.qualif.decisor_quien)}" placeholder="Ej. el jefe de RRHH, comité con compras..." />
+      <label>5. ${esc(linea().qualif.decisor)} ${tip('Identifica el decisor temprano para no perder tiempo.')}</label>
+      <input type="text" data-field="qualif.decisor_quien" value="${esc(state.qualif.decisor_quien)}" placeholder="Ej. jefe de RRHH; comité con compras; CFO + Legal (para EOR)..." />
     </div>
     ${navButtons({ nextLabel: 'Detectar segmento' })}
   `);
@@ -333,9 +575,11 @@ function stepSegment() {
 
   h(`
     ${stepHeader()}
+    <h1>Segmento detectado</h1>
+    ${viewIntro(stepIdx)}
+
     <div class="card">
-      <h1>Segmento detectado</h1>
-      <p class="muted">Confirma o ajusta. Esto define qué preguntas hacer y qué mostrar del demo.</p>
+      <p class="muted" style="margin:0 0 6px;">Confirma o ajusta. Esto define qué preguntas hacer, qué guion usar y qué módulos mostrar del demo.</p>
 
       <div class="chips">
         ${['A','B','C'].map(k => `
@@ -400,9 +644,11 @@ function stepDiscovery() {
 
   h(`
     ${stepHeader()}
+    <div class="split"><h1>Embudo del dolor <span class="segment-badge ${seg}">Segmento ${seg}</span></h1>${badge}</div>
+    ${viewIntro(stepIdx)}
+
     <div class="card">
-      <div class="split"><h1>Embudo del dolor <span class="segment-badge ${seg}">Segmento ${seg}</span></h1>${badge}</div>
-      <p class="muted"><strong>Regla del proceso:</strong> cuando el cliente menciona un dolor, la conversación se detiene ahí. <strong>Mínimo 2 de estas 3 preguntas</strong> antes de continuar. Un dolor sin desarrollar no ancla ni demo ni precio ni urgencia.</p>
+      <p class="muted" style="margin:0 0 6px;">Un dolor sin desarrollar no ancla ni demo ni precio ni urgencia. Documenta lo más textual posible lo que diga el cliente.</p>
 
       <div class="hint">
         <strong>Preguntas guía para este segmento:</strong>
@@ -411,8 +657,10 @@ function stepDiscovery() {
         </ul>
       </div>
 
-      <label>Dolor principal identificado ${tip('El problema concreto y textual que confesó el cliente. NO lo parafrasees — cópialo tal cual, en sus palabras.\n\nMal: "problemas contratando"\nBien (Lean Solutions, MIN 17:29): "Encontrar profesionales bilingües especializados en logística se complica porque somos los más grandes del sector."')}<span class="opt">(cópialo textual)</span></label>
-      <textarea data-field="dolor" placeholder="Textual, en las palabras del cliente.">${esc(state.dolor)}</textarea>
+      <p class="muted" style="font-size:13px;">Línea: <strong>${esc(linea().label)}</strong> · Eje del dolor: <em>${esc(linea().dolorEje)}</em></p>
+
+      <label>Dolor principal identificado ${tip('El problema concreto y TEXTUAL que confesó el cliente. NO lo parafrasees — cópialo tal cual.\n\nPara ' + linea().label + ', ejemplo:\n' + linea().dolorPh)}<span class="opt">(cópialo textual)</span></label>
+      <textarea data-field="dolor" placeholder="${esc(linea().dolorPh)}">${esc(state.dolor)}</textarea>
 
       <h3 style="margin-top: 24px;">Embudo del dolor · las 3 preguntas de proceso</h3>
 
@@ -448,9 +696,10 @@ function stepBudget() {
   const anclaBase = state.dolorCuantificar || state.fichaCosto || '';
   h(`
     ${stepHeader()}
+    <h1>Presupuesto y decisión</h1>
+    ${viewIntro(stepIdx)}
+
     <div class="card">
-      <h1>Presupuesto y decisión</h1>
-      <p class="muted"><strong>Regla del proceso:</strong> este bloque es contrato previo Nº 2. Sin fecha límite acordada con el cliente, no hay cotización.</p>
 
       ${anclaBase ? `<div class="hint"><strong>Ancla del dolor cuantificado:</strong> "${esc(anclaBase)}"<br/>Úsalo aquí para presentar precio: <em>"si esto les cuesta X al mes, la modalidad de Peaku que resuelve esto arranca en Y."</em></div>` : `<div class="hint" style="background:#fef3e2;border-left-color:var(--warn);"><strong>⚠ No tienes ancla cuantificada.</strong> Sin número de dolor, cualquier precio se evalúa como gasto puro. Vuelve al embudo del dolor.</div>`}
 
@@ -481,9 +730,11 @@ function stepIdeal() {
   state.idealRequests = items;
   h(`
     ${stepHeader()}
+    <h1>Lo que el cliente pidió en su ideal</h1>
+    ${viewIntro(stepIdx)}
+
     <div class="card">
-      <h1>Lo que el cliente pidió en su ideal ${tip('Lista CADA cosa que el cliente mencionó como "me encantaría", "necesitaría", "ojalá tuviera". Una línea por pedido. Marca el toggle si ya lo tenemos en Peaku.\n\nEsto alimenta el wishlist agregado por segmento (ranking de lo más pedido) que después usas para roadmap.\n\nEjemplos de pedidos típicos:\n• "Notificaciones por WhatsApp a candidatos"\n• "Reportes exportables a Power BI"\n• "Filtro por experiencia mínima específica"\n• "Integración con Microsoft Teams"\n• "Multi-empresa en una sola cuenta"')}</h1>
-      <p class="muted">Lista cada cosa que dijo que necesitaría/le encantaría. Marca si lo tenemos hoy. Esto alimenta el wishlist por segmento.</p>
+      <p class="muted">Lista cada cosa que el cliente mencionó como "me encantaría", "necesitaría", "ojalá tuviera". Una línea por pedido. Marca si lo tenemos hoy. Esto alimenta el wishlist agregado por segmento para roadmap.</p>
 
       <div id="ideal-list">
         ${items.map((it, i) => `
@@ -519,9 +770,10 @@ function stepClose() {
   const tipoAct = state.proximoPasoTipo || (califica ? 'piloto' : 'nutricion');
   h(`
     ${stepHeader()}
+    <h1>Cierre + Piloto</h1>
+    ${viewIntro(stepIdx)}
+
     <div class="card">
-      <h1>Fase 3 · Cierre + Piloto</h1>
-      <p class="muted"><strong>Regla del proceso:</strong> los próximos pasos los propones tú (nunca el cliente los dicta). La cotización viaja de anexo del piloto, nunca al revés.</p>
 
       <div style="margin: 8px 0 14px;">
         <strong style="font-size:13px;color:var(--peaku-gray);">Calificación Sandler:</strong>
@@ -662,6 +914,7 @@ function stepResult() {
 
   h(`
     ${stepHeader()}
+    ${viewIntro(stepIdx)}
 
     <div class="card" style="border-left:6px solid ${gateColor}; background:${gateBg};">
       <div class="split">
@@ -813,7 +1066,6 @@ async function renderDeals() {
 
     <div class="score-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
       <div class="card compact score-card"><div class="muted">Total deals</div><div class="num">${r.length}</div></div>
-      <div class="card compact score-card"><div class="muted">Cierre</div><div class="num" style="color:${cierreRate>=25?'var(--peaku-green)':'var(--peaku-gray)'};">${cierreRate === null ? '—' : cierreRate + '%'}</div><div class="muted" style="font-size:11px;">${r.filter(x=>x.outcome==='won').length} de ${closed.length}</div></div>
       <div class="card compact score-card"><div class="muted">"Lead sin valor" (meta &lt;20%)</div><div class="num" style="color:${pctSinValor!==null && pctSinValor<20?'var(--peaku-green)':'var(--bad)'};">${pctSinValor === null ? '—' : pctSinValor + '%'}</div><div class="muted" style="font-size:11px;">${sinValor.length} de ${lost.length} perdidas</div></div>
       <div class="card compact score-card"><div class="muted">Abiertos</div><div class="num">${r.filter(x=>!x.outcome || x.outcome==='open').length}</div></div>
     </div>
