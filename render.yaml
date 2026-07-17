@@ -12,6 +12,8 @@ services:
         fromDatabase:
           name: peaku-sandler-db
           property: connectionString
+      - key: ANTHROPIC_API_KEY
+        sync: false   # setéala manualmente en Render → Environment
 
 databases:
   - name: peaku-sandler-db

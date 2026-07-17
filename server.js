@@ -3,12 +3,20 @@
 const express = require('express');
 const path = require('path');
 const { Pool } = require('pg');
+const Anthropic = require('@anthropic-ai/sdk');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json({ limit: '1mb' }));
+// El transcript de un demo largo puede ser 40-80 KB; damos margen.
+app.use(express.json({ limit: '4mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// --- Claude (Anthropic) ---
+const anthropic = process.env.ANTHROPIC_API_KEY
+  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  : null;
+if (!anthropic) console.warn('[llm] ANTHROPIC_API_KEY no está seteada — /api/analyze devolverá error');
 
 // --- DB ---
 const useDb = !!process.env.DATABASE_URL;
@@ -328,6 +336,130 @@ app.get('/api/health', async (_req, res) => {
   } catch (e) {
     dbLastError = e.message;
     res.status(500).json({ ...out, db: false, error: e.message });
+  }
+});
+
+// ---------- Análisis IA de transcript ----------
+function buildAnalyzePrompt(transcript, ctx) {
+  const linea = ctx.lineaNegocio || 'SaaS';
+  const lineaContexto = {
+    SaaS: 'Peaku vende una plataforma SaaS de reclutamiento (sourcing automático + IA de ranking/scoring + pruebas de candidatos). El cliente usa la plataforma él mismo.',
+    Headhunting: 'Peaku ofrece búsqueda y selección (search a la medida). Peaku busca y trae el talento por encargo — el cliente no usa la plataforma directamente.',
+    EOR: 'Peaku ofrece Employer of Record: el cliente ya identificó al candidato y Peaku lo contrata legalmente a su nombre en el país que aplique.',
+  }[linea] || '';
+
+  const canalMap = {
+    freelancer: 'Freelancer/SDR externo', sdr_interno: 'SDR interno de Peaku',
+    inbound: 'Inbound (correo/web)', referido: 'Referido',
+    evento: 'Evento/networking', outbound: 'Outbound del ejecutivo', otro: 'Otro'
+  };
+
+  return `Eres un analista experto en el método Sandler de ventas y en el proceso comercial de Peaku (empresa colombiana de reclutamiento).
+
+CONTEXTO DEL DEAL:
+- Empresa cliente: ${ctx.company || 'no especificada'}
+- Ejecutivo comercial de Peaku: ${ctx.executive || 'no especificado'}
+- Línea de negocio: ${linea}. ${lineaContexto}
+- Canal de adquisición: ${canalMap[ctx.canalAdquisicion] || 'no especificado'}${ctx.freelancerNombre ? ' (' + ctx.freelancerNombre + ')' : ''}
+- Ficha previa del canal:
+  · Cargos/necesidad: ${ctx.fichaCargos || 'sin datos'}
+  · Costo del proceso actual: ${ctx.fichaCosto || 'sin datos'}
+  · Herramientas actuales: ${ctx.fichaHerramientas || 'sin datos'}
+  · Notas: ${ctx.fichaAdicional || 'sin datos'}
+- Actitud reportada por canal: ${ctx.prospActitud || 'sin datos'}
+- Urgencia reportada: ${ctx.prospUrgencia || 'sin datos'}
+
+PROCESO SANDLER DE PEAKU (para tu análisis):
+- Fase 1 · Construcción: contrato previo con el cliente (tiempo, agenda, permiso para decir "no") + vínculo.
+- Fase 2 · Calificación:
+  · EMBUDO DEL DOLOR (2 de 3): cuantificar ($/tiempo) + historia (qué intentaron) + impacto (a quién le duele). Sin embudo desarrollado, el dolor no ancla el precio.
+  · Presupuesto: ¿hay plata? ¿cuánto? ¿comparado con qué?
+  · Decisión: quiénes deciden + proceso interno + FECHA LÍMITE acordada con el cliente (máximo 14 días).
+- Fase 3 · Cierre: proponer TÚ los próximos pasos (nunca el cliente los dicta). Piloto (publicar cargo esta semana) es preferible a cotización fría.
+- CALIFICACIÓN SANDLER: Completa = dolor desarrollado + presupuesto + decisión + fecha límite. Parcial = 2-3 de 4. No califica = 0-1 de 4.
+
+TRANSCRIPT DEL DEMO (probablemente de Google Meet):
+\`\`\`
+${transcript}
+\`\`\`
+
+TAREA: Analiza el transcript y extrae la información estructurada en el JSON de abajo. Usa CITAS TEXTUALES del transcript cuando sea posible (con el segundo/minuto si aparece); si no hay dato, deja el campo como cadena vacía. Sé estricto: NO inventes información que no esté en el transcript.
+
+Además, genera:
+- Un array "acciones_concretas" con 3-7 próximos pasos ESPECÍFICOS (nombre, fecha, canal), priorizados. Ej.: "Llamar mañana a las 10am a María para preguntar presupuesto (no salió en el demo)"
+- Un array "preguntas_faltantes" con lo que el ejecutivo NO preguntó y debería haber preguntado en este demo, según Sandler.
+- Un array "momentos_criticos" con hasta 3 momentos del transcript donde se dejó ir un dolor sin desarrollar, se dio precio antes de tiempo, o el cliente dictó los próximos pasos. Incluye la cita textual y qué debió haber hecho el ejecutivo.
+
+RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL. Formato exacto:
+
+{
+  "contratoPrevio": "cita o resumen si se hizo, vacío si no",
+  "vinculo": "cómo se generó rapport, vacío si no hubo",
+  "dolor": "cita textual del dolor principal identificado",
+  "dolorCuantificar": "cita si hubo cifra/tiempo, vacío si no se preguntó o no respondió",
+  "dolorHistoria": "qué intentaron antes, cita si aparece",
+  "dolorImpacto": "impacto emocional/operativo mencionado, cita si aparece",
+  "consecuenciasEmocionales": "frustración/miedo/presión mencionados",
+  "medicion": "cómo miden el proceso hoy",
+  "integraciones": "solo si línea es SaaS y mencionan ATS/API",
+  "presupuesto": "info de presupuesto que salió (cifra, comparación, o 'no se preguntó')",
+  "decisor": "nombres/roles de decisores mencionados",
+  "procesoDecision": "pasos internos, comité, plazos",
+  "fechaLimiteDecision": "YYYY-MM-DD si se acordó fecha específica, vacío si no",
+  "idealRequests": [
+    {"text": "pedido del cliente en sus palabras", "weHave": true}
+  ],
+  "proximoPaso": "próximo paso concreto acordado en el demo",
+  "postVenta": "si se habló de onboarding/seguimiento",
+  "pilotoCargo": "si se ofreció piloto, qué cargo",
+  "pilotoFechaRevision": "YYYY-MM-DD si se acordó fecha de revisión",
+  "segmento_sugerido": "A (Micro), B (PyME) o C (Grande) según volumen/equipo del cliente",
+  "hasAts": true,
+  "atsName": "nombre del ATS si lo tienen",
+  "calificacion_sandler": "Completa | Parcial | No califica",
+  "acciones_concretas": [
+    {"prioridad": "alta", "accion": "descripción específica con nombre/fecha/canal", "cuando": "hoy | mañana | esta semana"}
+  ],
+  "preguntas_faltantes": [
+    "pregunta específica que se debió hacer y no se hizo"
+  ],
+  "momentos_criticos": [
+    {"cita": "cita textual del cliente/ejecutivo", "que_paso": "qué error se cometió", "que_debio_hacer": "cómo debió corregirse"}
+  ],
+  "resumen_ejecutivo": "2-3 oraciones: qué pasó en el demo, calificación, y recomendación clara (cotizar / piloto / nutrir)"
+}`;
+}
+
+app.post('/api/analyze', async (req, res) => {
+  try {
+    if (!anthropic) return res.status(500).json({ error: 'ANTHROPIC_API_KEY no configurada' });
+    const { transcript, context } = req.body || {};
+    if (!transcript || transcript.length < 100) {
+      return res.status(400).json({ error: 'transcript vacío o muy corto (mín 100 chars)' });
+    }
+    const prompt = buildAnalyzePrompt(transcript, context || {});
+    const msg = await anthropic.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 4096,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const text = (msg.content && msg.content[0] && msg.content[0].text) || '';
+    // Extraer JSON del texto (Claude puede envolverlo en ```json ... ``` a veces)
+    let jsonText = text.trim();
+    const fenced = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenced) jsonText = fenced[1].trim();
+    let parsed;
+    try { parsed = JSON.parse(jsonText); }
+    catch (e) {
+      console.error('[llm] JSON parse fallido:', e.message, '\ntexto:', text.slice(0, 500));
+      return res.status(502).json({ error: 'Claude devolvió JSON inválido', raw: text.slice(0, 2000) });
+    }
+    // Anotar uso para monitoreo
+    parsed._usage = msg.usage;
+    res.json(parsed);
+  } catch (e) {
+    console.error('[llm] error:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 

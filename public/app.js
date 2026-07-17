@@ -49,7 +49,12 @@ function newDraft() {
     fichaCosto: '',             // costo estimado de la vacante abierta
     fichaHerramientas: '',      // herramientas actuales
     fichaAdicional: '',         // notas extras del SDR
-    // --- Vista 2: Construcción de confianza (contrato previo Nº 1 con el cliente en el demo) ---
+    // --- Vista 2: Transcript del demo ---
+    transcript: '',              // texto completo pegado
+    // --- Vista 3: Análisis IA (output crudo de Claude) ---
+    iaExtracted: null,           // objeto completo devuelto por Claude
+    iaError: null,
+    // --- Datos del demo (todos AUTO-LLENADOS por la IA, editables en review) ---
     contratoPrevio: '',
     vinculo: '',
     // Calificación rápida
@@ -90,56 +95,37 @@ function newDraft() {
 
 let state = loadDraft() || newDraft();
 let stepIdx = 0;
+// Flujo transcript-only (nuevo): el comercial pega el transcript y la IA extrae todo.
 const STEPS = [
   {
     key: 'inicio', label: '0 · Datos iniciales',
-    goal: 'Registrar quién dentro de Peaku es dueño del deal y por qué canal llegó el cliente. Es la primera vez que existe el deal en el CRM (etapa "Demo agendado" en Brevo).',
-    rule: 'Sin canal de adquisición asignado, no se puede evaluar qué canales convierten mejor. Sin ejecutivo, no hay dueño.',
+    goal: 'Registrar quién dentro de Peaku es dueño del deal, empresa cliente, línea de negocio y por qué canal llegó. Es la única data que llena el comercial a mano.',
+    rule: 'Sin ejecutivo, línea y canal, no puedes evaluar qué combinaciones convierten mejor. Es lo mínimo.',
   },
   {
     key: 'prosp', label: '1 · Prospección',
-    goal: 'Recibir del canal (freelancer/SDR/inbound/referido) los datos que EL CLIENTE dio antes del demo. Determina si el demo se agenda con calidad o si toca reciclar.',
-    rule: 'La info varía según el canal: un freelancer trae ficha completa; un inbound solo trae lo que el cliente escribió. Sin esta ficha por canal, el demo empieza a ciegas.',
+    goal: 'Registrar lo que trajo el canal ANTES del demo (ficha del SDR, o lo que escribió el cliente si es inbound). Es contexto pre-demo — no lo que el cliente dijo en el demo.',
+    rule: 'La info varía según el canal: freelancer/SDR trae ficha completa; inbound solo trae lo que escribió el cliente. Sin ficha por canal, el demo empieza a ciegas.',
   },
   {
-    key: 'intro', label: '2 · Construcción',
-    goal: 'Al inicio del demo, establecer el contrato previo Nº 1 con el cliente (tiempo, agenda, permiso para decir "no") y generar vínculo par a par.',
-    rule: 'Escuchar 70%, hablar 30%. El "no" es un resultado válido — declararlo en el contrato previo desbloquea que el cliente sea honesto.',
+    key: 'transcript', label: '2 · Transcript del demo',
+    goal: 'Pegar el transcript del demo (Google Meet, Otter, Fireflies). Este es el input principal — la IA extrae de aquí dolor, presupuesto, decisión, fecha, pedidos y momentos críticos.',
+    rule: 'Grabar TODO el demo. Sin transcript no hay análisis. La verdad la dice el cliente, no la interpretación del comercial.',
   },
   {
-    key: 'qualif', label: '3 · Calificación',
-    goal: 'En menos de 3 min ubicar al cliente en segmento (Micro / PyME / Grande) y detectar si tiene ATS. Todo lo demás depende de esto.',
-    rule: 'No mostrar la plataforma antes de calificar. La demo se adapta al segmento — no al revés.',
+    key: 'analisis', label: '3 · Análisis IA',
+    goal: 'Claude lee el transcript y extrae toda la información estructurada + genera acciones concretas + detecta momentos críticos donde se dejó ir el dolor o se dio precio sin ancla.',
+    rule: 'El análisis tarda 20-40 segundos. No cierres la pestaña.',
   },
   {
-    key: 'segment', label: '4 · Segmento',
-    goal: 'Confirmar el segmento detectado. Cambia el guion, los módulos que muestras y la objeción a manejar.',
-    rule: 'Segmento C (Grande con ATS): posiciónate como CAPA de sourcing+IA. Nunca ataques el ATS de frente.',
+    key: 'review', label: '4 · Revisar y ajustar',
+    goal: 'Ver todo lo que la IA extrajo, con la cita textual del transcript al lado. Ajustar lo que esté mal antes de guardar.',
+    rule: 'La IA puede equivocarse — el comercial es responsable de validar. Especialmente el segmento, la calificación Sandler y la fecha límite.',
   },
   {
-    key: 'discovery', label: '5 · Embudo del dolor',
-    goal: 'Convertir el dolor mencionado por el cliente en un problema desarrollado: cuantificado ($), con historia (qué intentaron) y con impacto (a quién le duele). Es el ancla del precio.',
-    rule: 'Cuando el cliente menciona un dolor, la conversación se detiene ahí. Mínimo 2 de 3 preguntas antes de continuar. Sin cuantificación, el precio se evalúa como gasto puro.',
-  },
-  {
-    key: 'budget', label: '6 · Presupuesto / Decisión',
-    goal: 'Confirmar que hay plata, saber quiénes deciden y ACORDAR fecha límite de decisión con el cliente (contrato previo Nº 2).',
-    rule: 'Sin fecha límite acordada, no se envía cotización. Máximo 14 días desde hoy — históricamente ninguna venta cerró después del día 19.',
-  },
-  {
-    key: 'ideal', label: '7 · Pedidos del cliente',
-    goal: 'Capturar todo lo que el cliente pidió como "ideal". Marca si lo tenemos o no. Alimenta el ranking por segmento para roadmap.',
-    rule: 'Escribir textual, un pedido por línea. No parafrasear.',
-  },
-  {
-    key: 'close', label: '8 · Cierre + Piloto',
-    goal: 'Proponer TÚ los próximos pasos (nunca los dicta el cliente). El piloto — publicar el cargo del dolor esta semana — es el próximo paso principal si el deal califica completo.',
-    rule: 'La cotización viaja de anexo del piloto, nunca al revés. Si no califica, va a Nutrición: sin cotización, sin follow-ups de cierre.',
-  },
-  {
-    key: 'result', label: '9 · Calificación Sandler',
-    goal: 'Ver el veredicto final: Completa / Parcial / No califica. Es la decisión operativa de si se cotiza el mismo día o el deal va a Nutrición.',
-    rule: 'Solo se cotiza si Calificación = Completa. Es el filtro para bajar el 41% de "lead sin valor" a menos del 20%.',
+    key: 'result', label: '5 · Resultado + Acciones',
+    goal: 'Ver calificación Sandler final, qué mostrar, qué faltó, y la lista priorizada de acciones concretas que el comercial debe ejecutar esta semana.',
+    rule: 'Solo se cotiza si Calificación = Completa. Las acciones concretas deben aterrizar en tareas del CRM el mismo día.',
   },
 ];
 
@@ -272,16 +258,12 @@ function flashSaved(btn) {
 // ---------- Steps ----------
 function renderWizard() {
   const s = STEPS[stepIdx].key;
-  if (s === 'inicio')    return stepInicio();
-  if (s === 'prosp')     return stepProsp();
-  if (s === 'intro')     return stepIntro();
-  if (s === 'qualif')    return stepQualif();
-  if (s === 'segment')   return stepSegment();
-  if (s === 'discovery') return stepDiscovery();
-  if (s === 'budget')    return stepBudget();
-  if (s === 'ideal')     return stepIdeal();
-  if (s === 'close')     return stepClose();
-  if (s === 'result')    return stepResult();
+  if (s === 'inicio')     return stepInicio();
+  if (s === 'prosp')      return stepProsp();
+  if (s === 'transcript') return stepTranscript();
+  if (s === 'analisis')   return stepAnalisis();
+  if (s === 'review')     return stepReview();
+  if (s === 'result')     return stepResult();
 }
 
 // Componente reutilizable: bloque de "Objetivo + regla" para cada vista
@@ -536,6 +518,252 @@ function stepIntro() {
     ${navButtons()}
   `);
   bindForm();
+}
+
+// ---------- 2 · Transcript del demo ----------
+function stepTranscript() {
+  const chars = (state.transcript || '').length;
+  const words = (state.transcript || '').trim().split(/\s+/).filter(Boolean).length;
+  const enough = chars >= 500;
+  h(`
+    ${stepHeader()}
+    <h1>Transcript del demo</h1>
+    ${viewIntro(stepIdx)}
+
+    <div class="card">
+      <h3>Cómo obtener el transcript de Google Meet</h3>
+      <ol style="padding-left:20px;line-height:1.9;font-size:14px;color:var(--peaku-gray);">
+        <li>En la reunión: activa <strong>Transcribir reunión</strong> (menú de tres puntos → Grabar / Transcribir).</li>
+        <li>Al terminar el demo, Google envía el transcript por correo y lo guarda en el <strong>Google Drive</strong> del organizador (carpeta "Meet Recordings").</li>
+        <li>Abre el documento del transcript, selecciona todo (<code>Ctrl/Cmd + A</code>), copia (<code>Ctrl/Cmd + C</code>) y pega aquí abajo.</li>
+      </ol>
+      <p class="muted" style="font-size:13px;">Tips: si el transcript trae timestamps (12:34), déjalos — la IA los usa para citar momentos. Si vino de Otter/Fireflies, también sirve.</p>
+    </div>
+
+    <div class="card">
+      <label>Transcript completo del demo ${tip('Pega el transcript literal, con nombres de speaker si aparecen. Cuanto más completo, mejor la extracción.\n\nTamaño típico: 5.000-25.000 palabras para un demo de 30-45 min.')}</label>
+      <textarea data-field="transcript" style="min-height:340px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;" placeholder="Pega aquí el transcript completo del demo...&#10;&#10;Ejemplo del formato de Google Meet:&#10;&#10;Santiago (Peaku)  10:04&#10;Hola María, gracias por la disponibilidad. ¿Podemos usar los primeros 5 minutos para entender su proceso?&#10;&#10;María (Cliente)  10:04&#10;Sí claro, adelante...">${esc(state.transcript || '')}</textarea>
+      <div style="margin-top:8px;font-size:12px;color:var(--muted);">
+        ${chars.toLocaleString()} caracteres · ${words.toLocaleString()} palabras ·
+        ${enough ? '<span class="pill good">Suficiente para analizar</span>' : '<span class="pill warn">Muy corto (mín 500 chars) — sigue pegando</span>'}
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn ghost" data-act="prev">← Atrás</button>
+      <div style="display:flex;gap:10px;">
+        <button class="btn secondary" data-act="save">Guardar borrador</button>
+        <button class="btn ${!enough ? 'ghost' : ''}" data-act="analyze" ${!enough ? 'disabled style="opacity:.5;cursor:not-allowed;"' : ''}>🤖 Analizar con IA →</button>
+      </div>
+    </div>
+  `);
+  bindForm();
+  const btn = el.querySelector('[data-act="analyze"]');
+  if (btn && enough) btn.addEventListener('click', () => { stepIdx++; saveDraft(); renderWizard(); });
+}
+
+// ---------- 3 · Análisis IA ----------
+async function stepAnalisis() {
+  h(`
+    ${stepHeader()}
+    <h1>Analizando el demo con Claude...</h1>
+    ${viewIntro(stepIdx)}
+    <div class="card" style="text-align:center;padding:60px 20px;">
+      <div style="font-size:48px;margin-bottom:20px;">🤖</div>
+      <h2 style="margin-bottom:8px;">Extrayendo dolor, presupuesto, decisión, momentos críticos...</h2>
+      <p class="muted" id="analisis-status">Enviando transcript a Claude Sonnet 4.5 · esto puede tardar 20-40 segundos.</p>
+      <div class="progress" style="max-width:400px;margin:24px auto 0;"><span id="pbar" style="width:20%;"></span></div>
+      <p class="muted" id="analisis-error" style="color:var(--bad);margin-top:20px;display:none;"></p>
+    </div>
+  `);
+
+  // Animar barra progresivamente
+  let pct = 20;
+  const timer = setInterval(() => {
+    pct = Math.min(pct + 3, 90);
+    const bar = document.getElementById('pbar');
+    if (bar) bar.style.width = pct + '%';
+  }, 800);
+  const stages = [
+    'Enviando transcript a Claude...',
+    'Analizando dolor y embudo (cuantificar / historia / impacto)...',
+    'Detectando presupuesto y decisor...',
+    'Buscando fecha límite acordada...',
+    'Extrayendo pedidos del cliente y momentos críticos...',
+    'Generando acciones concretas para esta semana...',
+  ];
+  let si = 0;
+  const stageTimer = setInterval(() => {
+    si = Math.min(si + 1, stages.length - 1);
+    const s = document.getElementById('analisis-status');
+    if (s) s.textContent = stages[si];
+  }, 5000);
+
+  try {
+    const r = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        transcript: state.transcript,
+        context: {
+          company: state.company, executive: state.executive, lineaNegocio: state.lineaNegocio,
+          canalAdquisicion: state.canalAdquisicion, freelancerNombre: state.freelancerNombre,
+          fichaCargos: state.fichaCargos, fichaCosto: state.fichaCosto,
+          fichaHerramientas: state.fichaHerramientas, fichaAdicional: state.fichaAdicional,
+          prospActitud: state.prospActitud, prospUrgencia: state.prospUrgencia,
+          prospOrigen: state.prospOrigen,
+        }
+      }),
+    });
+    clearInterval(timer); clearInterval(stageTimer);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${r.status}`);
+    }
+    const data = await r.json();
+    state.iaExtracted = data;
+    state.iaError = null;
+
+    // Aplicar al state — la IA es la fuente de verdad inicial
+    const map = ['contratoPrevio','vinculo','dolor','dolorCuantificar','dolorHistoria','dolorImpacto',
+      'consecuenciasEmocionales','medicion','integraciones','presupuesto','decisor','procesoDecision',
+      'fechaLimiteDecision','proximoPaso','postVenta','pilotoCargo','pilotoFechaRevision','atsName'];
+    for (const k of map) if (data[k] !== undefined) state[k] = data[k];
+    if (data.segmento_sugerido) state.segment = String(data.segmento_sugerido).charAt(0).toUpperCase();
+    if (typeof data.hasAts === 'boolean') state.hasAts = data.hasAts;
+    if (Array.isArray(data.idealRequests)) state.idealRequests = data.idealRequests;
+
+    const bar = document.getElementById('pbar');
+    if (bar) bar.style.width = '100%';
+    stepIdx++; saveDraft();
+    setTimeout(() => renderWizard(), 400);
+  } catch (e) {
+    clearInterval(timer); clearInterval(stageTimer);
+    state.iaError = e.message;
+    const err = document.getElementById('analisis-error');
+    if (err) { err.style.display = 'block'; err.innerHTML = `❌ Error: ${esc(e.message)}<br/><button class="btn ghost" onclick="stepIdx--; renderWizard();" style="margin-top:10px;">← Volver al transcript</button>`; }
+  }
+}
+
+// ---------- 4 · Review y ajustar ----------
+function stepReview() {
+  const ia = state.iaExtracted || {};
+  const cal = calificacion(state);
+
+  const field = (label, key, ph, isDate) => {
+    const val = state[key] || '';
+    const type = isDate ? 'date' : 'text';
+    return `
+      <div class="detail-field">
+        <div class="detail-label">${label}</div>
+        <div>
+          ${isDate
+            ? `<input type="date" data-field="${key}" value="${esc(val)}" />`
+            : `<textarea data-field="${key}" placeholder="${esc(ph||'')}" style="min-height:60px;">${esc(val)}</textarea>`}
+        </div>
+      </div>
+    `;
+  };
+
+  h(`
+    ${stepHeader()}
+    <h1>Revisar y ajustar lo que extrajo la IA</h1>
+    ${viewIntro(stepIdx)}
+
+    <div class="card" style="background:#f0fbff;border-left:6px solid var(--peaku-blue);">
+      <strong>Resumen ejecutivo (IA):</strong>
+      <p style="margin:6px 0 0;">${esc(ia.resumen_ejecutivo || 'Sin resumen')}</p>
+    </div>
+
+    <div class="card">
+      <h2>Segmento y calificación</h2>
+      <label>Segmento detectado ${tip('La IA sugirió esto según volumen, equipo y herramientas mencionadas. Ajusta si no encaja.')}</label>
+      <div class="chips">
+        ${['A','B','C'].map(k => `<div class="chip ${state.segment === k ? 'selected' : ''}" data-pick-segment="${k}"><strong>${k}</strong> · ${SEGMENTS[k].label}</div>`).join('')}
+      </div>
+      <label style="margin-top:14px;"><input type="checkbox" data-field="hasAts" ${state.hasAts?'checked':''}/> Tiene ATS</label>
+      ${state.hasAts ? `<label>Nombre del ATS</label><input type="text" data-field="atsName" value="${esc(state.atsName||'')}" placeholder="SAP SF, Workday, Greenhouse..." />` : ''}
+    </div>
+
+    <div class="card">
+      <h2>Construcción</h2>
+      ${field('Contrato previo', 'contratoPrevio', 'Duración, agenda, permiso para "no"')}
+      ${field('Vínculo / rapport', 'vinculo', 'Cómo se rompió el hielo')}
+    </div>
+
+    <div class="card">
+      <h2>Embudo del dolor</h2>
+      ${field('Dolor principal (textual)', 'dolor', 'Cita textual del cliente')}
+      ${field('1. Cuantificar (ancla del precio)', 'dolorCuantificar', '$/tiempo mencionado')}
+      ${field('2. Historia (qué intentaron)', 'dolorHistoria', 'Qué probaron antes')}
+      ${field('3. Impacto (a quién le duele)', 'dolorImpacto', 'Cliente/equipo afectado')}
+      ${field('Consecuencias emocionales', 'consecuenciasEmocionales', '')}
+      ${field('Cómo miden hoy', 'medicion', '')}
+      ${state.segment === 'C' ? field('Integraciones / API del ATS', 'integraciones', '') : ''}
+    </div>
+
+    <div class="card">
+      <h2>Presupuesto y decisión</h2>
+      ${field('Presupuesto', 'presupuesto', '')}
+      ${field('Decisor / decisores', 'decisor', '')}
+      ${field('Proceso de decisión', 'procesoDecision', '')}
+      ${field('Fecha límite de decisión', 'fechaLimiteDecision', 'YYYY-MM-DD', true)}
+    </div>
+
+    <div class="card">
+      <h2>Pedidos del cliente (ideal)</h2>
+      <p class="muted" style="font-size:13px;">La IA extrajo estos pedidos. Puedes editarlos, agregar o quitar.</p>
+      <div id="ideal-list-review">
+        ${(state.idealRequests || []).map((it, i) => `
+          <div class="ideal-item">
+            <input type="text" data-ideal-text="${i}" value="${esc(it.text)}" placeholder="Pedido del cliente" />
+            <label class="toggle"><input type="checkbox" data-ideal-have="${i}" ${it.weHave?'checked':''}/> lo tenemos</label>
+            <button class="btn ghost btn-sm danger" data-ideal-del="${i}" title="Eliminar">✕</button>
+          </div>
+        `).join('')}
+      </div>
+      <button class="btn secondary btn-sm" id="add-ideal-review" style="margin-top:8px;">+ Agregar pedido</button>
+    </div>
+
+    <div class="card">
+      <h2>Cierre y próximos pasos</h2>
+      ${field('Próximo paso concreto acordado en el demo', 'proximoPaso', '')}
+      ${field('Cargo para piloto (si aplica)', 'pilotoCargo', 'Cargo que se publicaría esta semana')}
+      ${field('Fecha revisión piloto', 'pilotoFechaRevision', 'YYYY-MM-DD', true)}
+      ${field('Post-venta / anti-remordimiento', 'postVenta', '')}
+    </div>
+
+    <div class="card">
+      <div class="split">
+        <div>
+          <strong>Calificación Sandler calculada:</strong>
+          <span class="pill ${cal.label === 'Completa' ? 'good' : (cal.label === 'Parcial' ? 'warn' : 'bad')}" style="margin-left:8px;">${cal.label} · ${cal.done}/${cal.of}</span>
+        </div>
+        <span class="muted" style="font-size:12px;">${ia._usage ? `IA usó ${ia._usage.input_tokens}+${ia._usage.output_tokens} tokens` : ''}</span>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn ghost" data-act="prev">← Volver al transcript</button>
+      <div style="display:flex;gap:10px;">
+        <button class="btn secondary" data-act="save">Guardar borrador</button>
+        <button class="btn" data-act="next">Ver resultado + acciones →</button>
+      </div>
+    </div>
+  `);
+  bindForm();
+  el.querySelectorAll('[data-ideal-text]').forEach(i => i.addEventListener('input', () => {
+    state.idealRequests[+i.dataset.idealText].text = i.value; saveDraft();
+  }));
+  el.querySelectorAll('[data-ideal-have]').forEach(i => i.addEventListener('change', () => {
+    state.idealRequests[+i.dataset.idealHave].weHave = i.checked; saveDraft();
+  }));
+  el.querySelectorAll('[data-ideal-del]').forEach(i => i.addEventListener('click', () => {
+    state.idealRequests.splice(+i.dataset.idealDel, 1); saveDraft(); renderWizard();
+  }));
+  el.querySelector('#add-ideal-review').addEventListener('click', () => {
+    state.idealRequests.push({ text: '', weHave: false }); saveDraft(); renderWizard();
+  });
 }
 
 function stepQualif() {
@@ -894,6 +1122,7 @@ function localScore(d) {
 }
 
 function stepResult() {
+  const ia = state.iaExtracted || {};
   const s = localScore(state);
   const seg = state.segment || 'B';
   const show = SHOW_BY_SEGMENT[seg] || [];
@@ -951,8 +1180,50 @@ function stepResult() {
       </div>
     </div>
 
+    ${(ia.acciones_concretas && ia.acciones_concretas.length) ? `
+      <div class="card" style="border-left:6px solid var(--peaku-blue);">
+        <h2>🎯 Acciones concretas para esta semana</h2>
+        <p class="muted" style="font-size:13px;">Generadas por Claude a partir del transcript. Aterrízalas hoy en tu CRM (Brevo).</p>
+        <ol style="padding-left:22px;line-height:2;">
+          ${ia.acciones_concretas.map(a => {
+            const pri = (a.prioridad || '').toLowerCase();
+            const priColor = pri === 'alta' ? 'var(--bad)' : pri === 'media' ? 'var(--warn)' : 'var(--peaku-green)';
+            return `<li>
+              <span class="pill" style="color:#fff;background:${priColor};border-color:${priColor};margin-right:8px;">${esc(a.prioridad || 'media')}</span>
+              <strong>${esc(a.accion || '')}</strong>
+              ${a.cuando ? `<span class="muted" style="margin-left:6px;font-size:12px;">· ${esc(a.cuando)}</span>` : ''}
+            </li>`;
+          }).join('')}
+        </ol>
+      </div>
+    ` : ''}
+
+    ${(ia.momentos_criticos && ia.momentos_criticos.length) ? `
+      <div class="card" style="border-left:6px solid var(--warn);">
+        <h2>⚠ Momentos críticos del demo</h2>
+        <p class="muted" style="font-size:13px;">Puntos donde se dejó ir un dolor, se dio precio antes de tiempo, o el cliente dictó los pasos. Aprendizaje para el próximo demo.</p>
+        ${ia.momentos_criticos.map(m => `
+          <div style="border-left:3px solid var(--warn);padding:10px 14px;background:#fef3e2;margin:10px 0;border-radius:4px;">
+            <div style="font-style:italic;color:var(--peaku-gray);margin-bottom:6px;">"${esc(m.cita || '')}"</div>
+            <div style="font-size:13px;"><strong>Qué pasó:</strong> ${esc(m.que_paso || '')}</div>
+            <div style="font-size:13px;color:var(--peaku-green-dark);"><strong>Debió:</strong> ${esc(m.que_debio_hacer || '')}</div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+
+    ${(ia.preguntas_faltantes && ia.preguntas_faltantes.length) ? `
+      <div class="card">
+        <h2>❓ Preguntas que NO hiciste (Sandler)</h2>
+        <p class="muted" style="font-size:13px;">Según el proceso Sandler, faltó preguntar esto. Puedes cerrarlo con un WhatsApp o llamada corta.</p>
+        <ul class="list-clean">
+          ${ia.preguntas_faltantes.map(p => `<li><span>${esc(p)}</span><span class="pill warn">Falta preguntar</span></li>`).join('')}
+        </ul>
+      </div>
+    ` : ''}
+
     <div class="card">
-      <h2>1 · Qué mostrar de la plataforma</h2>
+      <h2>Qué mostrar de la plataforma</h2>
       <ul class="list-clean">
         ${show.map(k => {
           const f = PEAKU_FEATURES.find(x => x.key === k);

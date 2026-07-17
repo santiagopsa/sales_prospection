@@ -1,84 +1,74 @@
 # Peaku · Sandler Coach
 
-Herramienta web para guiar a los ejecutivos comerciales de Peaku por el proceso Sandler + las preguntas de calificación de la guía interna. Te da en cada deal:
+Herramienta web para procesar demos comerciales de Peaku con IA. El ejecutivo pega el **transcript del demo** (Google Meet, Otter, Fireflies) y **Claude extrae automáticamente**:
 
-- **% de cumplimiento** de fundamentales y nice-to-have del proceso.
-- **Qué mostrar de la plataforma** según el segmento detectado (Micro / PyME / Grande).
-- **Qué faltó** del proceso para no avanzar al cierre con huecos.
-- **Wishlist por segmento** — lo que los clientes piden y que aún no tenemos, ranqueado por frecuencia, para alimentar el roadmap.
+- Dolor + embudo desarrollado (cuantificar / historia / impacto)
+- Presupuesto, decisor, proceso de decisión, fecha límite
+- Pedidos del cliente (lo que sí tenemos vs. lo que hay que construir)
+- Calificación Sandler (Completa / Parcial / No califica)
+- **Momentos críticos** del demo (dolor no desarrollado, precio antes de tiempo, cliente dictó pasos)
+- **Preguntas faltantes** según Sandler
+- **Acciones concretas** priorizadas para esta semana
 
-Stack: Node 18 + Express + Postgres. SPA en HTML/JS plano (sin build step). Listo para Railway.
+El comercial solo llena: **datos iniciales** (ejecutivo, empresa, línea, canal) + **ficha de prospección** (lo que trajo el canal) + **transcript**. Todo lo demás lo hace la IA. El comercial revisa y ajusta antes de guardar.
 
----
-
-## 🚀 Deploy en Railway (5 minutos)
-
-### Opción A — Desde GitHub (recomendado)
-
-1. **Sube este folder a un repo de GitHub** (privado o público).
-
-   ```bash
-   cd peaku-sandler
-   git init
-   git add .
-   git commit -m "init: peaku sandler coach"
-   git branch -M main
-   git remote add origin https://github.com/<TU_USUARIO>/peaku-sandler.git
-   git push -u origin main
-   ```
-
-2. **Entra a [railway.app](https://railway.app)** → `New Project` → `Deploy from GitHub repo` → elige `peaku-sandler`.
-
-3. **Agrega Postgres**: dentro del proyecto, click `+ New` → `Database` → `Add PostgreSQL`. Railway automáticamente expone la variable `DATABASE_URL` al servicio web.
-
-4. **Variables de entorno** (en el servicio web → `Variables`):
-   - `NODE_ENV` = `production`
-   - `DATABASE_URL` ya viene linkeada automáticamente del plugin Postgres (déjala como está).
-
-5. **Generar dominio público**: en el servicio web → `Settings` → `Networking` → `Generate Domain`. Te da una URL tipo `peaku-sandler-production.up.railway.app`.
-
-6. Listo. La primera vez que arranque, el server crea las tablas `deals` y `wishlist` automáticamente.
-
-### Opción B — Railway CLI
-
-```bash
-npm i -g @railway/cli
-railway login
-cd peaku-sandler
-railway init
-railway add --plugin postgresql
-railway up
-```
+Stack: Node 18 + Express + Postgres + Anthropic SDK. SPA en HTML/JS plano.
 
 ---
 
-## 🧪 Correr local
+## 🚀 Deploy en Render
+
+### Requisitos
+- Cuenta de Render con Postgres plan Starter+ (el free trial se agota en 90 días)
+- **API key de Anthropic** (https://console.anthropic.com/)
+
+### Pasos
+
+1. **Sube este folder a GitHub.**
+2. En Render → **New +** → **Blueprint** → conecta el repo.
+3. Render lee `render.yaml` y crea: web service + Postgres.
+4. En **Environment del web service**, agrega:
+   - `ANTHROPIC_API_KEY` = tu key de Anthropic (empieza con `sk-ant-...`)
+   - `NODE_ENV` = `production` (ya está en render.yaml)
+   - `DATABASE_URL` = ya se linkea sola con Postgres
+5. **Settings → Networking → Generate Domain**.
+
+Primera vez que arranca crea tablas + migra columnas. Costo típico de IA: **~$0.05–0.15 USD por análisis de demo** (transcript de 30-45 min).
+
+---
+
+## 🧭 Flujo (6 vistas)
+
+| # | Vista | Quién llena | Contenido |
+|---|-------|-------------|-----------|
+| 0 | Datos iniciales | Comercial | Ejecutivo, empresa, línea (SaaS/HH/EOR), canal de adquisición, freelancer |
+| 1 | Prospección | Comercial | Ficha que trajo el canal antes del demo (dinámica por canal) |
+| 2 | Transcript | Comercial | Pega el transcript del demo (Google Meet) |
+| 3 | Análisis IA | Claude | Extrae ~30 segundos |
+| 4 | Revisar y ajustar | Comercial | Edita lo que la IA no pilló bien |
+| 5 | Resultado + acciones | — | Calificación Sandler + acciones concretas + momentos críticos |
+
+---
+
+## 📋 Cómo obtener transcript de Google Meet
+
+1. En el demo, menú de 3 puntos → **Grabar / Transcribir reunión**.
+2. Al terminar, Google guarda el transcript en el **Drive** del organizador (carpeta `Meet Recordings`) y lo envía por correo.
+3. Abre el documento, `Ctrl/Cmd + A` (seleccionar todo), `Ctrl/Cmd + C`, y pega en Vista 2 de la app.
+
+También funciona con Otter, Fireflies o cualquier transcript en texto plano.
+
+---
+
+## 🛠 Correr local
 
 ```bash
-cd peaku-sandler
 npm install
-# opcional: pon una DATABASE_URL real; si no, corre en modo memoria
+export DATABASE_URL="postgres://..."   # opcional; sin esto usa memoria
+export ANTHROPIC_API_KEY="sk-ant-..."
 node server.js
+# abre http://localhost:3000
 ```
-
-Abre http://localhost:3000
-
-Sin `DATABASE_URL`, los deals se guardan en memoria (se pierden al reiniciar). Útil solo para desarrollo.
-
----
-
-## 🧭 Flujo de la app
-
-1. **Construcción** — contrato previo + vínculo (Fase 1 Sandler).
-2. **Calificación rápida** — 5 preguntas que detectan segmento.
-3. **Segmento detectado** — auto-clasifica en A/B/C y si ya tiene ATS.
-4. **Dolor** — preguntas específicas por segmento (la guía cambia para Micro, PyME y Grande con ATS).
-5. **Presupuesto / Decisión** — los tres fundamentales que no pueden faltar.
-6. **Pedidos del cliente** — lista de cosas que el cliente dijo que necesitaría, marcando si las tenemos o no.
-7. **Cierre** — post-venta + próximo paso concreto.
-8. **Resultado** — % cumplimiento + qué mostrar + qué faltó + gaps que alimentan el wishlist.
-
-Después de guardar, **`/wishlist`** muestra el ranking por segmento de las cosas más pedidas que aún no tenemos. Eso es input directo para roadmap.
 
 ---
 
@@ -86,28 +76,21 @@ Después de guardar, **`/wishlist`** muestra el ranking por segmento de las cosa
 
 ```
 peaku-sandler/
-├── server.js           # Express + Postgres
+├── server.js           # Express + Postgres + Anthropic
 ├── package.json
-├── railway.json        # Config Railway
+├── render.yaml         # Config Render
 ├── Procfile
-├── .env.example
 └── public/
-    ├── index.html      # Shell
+    ├── index.html
     ├── style.css
-    └── app.js          # SPA: wizard + dashboards
+    ├── app.js          # SPA con wizard + dashboards
+    └── img/peaku-logo.png
 ```
 
 ---
 
-## 🛠 Customizar
+## 🔒 Notas de seguridad
 
-- **Cambiar los módulos de Peaku** que se sugieren en cada segmento: edita `PEAKU_FEATURES`, `SHOW_BY_SEGMENT` y `DONT_SHOW_BY_SEGMENT` en `public/app.js` (al inicio).
-- **Pesos del scoring**: edita la función `scoreDeal` en `server.js` y `localScore` en `public/app.js` (mantén ambas sincronizadas).
-- **Preguntas por segmento**: están en la función `stepDiscovery` en `public/app.js`.
-
----
-
-## ⚠️ Notas
-
-- **Sin autenticación**: cualquiera con el link puede ver/crear deals. Si lo expones públicamente, ponle una contraseña básica con Railway's `BASIC_AUTH` o pásalo por un Cloudflare Access.
-- El borrador del deal en curso se guarda en `localStorage` del navegador — si el comercial cierra la pestaña, recupera el progreso al abrir de nuevo.
+- **Sin auth**: cualquiera con el link puede ver/crear deals. Si vas a compartir públicamente, ponle Cloudflare Access o Basic Auth.
+- El transcript se guarda en la DB (JSONB). Considera esto si contiene información sensible.
+- La API key de Anthropic vive solo en las variables de Render — nunca en el repo.
