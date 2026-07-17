@@ -347,6 +347,12 @@ function buildAnalyzePrompt(transcript, ctx) {
     Headhunting: 'Peaku ofrece búsqueda y selección (search a la medida). Peaku busca y trae el talento por encargo — el cliente no usa la plataforma directamente.',
     EOR: 'Peaku ofrece Employer of Record: el cliente ya identificó al candidato y Peaku lo contrata legalmente a su nombre en el país que aplique.',
   }[linea] || '';
+  const saasFocus = linea === 'SaaS' ? ({
+    sourcing: 'El cliente entró por interés en SOURCING (adquisición automatizada de candidatos). Enfoca análisis y acciones en cómo Peaku alimenta el embudo.',
+    pruebas: 'El cliente entró por interés en PRUEBAS/ASSESSMENTS (filtrar candidatos que él ya tiene). Enfoca análisis y acciones en el motor de tests y en cuánto tiempo ahorra vs. su proceso actual de screening.',
+    ia: 'El cliente entró por interés en IA DE RANKING/SCORING (ordenar candidatos automáticamente). Enfoca análisis en cómo Peaku reduce el tiempo de screening manual.',
+    combinado: 'El cliente tiene interés combinado o aún no está claro qué le importa más. Al analizar, identifica qué ángulo (sourcing / pruebas / IA) resuena más en el transcript y recomiéndalo.'
+  })[ctx.saasInteres] || 'Interés SaaS sin especificar — deduce del transcript.' : '';
 
   const canalMap = {
     freelancer: 'Freelancer/SDR externo', sdr_interno: 'SDR interno de Peaku',
@@ -359,7 +365,7 @@ function buildAnalyzePrompt(transcript, ctx) {
 CONTEXTO DEL DEAL:
 - Empresa cliente: ${ctx.company || 'no especificada'}
 - Ejecutivo comercial de Peaku: ${ctx.executive || 'no especificado'}
-- Línea de negocio: ${linea}. ${lineaContexto}
+- Línea de negocio: ${linea}. ${lineaContexto}${saasFocus ? '\n- Interés SaaS específico: ' + saasFocus : ''}
 - Canal de adquisición: ${canalMap[ctx.canalAdquisicion] || 'no especificado'}${ctx.freelancerNombre ? ' (' + ctx.freelancerNombre + ')' : ''}
 - Ficha previa del canal:
   · Cargos/necesidad: ${ctx.fichaCargos || 'sin datos'}
@@ -446,7 +452,6 @@ app.post('/api/analyze', async (req, res) => {
     const text = (msg.content && msg.content[0] && msg.content[0].text) || '';
     // Extraer JSON del texto (Claude puede envolverlo en ```json ... ``` a veces)
     let jsonText = text.trim();
-    const fenced = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (fenced) jsonText = fenced[1].trim();
     let parsed;
     try { parsed = JSON.parse(jsonText); }
@@ -454,7 +459,6 @@ app.post('/api/analyze', async (req, res) => {
       console.error('[llm] JSON parse fallido:', e.message, '\ntexto:', text.slice(0, 500));
       return res.status(502).json({ error: 'Claude devolvió JSON inválido', raw: text.slice(0, 2000) });
     }
-    // Anotar uso para monitoreo
     parsed._usage = msg.usage;
     res.json(parsed);
   } catch (e) {
@@ -471,6 +475,7 @@ app.get('*', (_req, res) => {
 initSchema()
   .catch(e => {
     dbLastError = e.message;
+    console.error('[db] schema error:', e.message);
     console.error('[db] DATABASE_URL host:', (process.env.DATABASE_URL || '').replace(/:\/\/[^@]*@/, '://***:***@').split('/')[2]);
   })
   .finally(() => {

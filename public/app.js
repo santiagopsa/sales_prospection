@@ -38,6 +38,7 @@ function newDraft() {
     executive: '',              // ejecutivo comercial de Peaku
     company: '',                // empresa cliente
     lineaNegocio: '',           // SaaS / Headhunting / EOR
+    saasInteres: '',            // solo si SaaS: 'sourcing' | 'pruebas' | 'ia' | 'combinado'
     canalAdquisicion: '',       // Freelancer(SDR) / Inbound (correo/web) / Referido / Evento / Outbound interno / Otro
     freelancerNombre: '',       // si viene de freelancer/SDR, nombre de quien lo trajo
     // --- Vista 1: Prospección (data que debe traer quien adquirió, VARÍA por canal) ---
@@ -108,22 +109,27 @@ const STEPS = [
     rule: 'La info varía según el canal: freelancer/SDR trae ficha completa; inbound solo trae lo que escribió el cliente. Sin ficha por canal, el demo empieza a ciegas.',
   },
   {
-    key: 'transcript', label: '2 · Transcript del demo',
+    key: 'recordatorio', label: '2 · Guion del demo',
+    goal: 'Antes de entrar al demo: recordatorio de qué preguntar según Sandler, qué mostrar según la línea, y qué NO hacer. Avisa que después del demo se pedirá el transcript.',
+    rule: 'Léelo 2 min antes del demo. Grabar y activar transcripción de Google Meet ES OBLIGATORIO — sin transcript, la app no puede analizar.',
+  },
+  {
+    key: 'transcript', label: '3 · Transcript del demo',
     goal: 'Pegar el transcript del demo (Google Meet, Otter, Fireflies). Este es el input principal — la IA extrae de aquí dolor, presupuesto, decisión, fecha, pedidos y momentos críticos.',
     rule: 'Grabar TODO el demo. Sin transcript no hay análisis. La verdad la dice el cliente, no la interpretación del comercial.',
   },
   {
-    key: 'analisis', label: '3 · Análisis IA',
+    key: 'analisis', label: '4 · Análisis IA',
     goal: 'Claude lee el transcript y extrae toda la información estructurada + genera acciones concretas + detecta momentos críticos donde se dejó ir el dolor o se dio precio sin ancla.',
     rule: 'El análisis tarda 20-40 segundos. No cierres la pestaña.',
   },
   {
-    key: 'review', label: '4 · Revisar y ajustar',
+    key: 'review', label: '5 · Revisar y ajustar',
     goal: 'Ver todo lo que la IA extrajo, con la cita textual del transcript al lado. Ajustar lo que esté mal antes de guardar.',
     rule: 'La IA puede equivocarse — el comercial es responsable de validar. Especialmente el segmento, la calificación Sandler y la fecha límite.',
   },
   {
-    key: 'result', label: '5 · Resultado + Acciones',
+    key: 'result', label: '6 · Resultado + Acciones',
     goal: 'Ver calificación Sandler final, qué mostrar, qué faltó, y la lista priorizada de acciones concretas que el comercial debe ejecutar esta semana.',
     rule: 'Solo se cotiza si Calificación = Completa. Las acciones concretas deben aterrizar en tareas del CRM el mismo día.',
   },
@@ -258,9 +264,10 @@ function flashSaved(btn) {
 // ---------- Steps ----------
 function renderWizard() {
   const s = STEPS[stepIdx].key;
-  if (s === 'inicio')     return stepInicio();
-  if (s === 'prosp')      return stepProsp();
-  if (s === 'transcript') return stepTranscript();
+  if (s === 'inicio')       return stepInicio();
+  if (s === 'prosp')        return stepProsp();
+  if (s === 'recordatorio') return stepRecordatorio();
+  if (s === 'transcript')   return stepTranscript();
   if (s === 'analisis')   return stepAnalisis();
   if (s === 'review')     return stepReview();
   if (s === 'result')     return stepResult();
@@ -395,6 +402,18 @@ function stepInicio() {
           </div>
         `).join('')}
       </div>
+
+      ${state.lineaNegocio === 'SaaS' ? `
+        <label style="margin-top:14px;">Interés específico en SaaS ${tip('El cliente puede querer distintos ángulos de la plataforma. La propuesta debe encajar con lo que él realmente busca.\n\n• Sourcing: adquisición automatizada de candidatos (alimentar el embudo).\n• Pruebas: assessments/tests para filtrar candidatos que ellos ya tienen.\n• IA de ranking: motor de scoring que ordena candidatos automáticamente.\n• Combinado: quiere varios / no está claro aún.')}</label>
+        <div class="chips">
+          ${[
+            {k:'sourcing', l:'Sourcing (traer candidatos)'},
+            {k:'pruebas', l:'Pruebas / assessments'},
+            {k:'ia', l:'IA de ranking / scoring'},
+            {k:'combinado', l:'Combinado / por definir'}
+          ].map(o => `<div class="chip ${state.saasInteres === o.k ? 'selected' : ''}" data-pick-saas="${o.k}">${o.l}</div>`).join('')}
+        </div>
+      ` : ''}
     </div>
 
     <div class="card">
@@ -427,6 +446,11 @@ function stepInicio() {
   bindForm();
   el.querySelectorAll('[data-pick-linea]').forEach(c => c.addEventListener('click', () => {
     state.lineaNegocio = c.getAttribute('data-pick-linea');
+    if (state.lineaNegocio !== 'SaaS') state.saasInteres = '';
+    saveDraft(); renderWizard();
+  }));
+  el.querySelectorAll('[data-pick-saas]').forEach(c => c.addEventListener('click', () => {
+    state.saasInteres = c.getAttribute('data-pick-saas');
     saveDraft(); renderWizard();
   }));
   el.querySelectorAll('[data-pick-canal]').forEach(c => c.addEventListener('click', () => {
@@ -520,11 +544,104 @@ function stepIntro() {
   bindForm();
 }
 
-// ---------- 2 · Transcript del demo ----------
+// ---------- 2 · Guion del demo (recordatorio pre-demo) ----------
+function stepRecordatorio() {
+  const l = state.lineaNegocio || 'SaaS';
+  const focoSaaS = {
+    sourcing: 'Enfoca el demo en cómo Peaku les llena el embudo automáticamente. Muestra 1-2 campañas en vivo. Aterriza en horas ahorradas.',
+    pruebas: 'Enfoca el demo en el motor de pruebas / assessments. Muestra cómo filtra candidatos que ellos ya tienen. Aterriza en tiempo de screening ahorrado.',
+    ia: 'Enfoca el demo en el ranking automático (scoring IA). Muestra cómo ordena candidatos automáticamente. Aterriza en horas eliminadas de screening manual.',
+    combinado: 'Cliente aún no tiene claro qué quiere — usa los primeros minutos para forzar la elección. No muestres todo, muestra 1 ángulo profundo del que confesó dolor.',
+  }[state.saasInteres] || '';
+
+  // Recordatorios por línea
+  const showRules = {
+    SaaS: [
+      'Mostrar SOURCING automático solo si su dolor es traer candidatos.',
+      'Mostrar IA de ranking solo si gastan horas en screening.',
+      'Mostrar PRUEBAS/assessments solo si el dolor es filtrar candidatos que ya tienen.',
+      'Nunca muestres los 3 en el mismo demo — abrumas y no ancla el precio.',
+    ],
+    Headhunting: [
+      'Foco en el PROCESO de búsqueda: base de datos + red de investigadores + criterio de filtro.',
+      'Preguntar qué han intentado antes con otras firmas — el dolor real está ahí.',
+      'Aterrizar en fee % y timeline (garantizado en 4-6 semanas).',
+    ],
+    EOR: [
+      'NO buscamos talento — el cliente ya lo tiene. Muestra proceso de contratación legal + payroll.',
+      'Foco en países cubiertos, fees por país, tiempos de setup.',
+      'Aterrizar en el candidato específico: "¿podemos hacerte un cálculo para Juan (Argentina) ya?"',
+    ],
+  }[l] || [];
+
+  h(`
+    ${stepHeader()}
+    <h1>Guion del demo — repásalo 2 minutos antes de entrar</h1>
+    ${viewIntro(stepIdx)}
+
+    <div class="card" style="border-left:6px solid var(--peaku-blue);background:#f0fbff;">
+      <h2 style="margin-top:0;">🎥 CRÍTICO antes de arrancar</h2>
+      <ul style="padding-left:22px;line-height:2;font-size:14px;">
+        <li><strong>Activa "Transcribir reunión"</strong> en Google Meet (menú de 3 puntos). Sin transcript, la app NO puede analizar el demo.</li>
+        <li>Empieza el demo con el <strong>contrato previo</strong>: "Tenemos ${l === 'EOR' ? '20' : '30'} min. Entiendo su situación, al final decidimos juntos si tiene sentido cotizar. Está bien que digan que no."</li>
+        <li>Regla de oro: <strong>escucha 70%, habla 30%</strong>. No muestres pantalla en los primeros 10 min.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>❓ El embudo del dolor — DEBES hacer estas 3 preguntas</h2>
+      <p class="muted" style="font-size:13px;">Cuando el cliente mencione un problema, párate ahí. <strong>Mínimo 2 de 3</strong> antes de continuar. Sin esto, el precio no ancla.</p>
+      <ol style="padding-left:22px;line-height:2;">
+        <li><strong>Cuantificar:</strong> "¿Cuánto les cuesta al mes tener [ese problema]?" — busca $ o horas concretas.</li>
+        <li><strong>Historia:</strong> "¿Qué han intentado para resolverlo y por qué no funcionó?"</li>
+        <li><strong>Impacto:</strong> "¿Qué pasa con el cliente final / con el equipo cuando eso no se resuelve?"</li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h2>💰 Presupuesto + Decisión + Fecha (contrato Nº 2)</h2>
+      <ul style="padding-left:22px;line-height:2;font-size:14px;">
+        <li><strong>Presupuesto:</strong> "¿tienen un presupuesto asignado para esto? ¿comparado contra qué alternativa?"</li>
+        <li><strong>Decisión:</strong> "¿quiénes participan en la decisión? ¿pasa por compras? ¿quién firma?"</li>
+        <li><strong>Fecha límite (LA MÁS IMPORTANTE):</strong> "¿para cuándo necesitan esto resuelto?" — sin fecha, no hay cotización. Máximo 14 días.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>📽 Qué mostrar en este demo — Línea: <strong>${esc(l)}</strong>${state.saasInteres ? ` · foco: <strong>${esc(state.saasInteres)}</strong>` : ''}</h2>
+      ${focoSaaS ? `<div class="hint"><strong>Foco SaaS:</strong> ${esc(focoSaaS)}</div>` : ''}
+      <ul style="padding-left:22px;line-height:1.9;font-size:14px;">
+        ${showRules.map(r => `<li>${esc(r)}</li>`).join('')}
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>🚫 Lo que NO debes hacer</h2>
+      <ul style="padding-left:22px;line-height:1.9;font-size:14px;">
+        <li><strong>NO des precio antes del minuto 30.</strong> Si te lo piden: "Déjame entender primero el tamaño del problema para proponerte la modalidad correcta. Llegamos a cifras al final."</li>
+        <li><strong>NO dejes que el cliente dicte los próximos pasos.</strong> Tú propones fecha y formato de la siguiente reunión.</li>
+        <li><strong>NO te despidas con "le envío la propuesta para que la revise".</strong> Cierra la siguiente reunión antes de colgar.</li>
+        <li><strong>NO cotices si el deal no calificó completo</strong> (dolor + presupuesto + decisión + fecha). Va a nutrición.</li>
+      </ul>
+    </div>
+
+    <div class="card" style="border-left:6px solid var(--peaku-green);background:#e8f6f0;">
+      <h2 style="margin-top:0;color:var(--peaku-green-dark);">🚀 Ofrece PILOTO como próximo paso</h2>
+      <p style="font-size:14px;">Si el deal califica completo, propón un piloto real esta semana: "Antes de que evalúen una propuesta en frío, publiquemos [el cargo del dolor] esta semana. El [día pactado] revisamos juntos resultados + cotización completa." La cotización va de anexo del piloto, nunca al revés.</p>
+    </div>
+
+    <div class="card" style="border-left:6px solid var(--peaku-blue);">
+      <h2 style="margin-top:0;">Siguiente paso: después del demo</h2>
+      <p style="font-size:14px;margin:0;">Cuando termine la reunión, abre el transcript de Google Meet (Drive → carpeta "Meet Recordings" o el correo que te llegó) y <strong>pégalo en el siguiente paso</strong>. La IA extrae dolor, presupuesto, decisión, momentos críticos y te da la lista de acciones concretas.</p>
+    </div>
+
+    ${navButtons({ nextLabel: 'Ya hice el demo · pegar transcript →' })}
+  `);
+  bindForm();
+}
+
+// ---------- 3 · Transcript del demo ----------
 function stepTranscript() {
-  const chars = (state.transcript || '').length;
-  const words = (state.transcript || '').trim().split(/\s+/).filter(Boolean).length;
-  const enough = chars >= 500;
   h(`
     ${stepHeader()}
     <h1>Transcript del demo</h1>
@@ -542,24 +659,46 @@ function stepTranscript() {
 
     <div class="card">
       <label>Transcript completo del demo ${tip('Pega el transcript literal, con nombres de speaker si aparecen. Cuanto más completo, mejor la extracción.\n\nTamaño típico: 5.000-25.000 palabras para un demo de 30-45 min.')}</label>
-      <textarea data-field="transcript" style="min-height:340px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;" placeholder="Pega aquí el transcript completo del demo...&#10;&#10;Ejemplo del formato de Google Meet:&#10;&#10;Santiago (Peaku)  10:04&#10;Hola María, gracias por la disponibilidad. ¿Podemos usar los primeros 5 minutos para entender su proceso?&#10;&#10;María (Cliente)  10:04&#10;Sí claro, adelante...">${esc(state.transcript || '')}</textarea>
-      <div style="margin-top:8px;font-size:12px;color:var(--muted);">
-        ${chars.toLocaleString()} caracteres · ${words.toLocaleString()} palabras ·
-        ${enough ? '<span class="pill good">Suficiente para analizar</span>' : '<span class="pill warn">Muy corto (mín 500 chars) — sigue pegando</span>'}
-      </div>
+      <textarea id="ts-input" data-field="transcript" style="min-height:340px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;" placeholder="Pega aquí el transcript completo del demo...&#10;&#10;Ejemplo del formato de Google Meet:&#10;&#10;Santiago (Peaku)  10:04&#10;Hola María, gracias por la disponibilidad. ¿Podemos usar los primeros 5 minutos para entender su proceso?&#10;&#10;María (Cliente)  10:04&#10;Sí claro, adelante...">${esc(state.transcript || '')}</textarea>
+      <div id="ts-counter" style="margin-top:8px;font-size:12px;color:var(--muted);"></div>
     </div>
 
     <div class="btn-row">
       <button class="btn ghost" data-act="prev">← Atrás</button>
       <div style="display:flex;gap:10px;">
         <button class="btn secondary" data-act="save">Guardar borrador</button>
-        <button class="btn ${!enough ? 'ghost' : ''}" data-act="analyze" ${!enough ? 'disabled style="opacity:.5;cursor:not-allowed;"' : ''}>🤖 Analizar con IA →</button>
+        <button class="btn" id="btn-analyze">🤖 Analizar con IA →</button>
       </div>
     </div>
   `);
   bindForm();
-  const btn = el.querySelector('[data-act="analyze"]');
-  if (btn && enough) btn.addEventListener('click', () => { stepIdx++; saveDraft(); renderWizard(); });
+
+  const input = el.querySelector('#ts-input');
+  const counter = el.querySelector('#ts-counter');
+  const btn = el.querySelector('#btn-analyze');
+
+  function refresh() {
+    const t = input.value || '';
+    const chars = t.length;
+    const words = t.trim().split(/\s+/).filter(Boolean).length;
+    const enough = chars >= 500;
+    counter.innerHTML = `${chars.toLocaleString()} caracteres · ${words.toLocaleString()} palabras · ${
+      enough ? '<span class="pill good">Suficiente para analizar</span>' : '<span class="pill warn">Muy corto (mín 500 chars) — sigue pegando</span>'
+    }`;
+    btn.disabled = !enough;
+    btn.style.opacity = enough ? '1' : '.5';
+    btn.style.cursor = enough ? 'pointer' : 'not-allowed';
+  }
+  input.addEventListener('input', refresh);
+  input.addEventListener('paste', () => setTimeout(refresh, 0));
+  refresh();
+
+  btn.addEventListener('click', () => {
+    if (btn.disabled) return;
+    // Aseguramos que el último valor esté en el state antes de avanzar
+    state.transcript = input.value;
+    stepIdx++; saveDraft(); renderWizard();
+  });
 }
 
 // ---------- 3 · Análisis IA ----------
@@ -607,6 +746,7 @@ async function stepAnalisis() {
         transcript: state.transcript,
         context: {
           company: state.company, executive: state.executive, lineaNegocio: state.lineaNegocio,
+          saasInteres: state.saasInteres,
           canalAdquisicion: state.canalAdquisicion, freelancerNombre: state.freelancerNombre,
           fichaCargos: state.fichaCargos, fichaCosto: state.fichaCosto,
           fichaHerramientas: state.fichaHerramientas, fichaAdicional: state.fichaAdicional,
@@ -1495,8 +1635,7 @@ async function renderDealDetail(id) {
         <ul class="list-clean">
           ${ideal.map(p => `<li><span>${esc(p.text)}</span>${p.weHave ? '<span class="pill good">Lo tenemos</span>' : '<span class="pill warn">Construir</span>'}</li>`).join('')}
         </ul>
-      ` : `<p class="muted">No se registraron pedidos del cliente.</p>`}
-    </div>
+      ` : `<p class="muted">No se registraron pedidos del cliente.</p>`}    </div>
 
     <div class="card">
       <h2>Fase 3 · Cierre + Piloto</h2>
