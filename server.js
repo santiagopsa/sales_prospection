@@ -452,6 +452,7 @@ app.post('/api/analyze', async (req, res) => {
     const text = (msg.content && msg.content[0] && msg.content[0].text) || '';
     // Extraer JSON del texto (Claude puede envolverlo en ```json ... ``` a veces)
     let jsonText = text.trim();
+    const fenced = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (fenced) jsonText = fenced[1].trim();
     let parsed;
     try { parsed = JSON.parse(jsonText); }
