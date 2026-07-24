@@ -1225,11 +1225,13 @@ function localScore(d) {
     procesoDecision: has(d.procesoDecision),
     fechaLimiteDecision: has(d.fechaLimiteDecision),
   };
+  // "integraciones" solo aplica a clientes grandes (C) o con ATS; si no, no cuenta como faltante.
+  const integracionesRelevante = d.segment === 'C' || !!d.hasAts;
   const nth = {
     vinculo: has(d.vinculo),
     consecuenciasEmocionales: has(d.consecuenciasEmocionales),
     medicion: has(d.medicion),
-    integraciones: has(d.integraciones),
+    ...(integracionesRelevante ? { integraciones: has(d.integraciones) } : {}),
     postVenta: has(d.postVenta),
     proximoPaso: has(d.proximoPaso),
     piloto: has(d.pilotoCargo) && has(d.pilotoFechaRevision),
@@ -1273,7 +1275,7 @@ const OBJ_LABEL = {
   ninguna_clara: 'Sin señales claras de indecisión',
 };
 function iaReportHtml(ia) {
-  if (!ia || (!ia.resumen_ejecutivo && !(ia.acciones_concretas||[]).length && !ia.objecion_subyacente && !(ia.momentos_criticos||[]).length && !(ia.preguntas_faltantes||[]).length)) {
+  if (!ia || (!ia.resumen_ejecutivo && !(ia.acciones_concretas||[]).length && !ia.objecion_subyacente && !(ia.que_mostrar||[]).length && !(ia.momentos_criticos||[]).length && !(ia.preguntas_faltantes||[]).length)) {
     return '';
   }
   const obj = ia.objecion_subyacente || null;
@@ -1315,6 +1317,21 @@ function iaReportHtml(ia) {
         </ol>
       </div>` : ''}
 
+    ${(ia.que_mostrar && ia.que_mostrar.length) ? `
+      <div class="card" style="border-left:6px solid var(--peaku-green);">
+        <h2 style="margin-top:0;">🖥️ Qué mostrar en la demo/propuesta (según lo que pidió)</h2>
+        <p class="muted" style="font-size:13px;">Basado en el interés real del cliente en el transcript, no en reglas de segmento.</p>
+        <ul class="list-clean">
+          ${ia.que_mostrar.map(m => {
+            const show = m.mostrar !== false;
+            return `<li>
+              <span>${show ? '✓' : '✕'} ${esc(m.item || '')}${m.por_que ? `<div class="muted" style="font-size:12px;margin-top:2px;">${esc(m.por_que)}</div>` : ''}</span>
+              <span class="pill ${show ? 'good' : 'bad'}">${show ? 'Mostrar' : 'NO mostrar'}</span>
+            </li>`;
+          }).join('')}
+        </ul>
+      </div>` : ''}
+
     ${(ia.momentos_criticos && ia.momentos_criticos.length) ? `
       <div class="card" style="border-left:6px solid var(--warn);">
         <h2 style="margin-top:0;">⚠ Momentos críticos del demo</h2>
@@ -1330,9 +1347,13 @@ function iaReportHtml(ia) {
     ${(ia.preguntas_faltantes && ia.preguntas_faltantes.length) ? `
       <div class="card">
         <h2 style="margin-top:0;">❓ Preguntas que faltó hacer (Sandler)</h2>
-        <p class="muted" style="font-size:13px;">Cierra estos huecos con un WhatsApp o llamada corta.</p>
+        <p class="muted" style="font-size:13px;">Solo lo que de verdad no se tocó y es relevante a este dolor. Cierra el hueco con un WhatsApp o llamada corta.</p>
         <ul class="list-clean">
-          ${ia.preguntas_faltantes.map(p => `<li><span>${esc(p)}</span><span class="pill warn">Falta preguntar</span></li>`).join('')}
+          ${ia.preguntas_faltantes.map(p => {
+            const q = typeof p === 'string' ? p : (p.pregunta || '');
+            const why = typeof p === 'object' && p.por_que ? p.por_que : '';
+            return `<li><span>${esc(q)}${why ? `<div class="muted" style="font-size:12px;margin-top:2px;">${esc(why)}</div>` : ''}</span><span class="pill warn">Falta preguntar</span></li>`;
+          }).join('')}
         </ul>
       </div>` : ''}
   `;
@@ -1399,8 +1420,10 @@ function stepResult() {
 
     ${iaReportHtml(ia)}
 
+    ${(ia.que_mostrar && ia.que_mostrar.length) ? '' : `
     <div class="card">
-      <h2>Qué mostrar de la plataforma</h2>
+      <h2>Qué mostrar de la plataforma <span class="pill warn" style="margin-left:6px;">genérico por segmento</span></h2>
+      <p class="muted" style="font-size:13px;">Referencia por segmento (la IA no generó una recomendación específica para este caso).</p>
       <ul class="list-clean">
         ${show.map(k => {
           const f = PEAKU_FEATURES.find(x => x.key === k);
@@ -1412,7 +1435,7 @@ function stepResult() {
         }).join('')}
       </ul>
       ${seg === 'C' ? `<div class="hint" style="margin-top:10px;"><strong>Recordatorio Segmento C:</strong> nunca ataques el ATS de frente. Posiciónate como capa de sourcing + IA. ATS detectado: <strong>${esc(state.atsName || '—')}</strong>.</div>` : ''}
-    </div>
+    </div>`}
 
     <div class="card">
       <h2>2 · Qué faltó del proceso Sandler</h2>

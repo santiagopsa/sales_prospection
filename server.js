@@ -136,11 +136,13 @@ function scoreDeal(d) {
     fechaLimiteDecision: has(d.fechaLimiteDecision),
   };
   // Nice to have: vínculo, consecuencias emocionales, cotización piloto, post-venta, etc.
+  // "integraciones" solo es relevante si el cliente es grande (C) o ya tiene ATS.
+  const integracionesRelevante = d.segment === 'C' || !!d.hasAts;
   const niceToHave = {
     vinculo: has(d.vinculo),
     consecuenciasEmocionales: has(d.consecuenciasEmocionales),
     medicion: has(d.medicion),
-    integraciones: has(d.integraciones),
+    ...(integracionesRelevante ? { integraciones: has(d.integraciones) } : {}),
     postVenta: has(d.postVenta),
     proximoPaso: has(d.proximoPaso),
     piloto: has(d.pilotoCargo) && has(d.pilotoFechaRevision), // NEW
@@ -420,8 +422,9 @@ TAREA:
 1. Extrae la información estructurada (campos del JSON), con citas textuales.
 2. Diagnostica la objeción/indecisión SUBYACENTE (objecion_subyacente) usando SOLO señales del transcript. Cita la frase que la delata.
 3. Genera acciones_concretas: 3-7 pasos ESPECÍFICOS a esta conversación (nombre real, fecha, canal). Cada acción atada a: la palanca JOLT que ataca (J/O/L/T) y la cita o señal del transcript que la motiva. Prioriza por impacto en DESBLOQUEAR la indecisión detectada, NO por el orden del proceso.
-4. preguntas_faltantes: SOLO preguntas que de verdad no se hicieron (aplica la regla de oro). Si el ejecutivo cubrió casi todo, deja el array corto o vacío — es mejor vacío que inventado.
-5. momentos_criticos: hasta 3, cada uno con cita textual real.
+4. que_mostrar: qué mostrar (y qué NO mostrar) de Peaku en la demo/propuesta de seguimiento, SEGÚN LO QUE ESTE CLIENTE REALMENTE QUIERE Y LE DUELE en el transcript — NO por reglas de segmento. Ejemplo: si el cliente pidió PRUEBAS/ASSESSMENTS para filtrar candidatos que ya tiene, marca "Motor de pruebas" como mostrar:true, y "Sourcing masivo" como mostrar:false (porque no es lo que pidió). Cada ítem debe citar la señal del transcript. Sé concreto y aterrizado a este caso.
+5. preguntas_faltantes: aplica la REGLA DE ORO en dos pasos. PASO A (mental, no lo imprimas): recorre el transcript y lista qué temas/preguntas SÍ cubrió el ejecutivo (dolor, cuantificación, presupuesto, decisor, proceso, fecha límite, etc.), reconociendo variantes y formas indirectas. PASO B: incluye SOLO lo que de verdad NO se tocó Y es relevante al dolor de este cliente, cada una con "por_que" (por qué importa para ESTE deal). Si el ejecutivo cubrió lo esencial, devuelve array vacío — mejor vacío que inventado. NUNCA incluyas una pregunta cuyo tema ya apareció en el transcript.
+6. momentos_criticos: hasta 3, cada uno con cita textual real.
 
 RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL. Formato exacto:
 
@@ -458,8 +461,11 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL. Formato exacto:
   "acciones_concretas": [
     {"prioridad": "alta | media | baja", "jolt": "J | O | L | T", "accion": "descripción específica con nombre/fecha/canal", "porque": "cita o señal del transcript que motiva esta acción", "cuando": "hoy | mañana | esta semana"}
   ],
+  "que_mostrar": [
+    {"item": "módulo o ángulo concreto de Peaku", "mostrar": true, "por_que": "cita/señal del transcript de por qué a ESTE cliente le sirve (o por qué NO)"}
+  ],
   "preguntas_faltantes": [
-    "pregunta específica que de verdad NO se hizo (vacío si el ejecutivo ya cubrió lo esencial)"
+    {"pregunta": "pregunta específica que de verdad NO se hizo y es relevante", "por_que": "por qué importa para ESTE deal"}
   ],
   "momentos_criticos": [
     {"cita": "cita textual del cliente/ejecutivo", "que_paso": "qué error se cometió", "que_debio_hacer": "cómo debió corregirse (idealmente en clave JOLT)"}
