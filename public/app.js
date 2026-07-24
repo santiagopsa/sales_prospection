@@ -249,7 +249,7 @@ function bindForm() {
       if (seg) state.segment = seg.getAttribute('data-pick-segment');
       stepIdx++; saveDraft(); renderWizard();
     }
-    else if (a === 'finish') { submitDeal(); }
+    else if (a === 'finish') { submitDeal(b); }
     else if (a === 'new') { clearDraft(); renderWizard(); }
   }));
   el.querySelectorAll('[data-pick-segment]').forEach(c => c.addEventListener('click', () => {
@@ -1261,6 +1261,83 @@ function localScore(d) {
   };
 }
 
+// ---------- Reporte IA reutilizable (resultado + historial) ----------
+const JOLT_LABEL = {
+  J: 'Juzgar indecisión', O: 'Recomendar ruta', L: 'Limitar opciones', T: 'Quitar el riesgo',
+};
+const OBJ_LABEL = {
+  valoracion: 'No ve el valor / ROI vs. statu quo',
+  falta_informacion: 'Falta de información para decidir',
+  miedo_resultado: 'Miedo a que no funcione',
+  miedo_interno_statuquo: 'Miedo a llevar la propuesta al tomador de decisión',
+  ninguna_clara: 'Sin señales claras de indecisión',
+};
+function iaReportHtml(ia) {
+  if (!ia || (!ia.resumen_ejecutivo && !(ia.acciones_concretas||[]).length && !ia.objecion_subyacente && !(ia.momentos_criticos||[]).length && !(ia.preguntas_faltantes||[]).length)) {
+    return '';
+  }
+  const obj = ia.objecion_subyacente || null;
+  const objTipo = obj && obj.tipo ? obj.tipo : '';
+  const objColor = objTipo === 'ninguna_clara' ? 'var(--peaku-green)' : 'var(--bad)';
+  return `
+    ${ia.resumen_ejecutivo ? `
+      <div class="card" style="border-left:6px solid var(--peaku-blue-dark);">
+        <h2 style="margin-top:0;">🧠 Resumen ejecutivo (IA)</h2>
+        <p style="margin:6px 0 0;">${esc(ia.resumen_ejecutivo)}</p>
+      </div>` : ''}
+
+    ${obj && objTipo ? `
+      <div class="card" style="border-left:6px solid ${objColor};background:${objTipo==='ninguna_clara'?'#e8f6f0':'#fdecec'};">
+        <h2 style="margin-top:0;">🔎 Objeción / indecisión subyacente</h2>
+        <div style="font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:${objColor};margin-bottom:6px;">${esc(OBJ_LABEL[objTipo] || objTipo)}</div>
+        ${obj.descripcion ? `<p style="margin:0 0 8px;">${esc(obj.descripcion)}</p>` : ''}
+        ${obj.evidencia ? `<div style="font-style:italic;color:var(--peaku-gray);font-size:13px;border-left:3px solid ${objColor};padding-left:10px;">"${esc(obj.evidencia)}"</div>` : ''}
+      </div>` : ''}
+
+    ${(ia.acciones_concretas && ia.acciones_concretas.length) ? `
+      <div class="card" style="border-left:6px solid var(--peaku-blue);">
+        <h2 style="margin-top:0;">🎯 Acciones concretas (priorizadas por JOLT)</h2>
+        <p class="muted" style="font-size:13px;">Cada acción ataca una palanca JOLT para desbloquear la indecisión. Aterrízalas hoy en tu CRM (Brevo).</p>
+        <ol style="padding-left:22px;line-height:1.8;">
+          ${ia.acciones_concretas.map(a => {
+            const pri = (a.prioridad || '').toLowerCase();
+            const priColor = pri === 'alta' ? 'var(--bad)' : pri === 'media' ? 'var(--warn)' : 'var(--peaku-green)';
+            const jolt = (a.jolt || '').toUpperCase();
+            const joltLbl = JOLT_LABEL[jolt];
+            return `<li style="margin-bottom:10px;">
+              <span class="pill" style="color:#fff;background:${priColor};border-color:${priColor};margin-right:6px;">${esc(a.prioridad || 'media')}</span>
+              ${joltLbl ? `<span class="pill" style="background:#e6f8ff;border-color:var(--peaku-blue);color:var(--peaku-blue-dark);margin-right:6px;">${jolt} · ${esc(joltLbl)}</span>` : ''}
+              <strong>${esc(a.accion || '')}</strong>
+              ${a.cuando ? `<span class="muted" style="margin-left:6px;font-size:12px;">· ${esc(a.cuando)}</span>` : ''}
+              ${a.porque ? `<div class="muted" style="font-size:12px;margin-top:2px;">Por qué: ${esc(a.porque)}</div>` : ''}
+            </li>`;
+          }).join('')}
+        </ol>
+      </div>` : ''}
+
+    ${(ia.momentos_criticos && ia.momentos_criticos.length) ? `
+      <div class="card" style="border-left:6px solid var(--warn);">
+        <h2 style="margin-top:0;">⚠ Momentos críticos del demo</h2>
+        <p class="muted" style="font-size:13px;">Dónde se dejó ir un dolor, se dio precio antes de tiempo, o el cliente dictó los pasos. Aprendizaje para el próximo demo.</p>
+        ${ia.momentos_criticos.map(m => `
+          <div style="border-left:3px solid var(--warn);padding:10px 14px;background:#fef3e2;margin:10px 0;border-radius:4px;">
+            <div style="font-style:italic;color:var(--peaku-gray);margin-bottom:6px;">"${esc(m.cita || '')}"</div>
+            <div style="font-size:13px;"><strong>Qué pasó:</strong> ${esc(m.que_paso || '')}</div>
+            <div style="font-size:13px;color:var(--peaku-green-dark);"><strong>Debió:</strong> ${esc(m.que_debio_hacer || '')}</div>
+          </div>`).join('')}
+      </div>` : ''}
+
+    ${(ia.preguntas_faltantes && ia.preguntas_faltantes.length) ? `
+      <div class="card">
+        <h2 style="margin-top:0;">❓ Preguntas que faltó hacer (Sandler)</h2>
+        <p class="muted" style="font-size:13px;">Cierra estos huecos con un WhatsApp o llamada corta.</p>
+        <ul class="list-clean">
+          ${ia.preguntas_faltantes.map(p => `<li><span>${esc(p)}</span><span class="pill warn">Falta preguntar</span></li>`).join('')}
+        </ul>
+      </div>` : ''}
+  `;
+}
+
 function stepResult() {
   const ia = state.iaExtracted || {};
   const s = localScore(state);
@@ -1320,47 +1397,7 @@ function stepResult() {
       </div>
     </div>
 
-    ${(ia.acciones_concretas && ia.acciones_concretas.length) ? `
-      <div class="card" style="border-left:6px solid var(--peaku-blue);">
-        <h2>🎯 Acciones concretas para esta semana</h2>
-        <p class="muted" style="font-size:13px;">Generadas por Claude a partir del transcript. Aterrízalas hoy en tu CRM (Brevo).</p>
-        <ol style="padding-left:22px;line-height:2;">
-          ${ia.acciones_concretas.map(a => {
-            const pri = (a.prioridad || '').toLowerCase();
-            const priColor = pri === 'alta' ? 'var(--bad)' : pri === 'media' ? 'var(--warn)' : 'var(--peaku-green)';
-            return `<li>
-              <span class="pill" style="color:#fff;background:${priColor};border-color:${priColor};margin-right:8px;">${esc(a.prioridad || 'media')}</span>
-              <strong>${esc(a.accion || '')}</strong>
-              ${a.cuando ? `<span class="muted" style="margin-left:6px;font-size:12px;">· ${esc(a.cuando)}</span>` : ''}
-            </li>`;
-          }).join('')}
-        </ol>
-      </div>
-    ` : ''}
-
-    ${(ia.momentos_criticos && ia.momentos_criticos.length) ? `
-      <div class="card" style="border-left:6px solid var(--warn);">
-        <h2>⚠ Momentos críticos del demo</h2>
-        <p class="muted" style="font-size:13px;">Puntos donde se dejó ir un dolor, se dio precio antes de tiempo, o el cliente dictó los pasos. Aprendizaje para el próximo demo.</p>
-        ${ia.momentos_criticos.map(m => `
-          <div style="border-left:3px solid var(--warn);padding:10px 14px;background:#fef3e2;margin:10px 0;border-radius:4px;">
-            <div style="font-style:italic;color:var(--peaku-gray);margin-bottom:6px;">"${esc(m.cita || '')}"</div>
-            <div style="font-size:13px;"><strong>Qué pasó:</strong> ${esc(m.que_paso || '')}</div>
-            <div style="font-size:13px;color:var(--peaku-green-dark);"><strong>Debió:</strong> ${esc(m.que_debio_hacer || '')}</div>
-          </div>
-        `).join('')}
-      </div>
-    ` : ''}
-
-    ${(ia.preguntas_faltantes && ia.preguntas_faltantes.length) ? `
-      <div class="card">
-        <h2>❓ Preguntas que NO hiciste (Sandler)</h2>
-        <p class="muted" style="font-size:13px;">Según el proceso Sandler, faltó preguntar esto. Puedes cerrarlo con un WhatsApp o llamada corta.</p>
-        <ul class="list-clean">
-          ${ia.preguntas_faltantes.map(p => `<li><span>${esc(p)}</span><span class="pill warn">Falta preguntar</span></li>`).join('')}
-        </ul>
-      </div>
-    ` : ''}
+    ${iaReportHtml(ia)}
 
     <div class="card">
       <h2>Qué mostrar de la plataforma</h2>
@@ -1422,7 +1459,16 @@ function stepResult() {
   bindForm();
 }
 
-async function submitDeal() {
+let submitting = false;
+async function submitDeal(btn) {
+  if (submitting) return;              // guard anti doble-click
+  submitting = true;
+  // Deshabilitar TODOS los botones de guardar y mostrar loader en el que se pulsó
+  const saveButtons = el.querySelectorAll('[data-act="finish"]');
+  saveButtons.forEach(b => { b.disabled = true; });
+  const target = btn || saveButtons[saveButtons.length - 1];
+  const prevText = target ? target.innerHTML : '';
+  if (target) target.innerHTML = '<span class="spinner"></span> Guardando…';
   try {
     const r = await fetch('/api/deals', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -1430,12 +1476,20 @@ async function submitDeal() {
     });
     const j = await r.json();
     if (j.ok) {
-      alert(`Deal #${j.id} guardado. Fundamentales ${j.score.fundamentalsPct}% · Nice-to-have ${j.score.niceToHavePct}%`);
+      if (target) target.innerHTML = '✓ Guardado';
       clearDraft(); location.hash = '#/deals';
     } else {
       alert('Error al guardar: ' + (j.error || ''));
+      if (target) target.innerHTML = prevText;
+      saveButtons.forEach(b => { b.disabled = false; });
     }
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) {
+    alert('Error: ' + e.message);
+    if (target) target.innerHTML = prevText;
+    saveButtons.forEach(b => { b.disabled = false; });
+  } finally {
+    submitting = false;
+  }
 }
 
 // ---------- Historial ----------
@@ -1473,7 +1527,7 @@ async function renderDeals() {
 
   h(`
     <h1>Historial de deals</h1>
-    <p class="muted">Haz clic en una fila para ver el detalle. Ventana de 14 días desde la cotización.</p>
+    <p class="muted">Haz clic en una fila para ver el detalle completo y el reporte de la IA.</p>
 
     <div class="score-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
       <div class="card compact score-card"><div class="muted">Total deals</div><div class="num">${r.length}</div></div>
@@ -1485,7 +1539,7 @@ async function renderDeals() {
       <table>
         <thead><tr>
           <th>#</th><th>Empresa</th><th>Ejecutivo</th><th>Línea</th><th>Seg.</th>
-          <th>Calificación</th><th>Fund.</th><th>Ventana 14d</th><th>Fecha</th><th></th>
+          <th>Calificación</th><th>Fund.</th><th>Fecha</th><th></th>
         </tr></thead>
         <tbody>
           ${r.map(d => `<tr class="clickable" data-open="${d.id}">
@@ -1496,7 +1550,6 @@ async function renderDeals() {
             <td><span class="segment-badge ${d.segment||''}">${d.segment||'—'}</span></td>
             <td>${calCell(d.calificacion_sandler)}</td>
             <td>${barCell(d.score_fundamentals)}</td>
-            <td>${windowCell(d)}</td>
             <td>${new Date(d.created_at).toLocaleDateString()}</td>
             <td style="text-align:right;white-space:nowrap;">
               <button class="btn ghost btn-sm" data-view="${d.id}">Ver</button>
@@ -1568,6 +1621,8 @@ async function renderDealDetail(id) {
         </div>
       </div>
     </div>
+
+    ${iaReportHtml(d.iaExtracted)}
 
     <div class="card">
       <h2>⚠ Campos importantes que no se completaron</h2>

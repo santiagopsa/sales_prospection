@@ -126,6 +126,14 @@ th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: upp
 tbody tr:hover { background: #fafbfd; }
 tbody tr.clickable { cursor: pointer; }
 
+.btn:disabled { opacity: .6; cursor: not-allowed; }
+.spinner {
+  display: inline-block; width: 13px; height: 13px; vertical-align: -2px;
+  border: 2px solid rgba(255,255,255,.45); border-top-color: #fff;
+  border-radius: 50%; animation: spin .7s linear infinite; margin-right: 4px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 .btn.danger { color: var(--bad); }
 .btn.danger:hover { background: #fdecec; color: var(--bad); border-color: #f4c2c2; }

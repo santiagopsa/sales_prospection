@@ -17,6 +17,10 @@ const anthropic = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   : null;
 if (!anthropic) console.warn('[llm] ANTHROPIC_API_KEY no está seteada — /api/analyze devolverá error');
+// Modelo del análisis. Configurable por env para poder comparar (Opus vs Sonnet).
+// Default: Opus (razonamiento más profundo para inferir la objeción/indecisión subyacente).
+const ANALYZE_MODEL = process.env.ANALYZE_MODEL || 'claude-opus-4-8';
+console.log('[llm] modelo de análisis:', ANALYZE_MODEL);
 
 // --- DB ---
 const useDb = !!process.env.DATABASE_URL;
@@ -360,7 +364,7 @@ function buildAnalyzePrompt(transcript, ctx) {
     evento: 'Evento/networking', outbound: 'Outbound del ejecutivo', otro: 'Otro'
   };
 
-  return `Eres un analista experto en el método Sandler de ventas y en el proceso comercial de Peaku (empresa colombiana de reclutamiento).
+  return `Eres un analista senior de ventas experto en DOS marcos y en el proceso comercial de Peaku (empresa colombiana de reclutamiento): (1) el método Sandler y (2) "The JOLT Effect" (Matthew Dixon), sobre cómo vencer la INDECISIÓN del cliente. Analizas el transcript real de un demo comercial.
 
 CONTEXTO DEL DEAL:
 - Empresa cliente: ${ctx.company || 'no especificada'}
@@ -375,26 +379,49 @@ CONTEXTO DEL DEAL:
 - Actitud reportada por canal: ${ctx.prospActitud || 'sin datos'}
 - Urgencia reportada: ${ctx.prospUrgencia || 'sin datos'}
 
-PROCESO SANDLER DE PEAKU (para tu análisis):
-- Fase 1 · Construcción: contrato previo con el cliente (tiempo, agenda, permiso para decir "no") + vínculo.
-- Fase 2 · Calificación:
-  · EMBUDO DEL DOLOR (2 de 3): cuantificar ($/tiempo) + historia (qué intentaron) + impacto (a quién le duele). Sin embudo desarrollado, el dolor no ancla el precio.
-  · Presupuesto: ¿hay plata? ¿cuánto? ¿comparado con qué?
-  · Decisión: quiénes deciden + proceso interno + FECHA LÍMITE acordada con el cliente (máximo 14 días).
-- Fase 3 · Cierre: proponer TÚ los próximos pasos (nunca el cliente los dicta). Piloto (publicar cargo esta semana) es preferible a cotización fría.
-- CALIFICACIÓN SANDLER: Completa = dolor desarrollado + presupuesto + decisión + fecha límite. Parcial = 2-3 de 4. No califica = 0-1 de 4.
+═══════════════════════════════════════════════════════════
+REGLA DE ORO — ANCLAJE ESTRICTO AL TRANSCRIPT (léela dos veces):
+- Lee el transcript COMPLETO, de principio a fin, ANTES de concluir nada. No te quedes con el inicio.
+- Toda afirmación que hagas debe poder respaldarse con una cita textual del transcript. Si no hay evidencia, el campo va vacío ("").
+- NUNCA marques una pregunta como "no se hizo" sin antes barrer TODO el transcript buscando esa pregunta o una equivalente (aunque esté redactada distinto, con otras palabras o de forma indirecta). Si el tema ya se tocó de cualquier manera, NO es una pregunta faltante. Ante la más mínima duda, NO la reportes como faltante.
+- No inventes nombres, cifras, fechas, cargos ni compromisos que no aparezcan literalmente en el texto.
+- Las acciones y el diagnóstico deben ser ESPECÍFICOS a ESTA conversación (usa los nombres, cifras y frases reales), nunca genéricos ni "de manual".
+═══════════════════════════════════════════════════════════
 
-TRANSCRIPT DEL DEMO (probablemente de Google Meet):
+MÉTODO SANDLER (para calificar el deal):
+- Fase 1 · Construcción: contrato previo (tiempo, agenda, permiso para decir "no") + vínculo.
+- Fase 2 · Calificación:
+  · EMBUDO DEL DOLOR (2 de 3): cuantificar ($/tiempo) + historia (qué intentaron) + impacto (a quién le duele). Sin embudo, el dolor no ancla el precio.
+  · Presupuesto: ¿hay plata? ¿cuánto? ¿comparado con qué?
+  · Decisión: quiénes deciden + proceso interno + FECHA LÍMITE acordada.
+- Fase 3 · Cierre: el ejecutivo propone los próximos pasos (no el cliente). Piloto > cotización fría.
+- CALIFICACIÓN: Completa = dolor desarrollado + presupuesto + decisión + fecha límite. Parcial = 2-3 de 4. No califica = 0-1 de 4.
+
+═══════════════════════════════════════════════════════════
+MARCO JOLT — EL CENTRO DEL ANÁLISIS Y DE LAS ACCIONES:
+La mayoría de los deals calificados NO se pierden contra un competidor, sino contra la INDECISIÓN del cliente: se queda en el statu quo por miedo a equivocarse (FOMU, "fear of messing up"). Tu tarea más importante es diagnosticar la objeción/indecisión SUBYACENTE (la razón real detrás de "déjame pensarlo", "lo tengo que consultar", evasivas sobre presupuesto, silencios, "sigo investigando opciones") y proponer acciones según JOLT:
+- J · Judge (juzgar el nivel y tipo de indecisión). Tipos:
+   · valoracion: no ve claro que valga la pena / no percibe ROI vs. lo que hace hoy (statu quo).
+   · falta_informacion: siente que le faltan datos para decidir, quiere "seguir investigando/comparando".
+   · miedo_resultado: teme que la solución no funcione y quedar mal por haberla comprado.
+   · miedo_interno_statuquo: es usuario/champion que teme llevar la propuesta al tomador de decisión y que lo culpen si sale mal (miedo a "pasar el proveedor" hacia arriba).
+   · ninguna_clara: si de verdad no hay señales de indecisión en el transcript.
+- O · Offer (recomendar): el ejecutivo debe tomar postura y recomendar UNA ruta concreta, no dejar que el cliente arme el menú.
+- L · Limit (limitar): no abrumar con features/planes; acotar a lo que resuelve SU dolor puntual.
+- T · Take risk off the table (quitar el riesgo): piloto, prueba acotada, salida sin penalidad, garantía, referencias — para desactivar el miedo específico detectado.
+═══════════════════════════════════════════════════════════
+
+TRANSCRIPT DEL DEMO (probablemente de Google Meet / Otter / Fireflies):
 \`\`\`
 ${transcript}
 \`\`\`
 
-TAREA: Analiza el transcript y extrae la información estructurada en el JSON de abajo. Usa CITAS TEXTUALES del transcript cuando sea posible (con el segundo/minuto si aparece); si no hay dato, deja el campo como cadena vacía. Sé estricto: NO inventes información que no esté en el transcript.
-
-Además, genera:
-- Un array "acciones_concretas" con 3-7 próximos pasos ESPECÍFICOS (nombre, fecha, canal), priorizados. Ej.: "Llamar mañana a las 10am a María para preguntar presupuesto (no salió en el demo)"
-- Un array "preguntas_faltantes" con lo que el ejecutivo NO preguntó y debería haber preguntado en este demo, según Sandler.
-- Un array "momentos_criticos" con hasta 3 momentos del transcript donde se dejó ir un dolor sin desarrollar, se dio precio antes de tiempo, o el cliente dictó los próximos pasos. Incluye la cita textual y qué debió haber hecho el ejecutivo.
+TAREA:
+1. Extrae la información estructurada (campos del JSON), con citas textuales.
+2. Diagnostica la objeción/indecisión SUBYACENTE (objecion_subyacente) usando SOLO señales del transcript. Cita la frase que la delata.
+3. Genera acciones_concretas: 3-7 pasos ESPECÍFICOS a esta conversación (nombre real, fecha, canal). Cada acción atada a: la palanca JOLT que ataca (J/O/L/T) y la cita o señal del transcript que la motiva. Prioriza por impacto en DESBLOQUEAR la indecisión detectada, NO por el orden del proceso.
+4. preguntas_faltantes: SOLO preguntas que de verdad no se hicieron (aplica la regla de oro). Si el ejecutivo cubrió casi todo, deja el array corto o vacío — es mejor vacío que inventado.
+5. momentos_criticos: hasta 3, cada uno con cita textual real.
 
 RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL. Formato exacto:
 
@@ -423,16 +450,21 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL. Formato exacto:
   "hasAts": true,
   "atsName": "nombre del ATS si lo tienen",
   "calificacion_sandler": "Completa | Parcial | No califica",
+  "objecion_subyacente": {
+    "tipo": "valoracion | falta_informacion | miedo_resultado | miedo_interno_statuquo | ninguna_clara",
+    "descripcion": "en 1-2 frases, cuál es la verdadera razón de indecisión de ESTE cliente y en qué te basas",
+    "evidencia": "cita textual del transcript que la delata (vacío si el tipo es ninguna_clara)"
+  },
   "acciones_concretas": [
-    {"prioridad": "alta", "accion": "descripción específica con nombre/fecha/canal", "cuando": "hoy | mañana | esta semana"}
+    {"prioridad": "alta | media | baja", "jolt": "J | O | L | T", "accion": "descripción específica con nombre/fecha/canal", "porque": "cita o señal del transcript que motiva esta acción", "cuando": "hoy | mañana | esta semana"}
   ],
   "preguntas_faltantes": [
-    "pregunta específica que se debió hacer y no se hizo"
+    "pregunta específica que de verdad NO se hizo (vacío si el ejecutivo ya cubrió lo esencial)"
   ],
   "momentos_criticos": [
-    {"cita": "cita textual del cliente/ejecutivo", "que_paso": "qué error se cometió", "que_debio_hacer": "cómo debió corregirse"}
+    {"cita": "cita textual del cliente/ejecutivo", "que_paso": "qué error se cometió", "que_debio_hacer": "cómo debió corregirse (idealmente en clave JOLT)"}
   ],
-  "resumen_ejecutivo": "2-3 oraciones: qué pasó en el demo, calificación, y recomendación clara (cotizar / piloto / nutrir)"
+  "resumen_ejecutivo": "2-3 oraciones: qué pasó en el demo, calificación, la objeción subyacente detectada y la recomendación clara (cotizar / piloto / nutrir)"
 }`;
 }
 
@@ -445,8 +477,8 @@ app.post('/api/analyze', async (req, res) => {
     }
     const prompt = buildAnalyzePrompt(transcript, context || {});
     const msg = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 4096,
+      model: ANALYZE_MODEL,
+      max_tokens: 8000,
       messages: [{ role: 'user', content: prompt }],
     });
     const text = (msg.content && msg.content[0] && msg.content[0].text) || '';
