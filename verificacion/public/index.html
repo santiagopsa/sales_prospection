@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PeakU · Consola de Verificación</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="top">
+  <div class="topin">
+    <button class="logo" id="btnHome" type="button">
+      <span class="slashes">///</span>
+      <div>
+        <div class="nm">Consola de Verificación</div>
+        <div class="sub">PeakU Verificado · piloto</div>
+      </div>
+    </button>
+    <div class="spacer"></div>
+    <div class="who" id="whoTop"></div>
+    <div class="clock" id="clockWrap" style="display:none">
+      <div class="tm"><div class="lb">Fase</div><div class="vl mono" id="tPhase">0:00</div></div>
+      <div class="tm"><div class="lb">Total</div><div class="vl mono" id="tTotal">0:00</div></div>
+    </div>
+    <span class="pill" id="dbPill" title="Estado de la base de datos">···</span>
+    <button class="tbtn" id="btnReset" style="display:none">Salir de la sesión</button>
+  </div>
+</div>
+
+<!-- ===================== TABLERO ===================== -->
+<div class="screen on" id="vTablero">
+  <div class="wrap">
+    <div class="stage">
+      <div class="hero">
+        <h1>Vacantes verificables</h1>
+        <p class="lede">Cada vacante nace del levantamiento con el cliente. De ahí salen los requisitos excluyentes, y contra esos requisitos se verifica al finalista.</p>
+        <div class="heroacts">
+          <button class="cta" id="btnNuevoIntake" type="button">Cargar un levantamiento</button>
+          <button class="cta ghost" id="btnVerSesiones" type="button">Ver verificaciones</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="cardhd"><h2>Vacantes</h2><span class="cs" id="vacCount"></span></div>
+        <div id="vacList"><div class="empty">Cargando…</div></div>
+      </div>
+
+      <div class="card" id="sesCard">
+        <div class="cardhd"><h2>Verificaciones</h2><span class="cs" id="sesCount"></span></div>
+        <div id="sesList"><div class="empty">Cargando…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== LEVANTAMIENTO ===================== -->
+<div class="screen" id="vIntake">
+  <div class="wrap">
+    <div class="setup">
+      <button class="back" data-home type="button">← Volver</button>
+      <h1>Cargar el levantamiento</h1>
+      <p class="lede">Sube la transcripción de la reunión con el cliente o el job description que te envió. Claude extrae la empresa, la vacante y los requisitos excluyentes — tú los revisas antes de guardar.</p>
+
+      <div class="fset">
+        <div class="fttl">El archivo</div>
+        <div class="drop" id="drop">
+          <input type="file" id="file" accept=".txt,.md,.vtt,.srt,.docx,.pdf,.csv,.json" hidden>
+          <div class="dropin">
+            <div class="dropic">↑</div>
+            <div>
+              <b id="dropTitle">Arrastra el archivo aquí o haz clic para elegirlo</b>
+              <span id="dropSub">Transcripción de Meet (.txt, .vtt), Word (.docx), PDF o texto plano</span>
+            </div>
+          </div>
+        </div>
+        <div class="or">o pega el texto</div>
+        <div class="f"><textarea id="srcText" class="big" placeholder="Pega aquí la transcripción de la reunión de levantamiento, o el job description que envió el cliente."></textarea></div>
+        <div class="charc" id="charc">0 caracteres</div>
+      </div>
+
+      <div class="fset">
+        <div class="fttl">Contexto (opcional, ayuda a la extracción)</div>
+        <div class="frow">
+          <div class="f"><label for="hEmp">Empresa cliente</label><input id="hEmp" placeholder="IDOM"></div>
+          <div class="f"><label for="hRol">Cargo</label><input id="hRol" placeholder="Consultor SAP PP"></div>
+        </div>
+        <div class="frow one">
+          <div class="f"><label for="hRec">Reclutador a cargo</label><input id="hRec" placeholder="Tu nombre"></div>
+        </div>
+        <div class="segs" id="srcType">
+          <button class="seg sel" data-src="transcript" type="button">Transcripción de reunión</button>
+          <button class="seg" data-src="jd" type="button">Job description</button>
+        </div>
+      </div>
+
+      <button class="cta" id="btnAnalizar" disabled>Extraer los requisitos</button>
+      <p class="hint" id="intakeHint">Necesitas al menos 200 caracteres de texto. El análisis tarda entre 20 y 40 segundos.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== REVISIÓN ===================== -->
+<div class="screen" id="vRevision">
+  <div class="wrap"><div class="stage" id="revStage"></div></div>
+</div>
+
+<!-- ===================== DETALLE DE VACANTE ===================== -->
+<div class="screen" id="vVacante">
+  <div class="wrap"><div class="stage" id="vacStage"></div></div>
+</div>
+
+<!-- ===================== SETUP DE SESIÓN ===================== -->
+<div class="screen" id="vSetup">
+  <div class="wrap"><div class="stage" id="setupStage"></div></div>
+</div>
+
+<!-- ===================== SESIÓN EN VIVO ===================== -->
+<div class="screen" id="vLive">
+  <div class="phasebar"><div class="phasein" id="phaseNav"></div></div>
+  <div class="wrap"><div class="stage" id="stage"></div></div>
+</div>
+
+<!-- ===================== ACTA ===================== -->
+<div class="screen" id="vActa">
+  <div class="wrap"><div class="stage" id="actaStage"></div></div>
+</div>
+
+<div class="sigbar" id="sigBar" style="display:none">
+  <div class="sigin">
+    <div class="sighd">
+      <span class="t">Señales observadas</span>
+      <span class="cnt" id="sigCount">0</span>
+      <span class="sighint">Marca lo que veas. No interpretes — en duda, márcala.</span>
+    </div>
+    <div class="sigs" id="sigChips"></div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="obox">
+    <div class="spin"></div>
+    <b id="ovTitle">Leyendo el levantamiento…</b>
+    <span id="ovSub">Claude está identificando los requisitos excluyentes. Esto toma entre 20 y 40 segundos.</span>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

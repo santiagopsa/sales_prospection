@@ -8,8 +8,9 @@ const Anthropic = require('@anthropic-ai/sdk');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// El transcript de un demo largo puede ser 40-80 KB; damos margen.
-app.use(express.json({ limit: '4mb' }));
+// El transcript de un demo largo puede ser 40-80 KB. El margen grande es por
+// /verificacion: ahí los archivos suben en base64, que engorda un tercio.
+app.use(express.json({ limit: '12mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- Claude (Anthropic) ---
@@ -505,6 +506,22 @@ app.post('/api/analyze', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// ---------- PeakU Verificado ----------
+// Se monta sobre el mismo pool y la misma base de datos. Sus tablas viven en el schema
+// "verificacion", así que no toca deals ni wishlist. Si el módulo falta, el Sandler arranca igual.
+try {
+  const verificacion = require('./verificacion/app');
+  app.use('/verificacion', verificacion.router({
+    pool,
+    anthropic,
+    model: process.env.VERIF_MODEL || ANALYZE_MODEL,
+  }));
+  verificacion.initSchema(pool).catch(e => console.error('[verificacion] schema:', e.message));
+  console.log('[verificacion] montada en /verificacion');
+} catch (e) {
+  console.error('[verificacion] no se pudo montar:', e.message);
+}
 
 // SPA fallback
 app.get('*', (_req, res) => {
