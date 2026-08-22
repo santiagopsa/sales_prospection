@@ -38,13 +38,14 @@ const DEFENSA = [
   {t:'Cruce',       d:'Un retrollamado de consistencia sobre algo que dijo antes en la sesión.'}
 ];
 
+// Integridad de la sesión. Ya no se le pide ningún documento al candidato en la llamada:
+// el documento lo valida Didit después, y aquí solo queda lo que ocurre en la entrevista.
 const IDCHECKS = [
-  {id:'grab', t:'Grabación activa antes de que entre el candidato', d:'Si Meet pide consentimiento, mejor: queda grabado que aceptó'},
-  {id:'kyc',  t:'Verificación de identidad completada (Didit)',     d:'Confirma que llegó el reporte antes de arrancar'},
-  {id:'ced',  t:'Cédula junto al rostro + captura de pantalla',     d:'La foto del documento corresponde a la persona'},
-  {id:'ges',  t:'Dos gestos aleatorios cumplidos con naturalidad',  d:'Video congelado o lag justo al pedir el gesto = señal'},
-  {id:'nom',  t:'El nombre coincide con el del proceso',            d:'Cédula, reporte de identidad y proceso: los tres iguales'}
+  {id:'grab', t:'Grabación activa antes de que entre el candidato', d:'Si Meet pide consentimiento, mejor: queda grabado que aceptó', kinds:['sondeo','cierre']},
+  {id:'cam',  t:'Cámara encendida y rostro visible',                d:'Sin video no hay señales que observar; es lo normal en cualquier entrevista', kinds:['sondeo','cierre']},
+  {id:'shot', t:'Captura del rostro tomada',                        d:'Se marca sola al subir la imagen; es contra lo que se coteja la verificación', kinds:['cierre']}
 ];
+const idChecksDe = kind => IDCHECKS.filter(c => c.kinds.includes(kind));
 
 /* ===================== ruta base =====================
    La app se monta bajo un prefijo (/verificacion) dentro del servidor del Sandler.
@@ -96,6 +97,7 @@ async function api(path, opts={}){
 
 /* ===================== estado ===================== */
 const KEY = 'pkv_sesion_v2';
+const EV_MIN = 10;   // mínimo de caracteres para que la evidencia cuente; el servidor aplica el mismo
 let X = null;      // extracción del levantamiento en revisión
 let S = null;      // sesión en curso
 let VAC = null;    // vacante cargada para la sesión
@@ -472,6 +474,21 @@ function setupSesion(v){
       </div>
 
       <div class="fset">
+        <div class="fttl">Etapa del proceso</div>
+        <div class="modes" id="setKind">
+          <button class="mode sel" data-k="sondeo" type="button">
+            <b>Sondeo · primera entrevista</b>
+            <span>Cámara y señales, sin pedirle ningún documento al candidato. Produce una ficha interna.</span>
+          </button>
+          <button class="mode" data-k="cierre" type="button">
+            <b>Cierre · finalista</b>
+            <span>Suma la verificación de identidad, que el candidato hace después por su cuenta. Produce el acta para el cliente.</span>
+          </button>
+        </div>
+        <p class="hint">La identidad no se pide en la primera entrevista: ahí el candidato todavía no ha invertido nada y la petición espanta. En el cierre ya hay una oferta de por medio.</p>
+      </div>
+
+      <div class="fset">
         <div class="fttl">Modalidad</div>
         <div class="modes" id="setModes">
           <button class="mode ${modo==='A'?'sel':''}" data-m="A" type="button">
@@ -489,8 +506,12 @@ function setupSesion(v){
       <p class="hint">Antes de darle clic: ten la grabación de Meet activa y el reporte de identidad a la mano.</p>
     </div>`;
 
-  let mode = modo;
+  let mode = modo, kind = 'sondeo';
   $('#setupStage').querySelector('[data-back]').addEventListener('click', () => verVacante(v.id));
+  $('#setupStage').querySelectorAll('#setKind .mode').forEach(b => b.addEventListener('click', () => {
+    kind = b.dataset.k;
+    $('#setupStage').querySelectorAll('#setKind .mode').forEach(m => m.classList.toggle('sel', m===b));
+  }));
   $('#setupStage').querySelectorAll('#setModes .mode').forEach(b => b.addEventListener('click', () => {
     mode = b.dataset.m;
     $('#setupStage').querySelectorAll('#setModes .mode').forEach(m => m.classList.toggle('sel', m===b));
@@ -502,12 +523,13 @@ function setupSesion(v){
     try{
       const out = await api('/api/sessions', {method:'POST', body:{
         vacancy_id: v.id, candidate: $('#sCand').value.trim(),
-        candidate_email: $('#sMail').value.trim(), evaluator: $('#sEval').value.trim(), mode,
+        candidate_email: $('#sMail').value.trim(), evaluator: $('#sEval').value.trim(), mode, kind,
       }});
       VAC = v;
       S = {
         sid: out.id, id: out.report_code, cand: $('#sCand').value.trim(), rol: v.title,
-        cli: v.company_name || '', eval: $('#sEval').value.trim(), mode,
+        cli: v.company_name || '', eval: $('#sEval').value.trim(), mode, kind,
+        mail: $('#sMail').value.trim(), ident: null,
         reqs: (v.requirements||[]).map(r => ({rid:r.id, n:r.text, lvl:0, ev:'', r})),
         idc:{}, sig:{}, fase:0, t0:Date.now(), tFase:Date.now(), fin:false, fecha:null, hash:null,
       };
@@ -521,7 +543,7 @@ function setupSesion(v){
 
 /* ===================== sesión en vivo ===================== */
 function fases(){
-  const f = [{k:'id', t:'Identidad', min:5}];
+  const f = [{k:'id', t:'Apertura', min:4}];
   S.reqs.forEach((r,i) => f.push({k:'req', i, t:r.n || ('Requisito '+(i+1)), min:6}));
   f.push({k:'cierre', t:'Cierre', min:3});
   return f;
@@ -529,13 +551,14 @@ function fases(){
 function drawNav(){
   const F = fases();
   $('#phaseNav').innerHTML = F.map((f,i) => {
-    const done = f.k==='id' ? IDCHECKS.every(c=>S.idc[c.id]) : (f.k==='req' ? S.reqs[f.i].lvl>0 : false);
+    const done = f.k==='id' ? idChecksDe(S.kind).every(c=>S.idc[c.id]) : (f.k==='req' ? S.reqs[f.i].lvl>0 : false);
     return `<button class="ph ${i===S.fase?'act':''} ${done?'done':''}" data-f="${i}" type="button"><span class="dot"></span>${esc(f.t.length>26?f.t.slice(0,26)+'…':f.t)}</button>`;
   }).join('');
   $('#phaseNav').querySelectorAll('[data-f]').forEach(b =>
     b.addEventListener('click', e => goFase(+e.currentTarget.dataset.f)));
 }
-function goFase(i){ S.fase=i; S.tFase=Date.now(); saveLocal(); render(); }
+function goFase(i){ S.fase=i; S.tFase=Date.now(); saveLocal(); render();
+  if(fases()[i].k === 'cierre' && S.kind === 'cierre') recargarIdentidad(); }
 
 function sync(){
   if(!S || !S.sid) return;
@@ -557,18 +580,42 @@ function render(){
   if(!f) return;
 
   if(f.k === 'id'){
+    const cierre = S.kind === 'cierre';
     st.innerHTML = `
       <div class="card">
-        <h2>Identidad</h2>
-        <div class="cs" style="margin-bottom:16px">Minutos 0 a 5 · nada avanza hasta que los cinco estén marcados</div>
-        <div class="say"><div class="lb">DILO ASÍ</div><p>“Gracias por conectarte. Esta sesión queda grabada porque el resultado es un documento firmado que respaldamos. Primero lo rápido: ¿me muestras tu cédula junto a tu cara? … Perfecto. Ahora mírame y gira la cabeza a tu izquierda… ahora sonríe. Listo, eso era todo.”</p></div>
-        ${IDCHECKS.map(c => `<button class="chk ${S.idc[c.id]?'on':''}" data-idc="${c.id}" type="button"><span class="box">✓</span><span class="tx">${c.t}<small>${c.d}</small></span></button>`).join('')}
-        <p class="hint" style="margin-top:14px"><b>Si algo falla aquí</b> — la cara no corresponde, evita mostrar el documento, el video se congela justo en los gestos — no continúes. Cierra con naturalidad (“se nos está cayendo la conexión, te reagendo”) y escala hoy mismo. Nunca confrontes.</p>
-        <div class="nav"><button class="pri" data-next type="button">Identidad verificada · continuar</button></div>
+        <h2>Apertura</h2>
+        <div class="cs" style="margin-bottom:16px">Primeros minutos · ${cierre ? 'la identidad se verifica después de la llamada, no aquí' : 'en un sondeo no se pide ninguna identificación'}</div>
+        <div class="say"><div class="lb">DILO ASÍ</div><p>“Gracias por conectarte. Esta sesión queda grabada, como todas las nuestras. ${cierre ? 'Al final te voy a enviar un link para confirmar tu identidad — lo haces desde tu celular en un minuto, y no queda ninguna foto de tu documento con nosotros. ' : ''}¿Arrancamos?”</p></div>
+        ${idChecksDe(S.kind).map(c => `<button class="chk ${S.idc[c.id]?'on':''}" data-idc="${c.id}" ${c.id==='shot'?'disabled style="opacity:.75;cursor:default"':''} type="button"><span class="box">✓</span><span class="tx">${c.t}<small>${c.d}</small></span></button>`).join('')}
+
+        ${cierre ? `
+        <div class="shotbox ${S.idc.shot?'has':''}" id="shotBox">
+          <input type="file" id="shotFile" accept="image/*" hidden>
+          <div class="shotin">
+            <div class="shotic">${S.idc.shot?'✓':'⌗'}</div>
+            <div class="shottx">
+              <b id="shotTitle">${S.idc.shot?'Captura guardada':'Captura el rostro del candidato'}</b>
+              <span id="shotSub">${S.idc.shot
+                ? 'Se comparará con su verificación de identidad. Puedes reemplazarla si quedó borrosa.'
+                : 'Toma un pantallazo del video con la cara de frente y visible, y suéltalo aquí. También puedes pegarlo con Ctrl+V.'}</span>
+            </div>
+          </div>
+        </div>
+        <p class="hint">La captura se borra sola en cuanto el cotejo termina. Lo que queda guardado es el puntaje, no la imagen.</p>
+        ` : `
+        <p class="hint" style="margin-top:14px">Este es un <b>sondeo</b>: no se pide identidad ni se guarda ninguna imagen. Si el candidato avanza a finalista, ahí se hace el cierre verificado.</p>
+        `}
+
+        <p class="hint"><b>Si algo se sale de lo normal</b> — se niega a encender la cámara, el video se congela cada vez que responde — no confrontes. Regístralo en las señales y sigue.</p>
+        <div class="nav"><button class="pri" data-next type="button">Continuar</button></div>
       </div>`;
+
     st.querySelectorAll('[data-idc]').forEach(b => b.addEventListener('click', e => {
-      const k = e.currentTarget.dataset.idc; S.idc[k] = !S.idc[k]; touch(); render();
+      const k = e.currentTarget.dataset.idc;
+      if(k === 'shot') return;              // este se marca solo al subir la captura
+      S.idc[k] = !S.idc[k]; touch(); render();
     }));
+    if(cierre) montarCaptura();
   }
 
   else if(f.k === 'req'){
@@ -605,6 +652,7 @@ function render(){
         </div>
         <div class="anchor" id="anchorBox">${r.lvl?ANCHORS[r.lvl]:'Pasa el cursor sobre un nivel para ver su ancla, o marca el que corresponda.'}</div>
         <textarea class="notes" data-notes placeholder="Evidencia textual: la escena que contó, la fricción que narró, los detalles que cuadraron o no. Esto va al acta.">${esc(r.ev||'')}</textarea>
+        <div class="evnote" id="evNote"></div>
         <div class="nav">
           <button data-prev type="button">Atrás</button>
           <button class="pri" data-next type="button">${f.i===S.reqs.length-1?'Ir al cierre':'Siguiente requisito'}</button>
@@ -617,19 +665,53 @@ function render(){
       b.addEventListener('mouseenter', e => { $('#anchorBox').innerHTML = ANCHORS[+e.currentTarget.dataset.lv]; });
       b.addEventListener('mouseleave', reset);
     });
-    st.querySelector('[data-notes]').addEventListener('input', e => { r.ev = e.target.value; touch(); });
+    const evNote = () => {
+      const n = (r.ev||'').trim().length;
+      const el = $('#evNote');
+      if(!el) return;
+      el.className = 'evnote' + (n > EV_MIN ? ' ok' : (n ? ' warn' : ''));
+      el.textContent = n > EV_MIN ? 'Evidencia registrada'
+        : (n ? 'Muy corta — sin esto no se puede emitir el acta' : 'Sin evidencia no se puede emitir el acta');
+    };
+    st.querySelector('[data-notes]').addEventListener('input', e => { r.ev = e.target.value; evNote(); touch(); });
+    evNote();
   }
 
   else {
     const nSig = Object.values(S.sig).filter(Boolean).length;
-    const idOk = IDCHECKS.every(c => S.idc[c.id]);
+    const idOk = idChecksDe(S.kind).every(c => S.idc[c.id]);
     const allLvl = S.reqs.every(r => r.lvl>0);
-    const evOk = S.reqs.every(r => (r.ev||'').trim().length>10);
+    const evOk = S.reqs.every(r => (r.ev||'').trim().length > EV_MIN);
+    const idn = S.ident || {};
+    const idFalla = S.kind==='cierre' && (idn.face_verdict==='no_coincide' || idn.didit_status==='Declined');
+    const idEspera = S.kind==='cierre' && ['pendiente','en_curso','en_revision','sin_cotejo'].includes(idn.estado||'pendiente') && idn.estado!=='rechazada';
     let sem, semT, semX;
-    if(!idOk || nSig>=3){ sem='r'; semT='ROJO'; semX='No se emite acta. Cierra la sesión con amabilidad, escala hoy mismo con la grabación. Tú no acusas: registras.'; }
-    else if(nSig>=1){ sem='a'; semT='AMARILLO'; semX='Se emite solo después de que Santiago revise la grabación. En duda, siempre amarillo — el amarillo no cuesta nada.'; }
-    else { sem='v'; semT='VERDE'; semX='Identidad confirmada y cero señales. Pasa a revisión de cuatro ojos y se emite.'; }
-    const puede = sem!=='r' && idOk && allLvl && evOk;
+    if(idFalla || nSig>=3){
+      sem='r'; semT='ROJO';
+      semX = idFalla
+        ? 'El rostro verificado no corresponde al de la entrevista. No se emite nada; escala hoy mismo con la grabación.'
+        : 'No se emite acta. Cierra la sesión con amabilidad, escala hoy mismo con la grabación. Tú no acusas: registras.';
+    }
+    else if(nSig>=1 || idn.face_verdict==='revisar'){
+      sem='a'; semT='AMARILLO';
+      semX = idn.face_verdict==='revisar'
+        ? 'El cotejo de rostro quedó en zona dudosa — puede ser la calidad de la captura. Santiago revisa antes de emitir.'
+        : 'Se emite solo después de que Santiago revise la grabación. En duda, siempre amarillo — el amarillo no cuesta nada.';
+    }
+    else { sem='v'; semT='VERDE'; semX='Cero señales. Pasa a revisión de cuatro ojos y se emite.'; }
+    const puede = sem!=='r' && idOk && allLvl && evOk && !idEspera;
+
+    // Qué falta exactamente, para poder decirlo en vez de solo marcar el renglón en rojo.
+    const faltaId = idChecksDe(S.kind).filter(c => !S.idc[c.id]);
+    const sinLvl = S.reqs.map((r,i) => ({r,i})).filter(x => !x.r.lvl);
+    const sinEv  = S.reqs.map((r,i) => ({r,i})).filter(x => (x.r.ev||'').trim().length <= EV_MIN);
+    // fase 0 = identidad, fase i+1 = requisito i
+    const gate = (ok, titulo, detalle, irA) => `
+      <div class="gate ${ok?'ok':'no'}">
+        <span class="ic">${ok?'✓':'!'}</span>
+        <div class="gt">${titulo}${detalle?`<small>${detalle}</small>`:''}</div>
+        ${(!ok && irA!==null) ? `<button class="ir" data-ir="${irA}" type="button">Ir y completar</button>` : ''}
+      </div>`;
 
     st.innerHTML = `
       <div class="card">
@@ -648,26 +730,194 @@ function render(){
         ${nSig ? `<p class="hint" style="margin-top:12px"><b>Señales marcadas:</b> ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>s.t).join(' · ')}</p>` : ''}
       </div>
 
+      ${S.kind === 'cierre' ? bloqueIdentidad() : ''}
+
       <div class="card">
         <div class="fttl" style="margin-bottom:11px">Sin carpeta completa no hay acta</div>
-        <div class="gate ${idOk?'ok':'no'}"><span class="ic">${idOk?'✓':'!'}</span> Identidad verificada y grabación activa</div>
-        <div class="gate ${allLvl?'ok':'no'}"><span class="ic">${allLvl?'✓':'!'}</span> Todos los requisitos calificados</div>
-        <div class="gate ${evOk?'ok':'no'}"><span class="ic">${evOk?'✓':'!'}</span> Evidencia textual registrada en cada requisito</div>
-        <div class="gate ${sem!=='r'?'ok':'no'}"><span class="ic">${sem!=='r'?'✓':'!'}</span> Semáforo permite emisión</div>
+        ${gate(idOk, 'Identidad verificada y grabación activa',
+               faltaId.length ? `Falta${faltaId.length>1?'n':''}: ${faltaId.map(c=>esc(c.t.toLowerCase())).join(' · ')}` : '',
+               faltaId.length ? 0 : null)}
+        ${gate(allLvl, 'Todos los requisitos calificados',
+               sinLvl.length ? `Sin nivel: ${sinLvl.map(x=>esc(x.r.n)).join(' · ')}` : '',
+               sinLvl.length ? sinLvl[0].i+1 : null)}
+        ${gate(evOk, 'Evidencia textual registrada en cada requisito',
+               sinEv.length ? `Muy corta o vacía en: ${sinEv.map(x=>esc(x.r.n)).join(' · ')}` : '',
+               sinEv.length ? sinEv[0].i+1 : null)}
+        ${S.kind==='cierre' ? gate(!idEspera, 'Verificación de identidad resuelta',
+               idEspera ? (idn.texto || 'Enviada, sin completar') : '', null) : ''}
+        ${gate(sem!=='r', 'Semáforo permite emisión',
+               sem==='r' ? (idOk ? 'Tres o más señales observadas: se escala, no se emite.'
+                                 : 'La identidad incompleta pone el semáforo en rojo.') : '', null)}
         <div class="tools" style="margin-top:14px">
           <button data-prev type="button">Volver</button>
           <button class="pri" id="btnActa" ${puede?'':'disabled'} type="button">Generar acta</button>
           <button id="btnJson" type="button">Copiar JSON del archivo</button>
         </div>
-        <p class="hint">El JSON va a la carpeta del acta en Drive, junto con la grabación, la captura de cédula y el reporte de identidad.</p>
+        <p class="hint">${puede
+          ? 'El JSON va a la carpeta de la sesión en Drive, junto con la grabación y la bitácora.'
+          : '<b>El acta no se puede generar todavía.</b> Arriba está señalado en rojo lo que falta; toca la línea para ir directo a esa pantalla.'}</p>
       </div>`;
+    st.querySelectorAll('[data-ir]').forEach(b => b.addEventListener('click', e => goFase(+e.currentTarget.dataset.ir)));
     st.querySelector('#btnActa').addEventListener('click', emitirActa);
     st.querySelector('#btnJson').addEventListener('click', copiarJSON);
+    if(S.kind === 'cierre'){
+      montarIdentidad(st);
+      const bc = st.querySelector('#btnCopiarLink');
+      if(bc) bc.addEventListener('click', () => {
+        navigator.clipboard?.writeText(S.diditUrl).then(() => toast('Link copiado')).catch(() => toast('No se pudo copiar'));
+      });
+    }
   }
 
   st.querySelectorAll('[data-next]').forEach(b => b.addEventListener('click', () => goFase(Math.min(S.fase+1, fases().length-1))));
   st.querySelectorAll('[data-prev]').forEach(b => b.addEventListener('click', () => goFase(Math.max(S.fase-1, 0))));
   window.scrollTo({top:0, behavior:'instant'});
+}
+
+/* ===================== identidad (solo en un cierre) ===================== */
+const ID_TAG = {
+  verificada: ['v','VERIFICADA'], dudosa: ['a','A REVISAR'], fallida: ['r','NO CORRESPONDE'],
+  rechazada: ['n','NO QUISO'], abandonada: ['a','SIN TERMINAR'], en_curso: ['a','EN CURSO'],
+  en_revision: ['a','EN REVISIÓN'], sin_cotejo: ['a','SIN COTEJAR'], pendiente: ['n','PENDIENTE'],
+};
+
+function bloqueIdentidad(){
+  const i = S.ident || {estado:'pendiente', texto:'Todavía no se ha enviado'};
+  const [tag, txt] = ID_TAG[i.estado] || ['n','PENDIENTE'];
+  const enviada = !!(S.diditUrl || i.didit_status);
+  const score = i.face_score != null ? Number(i.face_score).toFixed(1) : null;
+
+  return `
+    <div class="card">
+      <div class="cardhd" style="margin-bottom:12px">
+        <h2 style="font-size:17px">Verificación de identidad</h2>
+        <span class="tag ${tag}">${txt}</span>
+      </div>
+      <p class="hint" style="margin-top:0">${esc(i.texto || 'El candidato la hace por su cuenta desde el celular, después de la llamada.')}${
+        score ? ` · Coincidencia de rostro: <b>${score}/100</b>` : ''}</p>
+
+      ${S.diditUrl ? `
+        <div class="linkbox">
+          <div class="lk">${esc(S.diditUrl)}</div>
+          <button class="ir" id="btnCopiarLink" type="button">Copiar</button>
+        </div>
+        <p class="hint">Mándaselo por donde ya vienen hablando. Cuando lo complete, esta pantalla se actualiza sola.</p>
+      ` : ''}
+
+      <div class="tools" style="margin-top:12px">
+        ${!enviada ? `<button class="pri" id="btnEnviarId" type="button">Generar link de verificación</button>` : ''}
+        ${enviada ? `<button id="btnRefrescarId" type="button">Revisar si ya la hizo</button>` : ''}
+        ${i.estado!=='verificada' && i.estado!=='rechazada' ? `<button id="btnRechazoId" type="button">El candidato no quiso</button>` : ''}
+      </div>
+    </div>`;
+}
+
+function montarIdentidad(st){
+  const b1 = st.querySelector('#btnEnviarId');
+  if(b1) b1.addEventListener('click', async () => {
+    overlay(true, 'Creando la verificación…', 'Pidiéndole a Didit un link para este candidato.');
+    try{
+      const out = await api(`/api/sessions/${S.sid}/identidad`, {method:'POST', body:{
+        email: S.mail || '', avisarPorCorreo: !!S.mail, publicUrl: location.origin,
+      }});
+      S.diditUrl = out.url;
+      S.ident = {estado:'pendiente', texto:'Enviada, sin completar', didit_status: out.status};
+      saveLocal(); render();
+      toast('Link listo — cópialo y mándaselo');
+    }catch(e){
+      toast(e.message.includes('no está configurada')
+        ? 'Falta configurar DIDIT_API_KEY y DIDIT_WORKFLOW_ID en el servidor'
+        : e.message);
+    }finally{ overlay(false); }
+  });
+
+  const b2 = st.querySelector('#btnRefrescarId');
+  if(b2) b2.addEventListener('click', async () => {
+    overlay(true, 'Consultando…', '');
+    try{
+      const out = await api(`/api/sessions/${S.sid}/identidad/refrescar`, {method:'POST'});
+      await recargarIdentidad();
+      toast(out.veredicto ? `Cotejo: ${out.veredicto}` : `Estado: ${out.diditStatus || 'sin cambios'}`);
+    }catch(e){ toast(e.message); }
+    finally{ overlay(false); }
+  });
+
+  const b3 = st.querySelector('#btnRechazoId');
+  if(b3) b3.addEventListener('click', async () => {
+    if(!confirm('¿El candidato prefirió no verificar su identidad?\n\nEl acta se emite igual, pero dirá que certifica conocimiento y no identidad.')) return;
+    try{
+      await api(`/api/sessions/${S.sid}/identidad/rechazada`, {method:'POST', body:{}});
+      S.ident = {estado:'rechazada', texto:'El candidato no quiso verificar su identidad'};
+      saveLocal(); render();
+    }catch(e){ toast(e.message); }
+  });
+}
+
+async function recargarIdentidad(){
+  if(!S || !S.sid || S.kind !== 'cierre') return;
+  try{
+    const s = await api('/api/sessions/' + S.sid);
+    S.ident = {...(s.identidad || {}), didit_status: s.didit_status,
+               face_verdict: s.face_verdict, face_score: s.face_score};
+    if(s.didit_url) S.diditUrl = s.didit_url;
+    saveLocal();
+    if(fases()[S.fase].k === 'cierre') render();
+  }catch(e){}
+}
+
+/* ===================== captura del rostro =====================
+   El pantallazo se reduce en el navegador antes de subirlo: no hace falta mandar
+   una imagen de 3 MB para comparar dos caras, y así el dato biométrico viaja lo mínimo. */
+function montarCaptura(){
+  const box = $('#shotBox'), file = $('#shotFile');
+  if(!box) return;
+
+  box.addEventListener('click', () => file.click());
+  file.addEventListener('change', e => { if(e.target.files[0]) subirCaptura(e.target.files[0]); });
+  ['dragenter','dragover'].forEach(ev => box.addEventListener(ev, e => { e.preventDefault(); box.classList.add('over'); }));
+  ['dragleave','drop'].forEach(ev => box.addEventListener(ev, e => { e.preventDefault(); box.classList.remove('over'); }));
+  box.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if(f) subirCaptura(f); });
+
+  // Pegar directo con Ctrl+V: es como sale de la tecla de captura de pantalla.
+  if(!window._pegaCaptura){
+    window._pegaCaptura = true;
+    document.addEventListener('paste', e => {
+      if(!$('#shotBox')) return;
+      const it = [...(e.clipboardData?.items || [])].find(x => x.type.startsWith('image/'));
+      if(it) subirCaptura(it.getAsFile());
+    });
+  }
+}
+
+// Reduce a 900px de lado mayor y comprime a JPEG. Suficiente para un face match.
+function reducirImagen(file, max = 900, calidad = 0.85){
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => {
+      const esc = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * esc);
+      c.height = Math.round(img.height * esc);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      res(c.toDataURL('image/jpeg', calidad).split(',')[1]);
+    };
+    img.onerror = () => rej(new Error('no se pudo leer la imagen'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function subirCaptura(file){
+  if(!file || !file.type.startsWith('image/')) return toast('Eso no es una imagen');
+  overlay(true, 'Guardando la captura…', '');
+  try{
+    const b64 = await reducirImagen(file);
+    await api(`/api/sessions/${S.sid}/shot`, {method:'POST', body:{dataBase64:b64, mime:'image/jpeg'}});
+    S.idc.shot = true; touch(); render();
+    toast('Captura guardada');
+  }catch(e){
+    toast('No se pudo guardar: ' + e.message);
+  }finally{ overlay(false); }
 }
 
 /* ===================== señales ===================== */
@@ -690,7 +940,10 @@ async function emitirActa(){
       candidate: S.cand, identity: S.idc, signals: S.sig, data:{mode:S.mode},
       ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||''})),
     }});
-    S.fin = true; S.fecha = Date.now(); S.hash = out.integrity_hash; saveLocal();
+    S.fin = true; S.fecha = Date.now(); S.hash = out.integrity_hash;
+    S.doc = out.documento || null;
+    if(out.identidad) S.ident = {...(S.ident||{}), ...out.identidad};
+    saveLocal();
     verActa();
   }catch(e){
     const f = e.payload && e.payload.faltas;
@@ -710,8 +963,9 @@ function verActa(){
     <div class="acta">
       <div class="ahd">
         <div>
+          <svg class="iso actaiso" viewBox="0 0 174.8 90.4" role="img" aria-label="PeakU" focusable="false"><path class="b" d="M 126.84 54.14 C 131.82 58.32 139.23 57.67 143.40 52.70 L 125.39 37.59 C 121.22 42.56 121.87 49.97 126.84 54.14"/><path class="b" d="M 167.13 6.13 C 162.16 1.96 154.75 2.61 150.58 7.58 L 168.58 22.69 C 172.75 17.71 172.11 10.30 167.13 6.13"/><path class="b" d="M 152.02 24.14 C 147.05 19.96 146.40 12.55 150.58 7.58 L 125.39 37.59 C 129.57 32.62 136.98 31.97 141.95 36.14 C 146.93 40.31 147.57 47.73 143.40 52.70 L 168.58 22.69 C 164.41 27.66 157.00 28.31 152.02 24.14"/><path class="b" d="M 141.95 36.14 C 136.98 31.97 129.57 32.62 125.39 37.59 L 143.40 52.70 C 147.57 47.73 146.93 40.31 141.95 36.14"/><path class="b" d="M 152.02 24.14 C 157.00 28.31 164.41 27.66 168.58 22.69 L 150.58 7.58 C 146.40 12.55 147.05 19.96 152.02 24.14"/><path class="a" d="M 73.12 6.13 C 68.14 1.96 60.73 2.61 56.56 7.58 L 44.90 21.48 L 62.62 36.92 L 74.56 22.69 C 78.73 17.71 78.09 10.30 73.12 6.13"/><path class="a" d="M 120.12 6.13 C 115.15 1.96 107.74 2.61 103.57 7.58 L 121.57 22.69 C 125.75 17.71 125.10 10.30 120.12 6.13"/><path class="a" d="M 105.02 24.14 C 109.99 28.31 117.40 27.66 121.57 22.69 L 103.57 7.58 C 99.39 12.55 100.04 19.96 105.02 24.14"/><path class="a" d="M 53.21 67.60 L 62.98 55.95 C 60.76 58.59 56.82 58.94 54.17 56.72 C 51.53 54.50 51.18 50.55 53.40 47.91 L 24.20 82.71 C 23.55 83.49 22.80 84.15 22.00 84.72 L 21.99 84.75 C 21.99 84.75 33.67 76.08 34.11 75.75 C 36.51 74.02 39.46 72.99 42.66 72.99 C 42.65 72.99 42.65 72.99 42.64 72.99 L 42.68 72.99 C 42.67 72.99 42.66 72.99 42.66 72.99 C 46.39 73.00 50.01 74.67 50.94 78.48 L 50.94 78.48 C 49.87 74.83 50.58 70.73 53.21 67.60"/><path class="a" d="M 58.01 24.14 C 53.04 19.96 52.39 12.55 56.56 7.58 L 6.20 67.60 C 10.37 62.62 17.78 61.98 22.75 66.15 C 25.79 68.70 27.20 72.45 26.90 76.12 C 26.71 78.46 25.83 80.77 24.20 82.71 L 53.40 47.91 L 74.56 22.69 C 70.39 27.66 62.98 28.31 58.01 24.14"/><path class="a" d="M 22.75 66.15 C 17.78 61.98 10.37 62.62 6.20 67.60 C 2.02 72.57 2.67 79.98 7.64 84.16 C 11.84 87.67 17.75 87.75 22.01 84.72 C 22.80 84.15 23.55 83.49 24.20 82.71 C 25.83 80.77 26.71 78.46 26.90 76.12 C 27.20 72.45 25.79 68.70 22.75 66.15"/><path class="a" d="M 121.57 22.69 C 117.40 27.66 109.99 28.31 105.02 24.14 C 100.04 19.96 99.39 12.55 103.57 7.58 L 62.98 55.95 L 53.21 67.60 C 54.60 65.94 56.35 64.77 58.25 64.10 C 62.05 62.74 66.45 63.37 69.76 66.15 C 74.73 70.32 75.38 77.73 71.21 82.71 Z M 121.57 22.69"/><path class="a" d="M 69.76 66.15 C 66.45 63.37 62.05 62.74 58.25 64.10 C 56.35 64.77 54.60 65.94 53.21 67.60 C 50.58 70.73 49.87 74.83 50.94 78.48 C 51.57 80.62 52.82 82.61 54.66 84.16 C 59.62 88.33 67.04 87.68 71.21 82.71 C 75.38 77.73 74.73 70.32 69.76 66.15"/></svg>
           <h2>${esc(S.cand)}</h2>
-          <div class="cert">Informe de verificación · PeakU Verificado</div>
+          <div class="cert">${esc((S.doc && S.doc.titulo) || 'Informe de verificación')} · PeakU Verificado</div>
           <div class="rl2">${esc(S.rol)}${S.cli?' · <b>'+esc(S.cli)+'</b>':''}</div>
         </div>
         <div class="mt">
@@ -730,17 +984,20 @@ function verActa(){
       }).join('')}
 
       <div class="asec">Integridad de la sesión</div>
-      <div class="res"><div class="rn">Identidad — documento, prueba de vida y validación en cámara</div><span class="vd ok">VERIFICADA</span></div>
+      ${S.kind === 'cierre' ? actaIdentidad() : ''}
       <div class="res"><div class="rn">Señales de asistencia durante la sesión</div><span class="vd ${nSig?'par':'ok'}">${nSig?nSig+' REGISTRADA'+(nSig>1?'S':''):'NINGUNA'}</span></div>
       <div class="res"><div class="rn">Grabación y bitácora</div><span class="vd ok">DISPONIBLES</span></div>
       ${nSig?`<div class="aev">Señales: ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(s.t)).join(' · ')}. Se reportan como observación factual; no constituyen un juicio sobre el candidato.</div>`:''}
 
       <div class="aback">
         <h4>PeakU responde por este informe.</h4>
-        <p>Si la persona no es quien este informe dice que es, o su desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo. Verifique la autenticidad en <b>peaku.co/verificar/${esc(S.id)}</b>.</p>
+        <p>${(S.doc && S.doc.tipo === 'acta')
+          ? `Si la persona no es quien este informe dice que es, o su desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo.`
+          : `Si el desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo. <b>Este informe no certifica la identidad de la persona</b>: certifica lo observado sobre los requisitos del cargo.`} Verifique la autenticidad en <b>peaku.co/verificar/${esc(S.id)}</b>.</p>
         <span class="sig">Firma de integridad: ${esc(firmaCorta())} · Evaluó: ${esc(S.eval||'—')} · Revisión de calidad: pendiente de cuatro ojos · Rúbrica anclada 1-5</span>
       </div>
-      <p class="hint" style="margin-top:14px">Metodología: entrevista estructurada con escalas ancladas (1-5) aplicadas sobre los requisitos definidos por el cliente; identidad verificada por proveedor externo más validación en cámara; sesión grabada y archivada.</p>
+      <p class="hint" style="margin-top:14px">${esc((S.doc && S.doc.alcance) || '')} Metodología: entrevista estructurada con escalas ancladas (1-5) sobre los requisitos definidos por el cliente${
+        (S.doc && S.doc.tipo === 'acta') ? '; identidad verificada por proveedor externo y cotejada contra el rostro de la sesión' : ''}; sesión grabada y archivada.</p>
     </div>
     <div class="tools" style="margin-top:14px">
       <button data-back type="button">Volver al cierre</button>
@@ -753,12 +1010,30 @@ function verActa(){
   go('vActa');
 }
 
+function actaIdentidad(){
+  const i = S.ident || {};
+  const est = i.estado || 'pendiente';
+  const score = i.face_score != null ? Number(i.face_score).toFixed(1) : null;
+  const cuadro = {
+    verificada:  ['ok',  'VERIFICADA',    'Documento validado por proveedor externo con prueba de vida, y rostro cotejado contra la sesión' + (score?` (coincidencia ${score}/100)`:'') + '.'],
+    dudosa:      ['par', 'PARCIAL',       'Documento validado, pero el cotejo del rostro quedó en zona dudosa' + (score?` (${score}/100)`:'') + ' y fue revisado manualmente.'],
+    rechazada:   ['nv',  'NO REALIZADA',  'El candidato optó por no verificar su identidad. Este informe no la certifica.'],
+    abandonada:  ['nv',  'SIN COMPLETAR', 'La verificación se envió y no se completó. Este informe no certifica identidad.'],
+    fallida:     ['no',  'NO SUPERADA',   'La verificación de identidad no fue superada.'],
+  }[est] || ['nv', 'NO REALIZADA', 'Este informe no certifica identidad.'];
+  return `<div class="res"><div class="rn">Identidad — documento, prueba de vida y cotejo con la sesión</div>
+            <span class="vd ${cuadro[0]}">${cuadro[1]}</span></div>
+          <div class="aev">${esc(cuadro[2])}</div>`;
+}
+
 function copiarJSON(){
   const out = {
     informe: S.id, sesion_id: S.sid, fecha: new Date(S.fecha||Date.now()).toISOString(),
     candidato: S.cand, cargo: S.rol, cliente: S.cli, evaluador: S.eval, modalidad: S.mode,
     requisitos: S.reqs.map(r => ({requisito:r.n, nivel:r.lvl, veredicto:r.lvl?LVLTXT[r.lvl]:null, evidencia:r.ev||''})),
-    identidad: IDCHECKS.map(c => ({item:c.t, ok:!!S.idc[c.id]})),
+    tipo_sesion: S.kind,
+    integridad: idChecksDe(S.kind).map(c => ({item:c.t, ok:!!S.idc[c.id]})),
+    identidad: S.ident || null,
     senales: SIGNALS.filter(s => S.sig[s.id]).map(s => s.t),
     firma_integridad: S.hash || null,
   };

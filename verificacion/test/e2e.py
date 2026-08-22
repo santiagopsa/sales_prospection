@@ -79,13 +79,13 @@ with sync_playwright() as pw:
     pg.click("#btnIniciar")
     pg.wait_for_selector("#vLive.on", timeout=10000); pg.wait_for_timeout(400)
 
-    # --- identidad ---
+    # --- apertura (sondeo: sin identidad) ---
     live = pg.inner_text("#stage")
-    assert "Identidad" in live and "DILO ASÍ" in live
+    assert "Apertura" in live and "DILO ASÍ" in live
     # cada click re-renderiza el DOM, así que se selecciona de nuevo cada vez
-    for k in ["grab","kyc","ced","ges","nom"]:
+    for k in ["grab","cam"]:
         pg.click(f'[data-idc="{k}"]'); pg.wait_for_timeout(120)
-    if pg.query_selector_all(".chk.on").__len__() != 5: errs.append("no quedaron 5 checks de identidad")
+    if pg.query_selector_all(".chk.on").__len__() != 2: errs.append("no quedaron 2 puntos de integridad")
     shot(pg, "app_06_identidad")
     pg.click("[data-next]"); pg.wait_for_timeout(400)
 
@@ -148,16 +148,16 @@ with sync_playwright() as pw:
     sid = out["id"]
     code, out = post(f"/api/sessions/{sid}/issue", {
         "candidate":"Prueba Regla",
-        "identity":{"grab":True,"kyc":True,"ced":True,"ges":True,"nom":True},
+        "identity":{"grab":True,"cam":True},
         "signals":{}, "ratings":[{"req_text":"x","level":5,"evidence":"corto"}]})
     if code != 409: errs.append(f"el servidor emitió acta sin evidencia suficiente (code {code})")
     code, out = post(f"/api/sessions/{sid}/issue", {
-        "candidate":"Prueba Regla", "identity":{"grab":True}, "signals":{},
+        "candidate":"Prueba Regla", "identity":{}, "signals":{},
         "ratings":[{"req_text":"x","level":5,"evidence":"evidencia larga y suficiente aquí"}]})
-    if code != 409: errs.append(f"el servidor emitió acta con identidad incompleta (code {code})")
+    if code != 409: errs.append(f"el servidor emitió acta con la integridad de sesión incompleta (code {code})")
     code, out = post(f"/api/sessions/{sid}/issue", {
         "candidate":"Prueba Regla",
-        "identity":{"grab":True,"kyc":True,"ced":True,"ges":True,"nom":True},
+        "identity":{"grab":True,"cam":True},
         "signals":{"a":True,"b":True,"c":True},
         "ratings":[{"req_text":"x","level":5,"evidence":"evidencia larga y suficiente aquí"}]})
     if code != 409: errs.append(f"el servidor emitió acta en semáforo rojo (code {code})")
@@ -169,6 +169,18 @@ with sync_playwright() as pw:
     if "Vacantes verificables" not in pg.inner_text("#vTablero"): errs.append("no cargó montada sin slash")
     if pg.evaluate("getComputedStyle(document.body).backgroundColor") in ("rgba(0, 0, 0, 0)","transparent"):
         errs.append("el CSS no cargó bajo el mount point")
+
+    # una ruta de API inexistente debe decirlo en JSON, no servir la aplicación
+    import urllib.error
+    for ruta, esperado in [("/api/no-existe", 404), ("/api/didit/webhook", 405)]:
+        try:
+            r = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/verificacion{ruta}", timeout=3)
+            code, cuerpo = r.status, r.read().decode()
+        except urllib.error.HTTPError as e:
+            code, cuerpo = e.code, e.read().decode()
+        if code != esperado: errs.append(f"{ruta} devolvió {code}, se esperaba {esperado}")
+        if "<html" in cuerpo.lower() or "<div" in cuerpo.lower():
+            errs.append(f"{ruta} devolvió HTML en vez de JSON — el fallback se lo está tragando")
 
     br.close()
 

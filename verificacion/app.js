@@ -11,12 +11,115 @@
 const express = require('express');
 const path = require('path');
 const { buildIntakePrompt } = require('./prompts');
-const { LVLTXT, clean, semaforo, bloqueos, integrityHash, reportCode } = require('./rules');
+const { LVLTXT, clean, esCierre, semaforo, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode } = require('./rules');
+const didit = require('./didit');
 const { T, initSchema } = require('./schema');
 
 // Fallback en memoria para correr sin Postgres (pruebas locales). Se pierde al reiniciar.
 const mem = { companies: [], vacancies: [], requirements: [], sessions: [], ratings: [], seq: 1 };
 const nextId = () => mem.seq++;
+
+// --- Auxiliares de identidad -------------------------------------------------
+
+async function leerSesion(pool, id) {
+  if (pool) {
+    const q = await pool.query(
+      `SELECT id, report_code, candidate, candidate_email, kind, didit_session_id, didit_status,
+              face_verdict, face_score, id_note, shot_mime
+       FROM ${T.sessions} WHERE id=$1`, [id]);
+    return q.rows[0] || null;
+  }
+  return mem.sessions.find(x => x.id === id) || null;
+}
+
+async function leerCaptura(pool, id) {
+  if (pool) {
+    const q = await pool.query(`SELECT shot, shot_mime FROM ${T.sessions} WHERE id=$1`, [id]);
+    if (!q.rows.length || !q.rows[0].shot) return null;
+    return { buffer: q.rows[0].shot, mime: q.rows[0].shot_mime || 'image/jpeg' };
+  }
+  const s = mem.sessions.find(x => x.id === id);
+  return s && s.shot ? { buffer: s.shot, mime: s.shot_mime || 'image/jpeg' } : null;
+}
+
+async function buscarPorDidit(pool, diditSessionId) {
+  if (pool) {
+    const q = await pool.query(`SELECT id FROM ${T.sessions} WHERE didit_session_id=$1 LIMIT 1`, [diditSessionId]);
+    return q.rows.length ? q.rows[0].id : null;
+  }
+  const s = mem.sessions.find(x => x.didit_session_id === diditSessionId);
+  return s ? s.id : null;
+}
+
+/**
+ * Cierra el círculo: recupera la decisión de Didit y, si quedó aprobada, compara el rostro
+ * de la entrevista contra el de la verificación. Si coinciden, la persona que respondió
+ * es la persona verificada — que es lo único que el KYC por sí solo no puede afirmar.
+ *
+ * Al terminar borra la captura: ya cumplió su función y es un dato biométrico.
+ */
+async function procesarIdentidad(pool, body) {
+  const diditId = body.session_id;
+  if (!diditId) throw new Error('el webhook no traía session_id');
+  const id = await buscarPorDidit(pool, diditId);
+  if (!id) { console.warn('[verificacion/didit] sesión desconocida:', diditId); return { ignorada: true }; }
+
+  const d = await didit.decision(diditId);
+  let veredicto = null, score = null;
+
+  if (d.status === 'Approved' && d.imagenRostro) {
+    const captura = await leerCaptura(pool, id);
+    if (captura) {
+      try {
+        const kyc = await didit.bajarImagen(d.imagenRostro);
+        const fm = await didit.faceMatch(captura, kyc, {
+          vendorData: String(id),
+          metadata: { origen: 'peaku-verificacion' },
+        });
+        veredicto = fm.veredicto;
+        score = fm.score;
+        console.log(`[verificacion/didit] sesión ${id}: cotejo ${veredicto} (${score})`);
+      } catch (e) {
+        console.error('[verificacion/didit] face match falló:', e.message);
+      }
+    } else {
+      console.warn(`[verificacion/didit] sesión ${id}: aprobada pero sin captura de la entrevista`);
+    }
+  }
+
+  await guardarIdentidad(pool, id, {
+    diditStatus: d.status,
+    veredicto, score,
+    documento: d.documento,
+    // La captura se borra en cuanto el cotejo termina (o falla de forma definitiva).
+    borrarCaptura: d.status === 'Approved' || d.status === 'Declined',
+  });
+  return { sesion: id, diditStatus: d.status, veredicto, score };
+}
+
+async function guardarIdentidad(pool, id, { diditStatus, veredicto, score, documento, borrarCaptura }) {
+  if (pool) {
+    await pool.query(
+      `UPDATE ${T.sessions}
+         SET didit_status=$2, didit_at=NOW(),
+             face_verdict=COALESCE($3, face_verdict),
+             face_score=COALESCE($4, face_score),
+             face_at=CASE WHEN $3 IS NULL THEN face_at ELSE NOW() END,
+             id_doc=COALESCE($5::jsonb, id_doc),
+             shot=CASE WHEN $6 THEN NULL ELSE shot END,
+             shot_mime=CASE WHEN $6 THEN NULL ELSE shot_mime END,
+             updated_at=NOW()
+       WHERE id=$1`,
+      [id, diditStatus, veredicto, score, documento ? JSON.stringify(documento) : null, !!borrarCaptura]);
+    return;
+  }
+  const s = mem.sessions.find(x => x.id === id);
+  if (!s) return;
+  s.didit_status = diditStatus;
+  if (veredicto) { s.face_verdict = veredicto; s.face_score = score; }
+  if (documento) s.id_doc = documento;
+  if (borrarCaptura) { s.shot = null; s.shot_mime = null; }
+}
 
 function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {}) {
   const r = express.Router();
@@ -264,22 +367,196 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       if (!clean(b.candidate)) return res.status(400).json({ error: 'Falta el nombre del candidato' });
       const code = reportCode();
       const vacancyId = b.vacancy_id ? Number(b.vacancy_id) : null;
+      const kind = b.kind === 'cierre' ? 'cierre' : 'sondeo';
       if (pool) {
         const q = await pool.query(
-          `INSERT INTO ${T.sessions} (vacancy_id, report_code, candidate, candidate_email, evaluator, mode, status, started_at)
-           VALUES ($1,$2,$3,$4,$5,$6,'draft',NOW()) RETURNING id, report_code, started_at`,
-          [vacancyId, code, clean(b.candidate), clean(b.candidate_email) || null, clean(b.evaluator) || null, b.mode === 'A' ? 'A' : 'B']
+          `INSERT INTO ${T.sessions} (vacancy_id, report_code, candidate, candidate_email, evaluator, mode, kind, status, started_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'draft',NOW()) RETURNING id, report_code, kind, started_at`,
+          [vacancyId, code, clean(b.candidate), clean(b.candidate_email) || null, clean(b.evaluator) || null, b.mode === 'A' ? 'A' : 'B', kind]
         );
         return res.json({ ok: true, ...q.rows[0] });
       }
       const s = {
         id: nextId(), vacancy_id: vacancyId, report_code: code, candidate: clean(b.candidate),
         candidate_email: clean(b.candidate_email), evaluator: clean(b.evaluator), mode: b.mode === 'A' ? 'A' : 'B',
-        status: 'draft', identity: {}, signals: {}, data: {}, started_at: new Date().toISOString(),
+        kind, status: 'draft', identity: {}, signals: {}, data: {}, started_at: new Date().toISOString(),
       };
       mem.sessions.push(s);
-      res.json({ ok: true, id: s.id, report_code: s.report_code, started_at: s.started_at });
+      res.json({ ok: true, id: s.id, report_code: s.report_code, kind, started_at: s.started_at });
     } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // -------------------------------------------------------------------------
+  // IDENTIDAD (solo en sesiones de cierre)
+  //
+  // El candidato no muestra ningún documento en la llamada. Lo único que pasa durante
+  // la entrevista es una captura de su rostro; el KYC va después, por su cuenta, desde
+  // el celular. Al volver el resultado, cotejamos las dos caras.
+  // -------------------------------------------------------------------------
+
+  // Guarda el pantallazo del video. Llega en base64 ya reducido por el navegador.
+  r.post('/api/sessions/:id/shot', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { dataBase64, mime } = req.body || {};
+      if (!dataBase64) return res.status(400).json({ error: 'falta la imagen' });
+      const buf = Buffer.from(dataBase64, 'base64');
+      if (buf.length > 3 * 1024 * 1024) return res.status(413).json({ error: 'La captura pesa más de 3 MB.' });
+      const tipo = (mime || 'image/jpeg').startsWith('image/') ? mime : 'image/jpeg';
+
+      if (pool) {
+        const q = await pool.query(
+          `UPDATE ${T.sessions} SET shot=$2, shot_mime=$3, shot_at=NOW(), updated_at=NOW() WHERE id=$1 RETURNING id`,
+          [id, buf, tipo]);
+        if (!q.rows.length) return res.status(404).json({ error: 'not found' });
+      } else {
+        const s = mem.sessions.find(x => x.id === id);
+        if (!s) return res.status(404).json({ error: 'not found' });
+        Object.assign(s, { shot: buf, shot_mime: tipo, shot_at: new Date().toISOString() });
+      }
+      res.json({ ok: true, bytes: buf.length });
+    } catch (e) {
+      console.error('[verificacion/shot]', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Devuelve la captura para poder revisarla (mientras siga guardada).
+  r.get('/api/sessions/:id/shot', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      let buf = null, mime = 'image/jpeg';
+      if (pool) {
+        const q = await pool.query(`SELECT shot, shot_mime FROM ${T.sessions} WHERE id=$1`, [id]);
+        if (q.rows.length && q.rows[0].shot) { buf = q.rows[0].shot; mime = q.rows[0].shot_mime || mime; }
+      } else {
+        const s = mem.sessions.find(x => x.id === id);
+        if (s && s.shot) { buf = s.shot; mime = s.shot_mime || mime; }
+      }
+      if (!buf) return res.status(404).json({ error: 'sin captura' });
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(buf);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Crea la sesión de Didit y devuelve el link para mandárselo al candidato.
+  r.post('/api/sessions/:id/identidad', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const b = req.body || {};
+      if (!didit.activo()) {
+        return res.status(501).json({ error: 'Verificación de identidad no configurada', ...didit.estado() });
+      }
+      const s = await leerSesion(pool, id);
+      if (!s) return res.status(404).json({ error: 'not found' });
+      if (!esCierre(s.kind)) return res.status(400).json({ error: 'La verificación de identidad solo aplica en una sesión de cierre.' });
+
+      const base = (b.publicUrl || process.env.PUBLIC_URL || '').replace(/\/+$/, '');
+      const out = await didit.crearSesion({
+        vendorData: s.report_code,
+        metadata: { session_id: id, report_code: s.report_code, candidate: s.candidate },
+        email: clean(b.email) || s.candidate_email || '',
+        telefono: clean(b.telefono),
+        avisarPorCorreo: !!b.avisarPorCorreo,
+        callbackUrl: base ? `${base}/verificacion/gracias` : undefined,
+      });
+
+      if (pool) {
+        await pool.query(
+          `UPDATE ${T.sessions} SET didit_session_id=$2, didit_url=$3, didit_status=$4, updated_at=NOW() WHERE id=$1`,
+          [id, out.sessionId, out.url, out.status || 'Not Started']);
+      } else {
+        Object.assign(mem.sessions.find(x => x.id === id),
+          { didit_session_id: out.sessionId, didit_url: out.url, didit_status: out.status || 'Not Started' });
+      }
+      res.json({ ok: true, url: out.url, sessionId: out.sessionId, status: out.status });
+    } catch (e) {
+      console.error('[verificacion/identidad]', e.message);
+      res.status(502).json({ error: 'Didit: ' + e.message });
+    }
+  });
+
+  // El candidato se negó a verificarse. No es sospecha: el acta se emite sin capa de identidad.
+  r.post('/api/sessions/:id/identidad/rechazada', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const nota = clean((req.body || {}).nota);
+      if (pool) {
+        const q = await pool.query(
+          `UPDATE ${T.sessions} SET id_note='rechazada', data = COALESCE(data,'{}'::jsonb) || $2::jsonb, updated_at=NOW()
+           WHERE id=$1 RETURNING id`, [id, JSON.stringify({ id_rechazo_nota: nota })]);
+        if (!q.rows.length) return res.status(404).json({ error: 'not found' });
+      } else {
+        const s = mem.sessions.find(x => x.id === id);
+        if (!s) return res.status(404).json({ error: 'not found' });
+        s.id_note = 'rechazada';
+      }
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Webhook de Didit. Solo nos dice qué sesión cambió; los datos los pedimos nosotros.
+  r.post('/api/didit/webhook', async (req, res) => {
+    const body = req.body || {};
+    try {
+      const chk = didit.firmaValida(req.headers, body);
+      if (!chk.ok) {
+        console.warn('[verificacion/didit] webhook rechazado:', chk.motivo);
+        return res.status(401).json({ error: chk.motivo });
+      }
+      // Responder rápido: Didit reintenta si tardamos, y el cotejo puede demorar.
+      res.json({ ok: true });
+      procesarIdentidad(pool, body).catch(e => console.error('[verificacion/didit] cotejo:', e.message));
+    } catch (e) {
+      console.error('[verificacion/didit] webhook:', e.message);
+      if (!res.headersSent) res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Reintento manual, por si el webhook no llegó.
+  r.post('/api/sessions/:id/identidad/refrescar', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const s = await leerSesion(pool, id);
+      if (!s) return res.status(404).json({ error: 'not found' });
+      if (!s.didit_session_id) return res.status(400).json({ error: 'Esta sesión no tiene verificación enviada.' });
+      const out = await procesarIdentidad(pool, { session_id: s.didit_session_id });
+      res.json({ ok: true, ...out });
+    } catch (e) {
+      res.status(502).json({ error: e.message });
+    }
+  });
+
+  r.get('/api/didit/estado', (_req, res) => res.json(didit.estado()));
+
+  // Abrir el webhook en el navegador es un GET, y el webhook es POST. En vez de un 404 seco,
+  // decir qué es esta ruta y si está lista para recibir: es la primera cosa que uno prueba.
+  r.get('/api/didit/webhook', (_req, res) => {
+    const e = didit.estado();
+    res.status(405).json({
+      esto_es: 'El destino del webhook de Didit. Solo acepta POST, y quien lo llama es Didit.',
+      ver_en_el_navegador_es_normal: true,
+      listo_para_recibir: e.activo,
+      firma_validada: e.webhookFirmado,
+      falta: e.falta.concat(e.webhookFirmado ? [] : ['DIDIT_WEBHOOK_SECRET']),
+      siguiente: 'Si "listo_para_recibir" es true, la URL está bien registrada en Didit. El estado completo está en /verificacion/api/didit/estado.',
+    });
+  });
+
+  // Página de regreso del candidato tras verificarse.
+  r.get('/gracias', (_req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1"><title>Verificación recibida</title>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap">
+      <style>body{font-family:Montserrat,system-ui,sans-serif;background:#F5FAFC;color:#2A2E31;display:grid;
+      place-items:center;min-height:100vh;margin:0;padding:24px;text-align:center}
+      .c{background:#fff;border-radius:14px;padding:36px 32px;max-width:420px;box-shadow:0 4px 20px rgba(20,40,50,.08);
+      border-top:3px solid #00C3FF}h1{font-size:21px;margin:0 0 10px}p{color:#565656;line-height:1.55;font-size:15px;margin:0}</style>
+      </head><body><div class="c"><h1>Listo, recibimos tu verificación</h1>
+      <p>Gracias por tomarte el minuto. No guardamos la imagen de tu documento y no se comparte con la empresa:
+      el informe solo indica que tu identidad quedó verificada.</p></div></body></html>`);
   });
 
   // Autosave del avance.
@@ -289,7 +566,10 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       const b = req.body || {};
       const identity = b.identity || {}, signals = b.signals || {};
       const ratings = Array.isArray(b.ratings) ? b.ratings : [];
-      const sem = semaforo({ identity, signals });
+      const s0 = await leerSesion(pool, id);
+      if (!s0) return res.status(404).json({ error: 'not found' });
+      const ctx = { kind: s0.kind, faceVerdict: s0.face_verdict, diditStatus: s0.didit_status, idNote: s0.id_note };
+      const sem = semaforo({ identity, signals, ...ctx });
 
       if (pool) {
         const c = await pool.connect();
@@ -312,7 +592,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
             );
           }
           await c.query('COMMIT');
-          return res.json({ ok: true, id, semaforo: sem });
+          return res.json({ ok: true, id, semaforo: sem, identidad: estadoIdentidad(ctx) });
         } catch (e) { await c.query('ROLLBACK'); throw e; }
         finally { c.release(); }
       }
@@ -325,7 +605,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         id: nextId(), session_id: id, requirement_id: q.requirement_id || null, req_text: clean(q.req_text),
         ord: i, level: q.level || null, verdict: q.level ? LVLTXT[q.level] : null, evidence: clean(q.evidence),
       }));
-      res.json({ ok: true, id, semaforo: sem });
+      res.json({ ok: true, id, semaforo: sem, identidad: estadoIdentidad(ctx) });
     } catch (e) {
       console.error('[verificacion/sessions.patch]', e.message);
       res.status(500).json({ error: e.message });
@@ -339,13 +619,20 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       const b = req.body || {};
       const identity = b.identity || {}, signals = b.signals || {};
       const ratings = Array.isArray(b.ratings) ? b.ratings : [];
-      const { faltas, semaforo: sem } = bloqueos({ identity, signals, ratings });
-      if (faltas.length) return res.status(409).json({ error: 'No se puede emitir el acta', faltas, semaforo: sem });
+      const s0 = await leerSesion(pool, id);
+      if (!s0) return res.status(404).json({ error: 'not found' });
+      const ctx = { kind: s0.kind, faceVerdict: s0.face_verdict, diditStatus: s0.didit_status, idNote: s0.id_note };
+      const { faltas, semaforo: sem, identidad } = bloqueos({ identity, signals, ratings, ...ctx });
+      if (faltas.length) {
+        return res.status(409).json({ error: 'No se puede emitir el documento', faltas, semaforo: sem, identidad });
+      }
+      const doc = tipoDocumento(ctx);
 
       const hash = integrityHash({
         candidate: clean(b.candidate),
         ratings: ratings.map(x => ({ t: x.req_text, l: x.level })),
-        identity, signals, at: new Date().toISOString(),
+        identity, signals, kind: s0.kind, identidad: identidad.estado,
+        faceScore: s0.face_score ?? null, at: new Date().toISOString(),
       });
 
       if (pool) {
@@ -356,12 +643,12 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
           [id, sem.color, JSON.stringify(identity), JSON.stringify(signals), JSON.stringify(b.data || {}), hash]
         );
         if (!q.rows.length) return res.status(404).json({ error: 'not found' });
-        return res.json({ ok: true, semaforo: sem, ...q.rows[0] });
+        return res.json({ ok: true, semaforo: sem, identidad, documento: doc, ...q.rows[0] });
       }
       const s = mem.sessions.find(x => x.id === id);
       if (!s) return res.status(404).json({ error: 'not found' });
       Object.assign(s, { status: 'issued', semaforo: sem.color, identity, signals, data: b.data || {}, integrity_hash: hash, issued_at: new Date().toISOString() });
-      res.json({ ok: true, semaforo: sem, id, report_code: s.report_code, issued_at: s.issued_at, integrity_hash: hash });
+      res.json({ ok: true, semaforo: sem, identidad, documento: doc, id, report_code: s.report_code, issued_at: s.issued_at, integrity_hash: hash });
     } catch (e) {
       console.error('[verificacion/sessions.issue]', e.message);
       res.status(500).json({ error: e.message });
@@ -372,7 +659,8 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
     try {
       if (pool) {
         const q = await pool.query(`
-          SELECT s.id, s.report_code, s.candidate, s.evaluator, s.mode, s.status, s.semaforo,
+          SELECT s.id, s.report_code, s.candidate, s.evaluator, s.mode, s.kind, s.status, s.semaforo,
+                 s.didit_status, s.face_verdict, s.face_score, s.id_note,
                  s.started_at, s.issued_at, v.title AS vacancy_title, c.name AS company_name
           FROM ${T.sessions} s
           LEFT JOIN ${T.vacancies} v ON v.id=s.vacancy_id
@@ -397,7 +685,11 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
           LEFT JOIN ${T.companies} c ON c.id=v.company_id WHERE s.id=$1`, [id]);
         if (!s.rows.length) return res.status(404).json({ error: 'not found' });
         const q = await pool.query(`SELECT * FROM ${T.ratings} WHERE session_id=$1 ORDER BY ord, id`, [id]);
-        return res.json({ ...s.rows[0], ratings: q.rows });
+        const row = s.rows[0];
+        const ctx = { kind: row.kind, faceVerdict: row.face_verdict, diditStatus: row.didit_status, idNote: row.id_note };
+        const { shot, ...sinImagen } = row;   // la imagen no viaja en el JSON
+        return res.json({ ...sinImagen, tiene_captura: !!shot, identidad: estadoIdentidad(ctx),
+                          documento: tipoDocumento(ctx), ratings: q.rows });
       }
       const s = mem.sessions.find(x => x.id === id);
       if (!s) return res.status(404).json({ error: 'not found' });
@@ -424,7 +716,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
 
   // Salud propia — no interfiere con /api/health del Sandler.
   r.get('/api/health', async (_req, res) => {
-    const out = { ok: true, app: 'verificacion', poolShared: !!pool, llm: !!anthropic, model };
+    const out = { ok: true, app: 'verificacion', poolShared: !!pool, llm: !!anthropic, model, identidad: didit.estado() };
     if (!pool) return res.json({ ...out, db: false, mode: 'memoria' });
     try {
       const q = pool.query(`SELECT 1 AS ping FROM ${T.companies} LIMIT 1`);
@@ -437,7 +729,21 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
     }
   });
 
-  // SPA fallback propio: cualquier ruta bajo el mount point sirve el index.
+  // Una ruta /api que no existe debe decirlo, no devolver la aplicación.
+  // Sin esto, abrir por error /api/lo-que-sea entrega el index.html: el navegador lo pinta
+  // sin estilos y parece que la app está rota, cuando lo único que pasa es que la ruta no existe.
+  r.all('/api/*', (req, res) => {
+    res.status(404).json({
+      error: 'Esta ruta de la API no existe',
+      ruta: req.originalUrl,
+      metodo: req.method,
+      pista: req.path === '/api/didit/webhook'
+        ? 'El webhook solo acepta POST y lo llama Didit, no el navegador. Para comprobar que está configurado, abre /verificacion/api/didit/estado.'
+        : 'Revisa la ruta. El estado general está en /verificacion/api/health.',
+    });
+  });
+
+  // SPA fallback: cualquier otra ruta bajo el mount point sirve el index.
   r.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
   return r;

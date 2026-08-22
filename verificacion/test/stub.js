@@ -8,7 +8,7 @@ const crypto = require('crypto');
 
 const PUB = path.join(__dirname, '..', 'public');
 const MOUNT = '/verificacion'; // igual que en el servidor real
-const { LVLTXT, semaforo, bloqueos } = require('../rules'); // reglas reales del servidor
+const { LVLTXT, semaforo, bloqueos, estadoIdentidad, tipoDocumento } = require('../rules'); // reglas reales del servidor
 const db = { companies:[], vacancies:[], requirements:[], sessions:[], ratings:[], seq:1 };
 const nid = () => db.seq++;
 const clean = s => (s==null?'':String(s)).trim();
@@ -115,10 +115,21 @@ const server = http.createServer(async (req, res) => {
     const b = await body(req);
     if(!clean(b.candidate)) return json(res,400,{error:'Falta el nombre del candidato'});
     const s={id:nid(), vacancy_id:b.vacancy_id||null, report_code:'PKV-2026-'+crypto.randomInt(100000,999999),
-      candidate:clean(b.candidate), evaluator:clean(b.evaluator), mode:b.mode==='A'?'A':'B', status:'draft',
+      candidate:clean(b.candidate), evaluator:clean(b.evaluator), mode:b.mode==='A'?'A':'B',
+      kind:b.kind==='cierre'?'cierre':'sondeo', status:'draft',
       identity:{}, signals:{}, started_at:new Date().toISOString()};
     db.sessions.push(s);
-    return json(res,200,{ok:true, id:s.id, report_code:s.report_code, started_at:s.started_at});
+    return json(res,200,{ok:true, id:s.id, report_code:s.report_code, kind:s.kind, started_at:s.started_at});
+  }
+
+  mm = p.match(/^\/api\/sessions\/(\d+)$/);
+  if(mm && m==='GET'){
+    const s = db.sessions.find(x=>x.id===+mm[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    const ctx = {kind:s.kind, faceVerdict:s.face_verdict, diditStatus:s.didit_status, idNote:s.id_note};
+    const {shot, ...sinImagen} = s;
+    return json(res,200,{...sinImagen, tiene_captura:!!shot, identidad:estadoIdentidad(ctx),
+      documento:tipoDocumento(ctx), ratings:db.ratings.filter(r=>r.session_id===s.id)});
   }
 
   if(p === '/api/sessions' && m==='GET'){
@@ -133,12 +144,13 @@ const server = http.createServer(async (req, res) => {
     const b = await body(req);
     const s = db.sessions.find(x=>x.id===+mm[1]);
     if(!s) return json(res,404,{error:'not found'});
-    const sem = semaforo({identity:b.identity||{}, signals:b.signals||{}});
+    const ctx = {kind:s.kind, faceVerdict:s.face_verdict, diditStatus:s.didit_status, idNote:s.id_note};
+    const sem = semaforo({identity:b.identity||{}, signals:b.signals||{}, ...ctx});
     Object.assign(s, {identity:b.identity||{}, signals:b.signals||{}, semaforo:sem.color});
     db.ratings = db.ratings.filter(r=>r.session_id!==s.id);
     (b.ratings||[]).forEach((r,i)=>db.ratings.push({id:nid(), session_id:s.id, req_text:r.req_text, ord:i,
       level:r.level, verdict:r.level?LVLTXT[r.level]:null, evidence:r.evidence}));
-    return json(res,200,{ok:true, id:s.id, semaforo:sem});
+    return json(res,200,{ok:true, id:s.id, semaforo:sem, identidad:estadoIdentidad(ctx)});
   }
 
   mm = p.match(/^\/api\/sessions\/(\d+)\/issue$/);
@@ -146,13 +158,72 @@ const server = http.createServer(async (req, res) => {
     const b = await body(req);
     const s = db.sessions.find(x=>x.id===+mm[1]);
     if(!s) return json(res,404,{error:'not found'});
-    const sem = semaforo({identity:b.identity||{}, signals:b.signals||{}});
+    const ctx = {kind:s.kind, faceVerdict:s.face_verdict, diditStatus:s.didit_status, idNote:s.id_note};
+    const sem = semaforo({identity:b.identity||{}, signals:b.signals||{}, ...ctx});
     const ratings = b.ratings||[];
-    const { faltas } = bloqueos({identity:b.identity||{}, signals:b.signals||{}, ratings});
-    if(faltas.length) return json(res,409,{error:'No se puede emitir el acta', faltas, semaforo:sem});
+    const { faltas, identidad } = bloqueos({identity:b.identity||{}, signals:b.signals||{}, ratings, ...ctx});
+    if(faltas.length) return json(res,409,{error:'No se puede emitir el documento', faltas, semaforo:sem, identidad});
     const hash = crypto.createHash('sha256').update(JSON.stringify({c:b.candidate, r:ratings.map(r=>[r.req_text,r.level])})).digest('hex');
     Object.assign(s, {status:'issued', semaforo:sem.color, integrity_hash:hash, issued_at:new Date().toISOString()});
-    return json(res,200,{ok:true, semaforo:sem, id:s.id, report_code:s.report_code, issued_at:s.issued_at, integrity_hash:hash});
+    return json(res,200,{ok:true, semaforo:sem, identidad, documento:tipoDocumento(ctx),
+      id:s.id, report_code:s.report_code, issued_at:s.issued_at, integrity_hash:hash});
+  }
+
+  // --- identidad simulada (no llama a Didit de verdad) ---
+  mm = p.match(/^\/api\/sessions\/(\d+)\/shot$/);
+  if(mm && m==='POST'){
+    const b = await body(req);
+    const s = db.sessions.find(x=>x.id===+mm[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    if(!b.dataBase64) return json(res,400,{error:'falta la imagen'});
+    s.shot = Buffer.from(b.dataBase64,'base64'); s.shot_mime = b.mime||'image/jpeg';
+    return json(res,200,{ok:true, bytes:s.shot.length});
+  }
+
+  mm = p.match(/^\/api\/sessions\/(\d+)\/identidad$/);
+  if(mm && m==='POST'){
+    const s = db.sessions.find(x=>x.id===+mm[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    if(s.kind!=='cierre') return json(res,400,{error:'La verificación de identidad solo aplica en una sesión de cierre.'});
+    s.didit_session_id = 'sess_'+crypto.randomInt(100000,999999);
+    s.didit_url = 'https://verify.didit.me/es/session/'+s.didit_session_id;
+    s.didit_status = 'Not Started';
+    return json(res,200,{ok:true, url:s.didit_url, sessionId:s.didit_session_id, status:s.didit_status});
+  }
+
+  mm = p.match(/^\/api\/sessions\/(\d+)\/identidad\/rechazada$/);
+  if(mm && m==='POST'){
+    const s = db.sessions.find(x=>x.id===+mm[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    s.id_note = 'rechazada';
+    return json(res,200,{ok:true});
+  }
+
+  // Simula que el candidato completó el KYC. En el servidor real esto lo dispara el webhook.
+  mm = p.match(/^\/api\/sessions\/(\d+)\/identidad\/refrescar$/);
+  if(mm && m==='POST'){
+    const s = db.sessions.find(x=>x.id===+mm[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    if(!s.didit_session_id) return json(res,400,{error:'Esta sesión no tiene verificación enviada.'});
+    // El caso a simular se controla desde la prueba con __simular
+    const sim = db.simular || {status:'Approved', score:96.4, verdict:'coincide'};
+    s.didit_status = sim.status;
+    if(sim.verdict){ s.face_verdict = sim.verdict; s.face_score = sim.score; }
+    s.shot = null;   // el servidor real borra la captura tras el cotejo
+    return json(res,200,{ok:true, sesion:s.id, diditStatus:s.didit_status, veredicto:s.face_verdict, score:s.face_score});
+  }
+
+  if(p === '/api/__simular' && m==='POST'){ db.simular = await body(req); return json(res,200,{ok:true}); }
+
+  if(p === '/api/didit/estado') return json(res,200,{activo:true, falta:[], webhookFirmado:true, umbrales:{aprueba:70,duda:50}});
+
+  // Una ruta /api inexistente responde 404 JSON, no la aplicación.
+  if(p.startsWith('/api/')){
+    if(p === '/api/didit/webhook' && m === 'GET'){
+      return json(res,405,{esto_es:'El destino del webhook de Didit. Solo acepta POST.',
+        ver_en_el_navegador_es_normal:true, listo_para_recibir:true, firma_validada:true, falta:[]});
+    }
+    return json(res,404,{error:'Esta ruta de la API no existe', ruta:MOUNT+p, metodo:m});
   }
 
   // estáticos

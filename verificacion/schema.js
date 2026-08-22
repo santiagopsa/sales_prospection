@@ -104,6 +104,23 @@ async function initSchema(pool) {
 
   // Migraciones incrementales — seguras aunque ya existan.
   const alters = [
+    // Tipo de sesión: 'sondeo' (primera entrevista, sin identidad) o 'cierre' (finalista, con identidad)
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS kind TEXT DEFAULT 'sondeo'`,
+    // Verificación de identidad con Didit
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS didit_session_id TEXT`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS didit_url TEXT`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS didit_status TEXT`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS didit_at TIMESTAMPTZ`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS id_doc JSONB`,
+    // El pantallazo de la entrevista vive aquí solo hasta que el face match lo usa; después se borra.
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS shot BYTEA`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS shot_mime TEXT`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS shot_at TIMESTAMPTZ`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS face_score NUMERIC`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS face_verdict TEXT`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS face_at TIMESTAMPTZ`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS id_note TEXT`,
+    `CREATE INDEX IF NOT EXISTS idx_v_sess_didit ON ${T.sessions}(didit_session_id)`,
     `ALTER TABLE ${T.vacancies} ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
