@@ -534,13 +534,18 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
   // decir qué es esta ruta y si está lista para recibir: es la primera cosa que uno prueba.
   r.get('/api/didit/webhook', (_req, res) => {
     const e = didit.estado();
+    const falta = e.falta.concat(e.webhookFirmado ? [] : ['DIDIT_WEBHOOK_SECRET']);
     res.status(405).json({
       esto_es: 'El destino del webhook de Didit. Solo acepta POST, y quien lo llama es Didit.',
       ver_en_el_navegador_es_normal: true,
-      listo_para_recibir: e.activo,
+      // Ojo con la diferencia: esto describe al SERVIDOR, no a la consola de Didit.
+      // Que el servidor esté listo no dice nada sobre si Didit tiene la URL registrada.
+      servidor_listo_para_recibir: e.activo,
       firma_validada: e.webhookFirmado,
-      falta: e.falta.concat(e.webhookFirmado ? [] : ['DIDIT_WEBHOOK_SECRET']),
-      siguiente: 'Si "listo_para_recibir" es true, la URL está bien registrada en Didit. El estado completo está en /verificacion/api/didit/estado.',
+      falta,
+      siguiente: falta.length
+        ? `Falta configurar ${falta.join(', ')} en las variables de entorno. Aparte de eso, esta URL hay que registrarla como destino de webhook en la consola de Didit: el servidor no puede saber si ya lo hiciste.`
+        : 'El servidor está listo y valida la firma. Lo único que no puede comprobar desde aquí es si Didit tiene esta URL registrada como destino: eso se ve en la consola de Didit.',
     });
   });
 
