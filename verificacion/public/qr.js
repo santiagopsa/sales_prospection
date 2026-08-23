@@ -142,8 +142,11 @@
     }
     localizador(3, 3); localizador(3, size - 4); localizador(size - 4, 3);
 
-    // Sincronización.
-    for (i = 0; i < size; i++) { set(6, i, i % 2 === 0); set(i, 6, i % 2 === 0); }
+    // Sincronización: SOLO el tramo entre los localizadores, columnas/filas 8 a size-9.
+    // Recorrer la fila y la columna completas pisa el borde de los localizadores, que son
+    // justo lo que una cámara busca primero para encontrar el código. Con ese borde roto,
+    // el lector no ve ningún QR — aunque los datos de adentro estén impecables.
+    for (i = 8; i <= size - 9; i++) { set(6, i, i % 2 === 0); set(i, 6, i % 2 === 0); }
 
     // Alineación, saltando los tres cruces con los localizadores.
     var cen = ALIN[v], n = cen.length;
@@ -154,7 +157,11 @@
     }
 
     // Reserva de las áreas de formato y de versión (se rellenan después).
-    for (i = 0; i <= 8; i++) { set(8, i, false); set(i, 8, false); }
+    // Se salta el índice 6: (8,6) y (6,8) NO son área de formato, son el primer módulo de
+    // cada patrón de sincronización. Pisarlos deja el código válido para un verificador que
+    // solo mire los datos, y a la vez ilegible para un lector real: la sincronización es lo
+    // que usa una cámara para saber dónde cae cada módulo.
+    for (i = 0; i <= 8; i++) { if (i !== 6) { set(8, i, false); set(i, 8, false); } }
     for (i = 0; i < 8; i++) { set(8, size - 1 - i, false); set(size - 1 - i, 8, false); }
     set(size - 8, 8, true);   // módulo oscuro fijo
     if (v >= 7) {

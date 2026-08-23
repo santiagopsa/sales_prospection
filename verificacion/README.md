@@ -167,7 +167,16 @@ Con `shape-rendering="crispEdges"` el navegador ajusta cada módulo a píxeles e
 
 Tamaños objetivo: **6** en el acta, **7** en el cierre, y el botón *Ampliar para compartir pantalla*, que calcula el módulo contra el tamaño de la ventana. Ese botón existe porque compartir pantalla en una videollamada comprime la imagen, y lo primero que se pierde en una compresión es justo el detalle fino de un QR. El mínimo es 4px CSS por módulo: por debajo, una cámara no lo resuelve.
 
-Cómo se sabe que funciona, sin librería de referencia contra la cual comparar: `test/qr_verify.py` vuelve a implementar el **decodificador** desde la norma, en otro lenguaje, y comprueba que los bits de formato pasan su BCH, que los síndromes Reed-Solomon de cada bloque dan cero y que el texto que sale es idéntico al que entró. `test/e2e_qr.py` va más allá y decodifica el SVG que el navegador de verdad dibujó, comprueba que coincide con la URL impresa al lado, y **abre esa dirección** para confirmar que responde.
+#### El error que enseñó a probar esto bien
+
+El QR decodificaba perfecto —formato válido, síndromes Reed-Solomon en cero, texto exacto— y **ninguna cámara lo leía**. Eran dos defectos en el andamiaje, no en los datos:
+
+1. Los patrones de **sincronización** se dibujaban recorriendo la fila 6 y la columna 6 completas, encima de los localizadores ya dibujados. Eso partía el borde de los tres localizadores — que es exactamente lo que una cámara busca primero para encontrar que ahí hay un QR. Con ese borde roto, el lector no ve ningún código.
+2. La reserva del área de formato pisaba `(8,6)` y `(6,8)`, que no son área de formato sino el primer módulo de cada patrón de sincronización.
+
+La lección: **un QR puede tener los datos impecables y ser ilegible si su andamiaje está mal.** El decodificador propio no lo veía porque deduce la rejilla del ancho del localizador; un lector real hace lo contrario, usa la sincronización para ubicar cada módulo. Por eso `qr_verify.py` ahora revisa **los patrones fijos uno por uno** —localizadores, separadores, sincronización, alineación, módulo oscuro— antes de mirar los datos.
+
+Cómo se sabe que funciona, sin librería de referencia contra la cual comparar: `test/qr_verify.py` vuelve a implementar el **decodificador** desde la norma, en otro lenguaje, y comprueba que los patrones fijos están donde deben, que los bits de formato pasan su BCH, que los síndromes Reed-Solomon de cada bloque dan cero y que el texto que sale es idéntico al que entró. `test/e2e_qr.py` va más allá y decodifica el SVG que el navegador de verdad dibujó, comprueba que coincide con la URL impresa al lado, y **abre esa dirección** para confirmar que responde.
 
 Y `test/e2e_qr_pixeles.py` decodifica desde los **píxeles rasterizados** al 90%, 100%, 110%, 125%, 150%, 175% y 200%, y exige que en cada escala el módulo mida un número entero de píxeles físicos. Esa prueba existe porque el error de arriba pasó de verdad: el codificador estaba bien, la matriz decodificaba perfecto, y el QR no escaneaba. Solo mirando el resultado pintado se ve.
 

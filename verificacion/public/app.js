@@ -1180,7 +1180,7 @@ function bloqueIdentidad(){
 // El QR a pantalla completa. Compartir pantalla en una videollamada comprime la imagen,
 // y lo primero que se pierde en una compresión es justo el detalle fino de un QR.
 // Grande sobrevive a eso; pequeño no.
-function qrGrande(url){
+function qrGrande(url, texto){
   // El módulo se calcula contra la pantalla, no se deja que el CSS encoja el SVG:
   // escalar por CSS devuelve módulos fraccionarios y arruina justo lo que se quería mejorar.
   let modulo = 11;
@@ -1192,20 +1192,22 @@ function qrGrande(url){
   const capa = document.createElement('div');
   capa.className = 'qrfull';
   capa.innerHTML = `<div class="qrfin">
-      <div class="qrbig">${qrSvg(url, modulo, 'Verificación de identidad')}</div>
-      <p>Escanea este código con tu celular para verificar tu identidad.</p>
+      <div class="qrbig">${qrSvg(url, modulo, texto || 'Código QR')}</div>
+      <p>${esc(texto || 'Escanea este código con tu celular.')}</p>
       <span>Toca en cualquier parte para cerrar</span>
     </div>`;
   capa.addEventListener('click', () => capa.remove());
-  const esc = e => { if(e.key === 'Escape'){ capa.remove(); document.removeEventListener('keydown', esc); } };
-  document.addEventListener('keydown', esc);
+  // Ojo con el nombre: 'esc' ya existe como escapador de HTML. Declararlo aquí lo tapaba
+  // dentro de toda la función y reventaba el template de arriba antes de crear la capa.
+  const alEscape = e => { if(e.key === 'Escape'){ capa.remove(); document.removeEventListener('keydown', alEscape); } };
+  document.addEventListener('keydown', alEscape);
   document.body.appendChild(capa);
 }
 
 function montarIdentidad(st){
   pintarQrs(st);
   const bq = st.querySelector('#btnQrGrande');
-  if(bq) bq.addEventListener('click', () => qrGrande(S.diditUrl));
+  if(bq) bq.addEventListener('click', () => qrGrande(S.diditUrl, 'Escanea este código con tu celular para verificar tu identidad.'));
   const b1 = st.querySelector('#btnEnviarId');
   if(b1) b1.addEventListener('click', async () => {
     overlay(true, 'Creando la verificación…', 'Pidiéndole a Didit un link para este candidato.');
@@ -1503,10 +1505,10 @@ function verActa(){
             : `Si el desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo. <b>Este informe no certifica la identidad de la persona</b>: certifica lo observado sobre los requisitos del cargo.`} Verifique la autenticidad en <b>${esc(urlVerificacion(S.id))}</b>.</p>
           <span class="sig">Firma de integridad: ${esc(firmaCorta())} · Evaluó: ${esc(S.eval||'—')} · Revisión de calidad: pendiente de cuatro ojos · Rúbrica anclada 1-5</span>
         </div>
-        ${S.id ? `<div class="abqr" title="${esc(urlVerificacionAbs(S.id))}">
+        ${S.id ? `<button class="abqr" type="button" title="${esc(urlVerificacionAbs(S.id))}">
           ${huecoQr(urlVerificacionAbs(S.id), 6, 'Verificar la autenticidad de este informe')}
           <span>Escanee para verificar</span>
-        </div>` : ''}
+        </button>` : ''}
       </div>
       <p class="hint" style="margin-top:14px">${esc(doc.alcance || '')} Metodología: entrevista estructurada con escalas ancladas (1-5) sobre los requisitos definidos por el cliente${
         (doc.tipo === 'acta') ? '; identidad verificada por proveedor externo y cotejada contra el rostro de la sesión' : ''}; sesión grabada y archivada.</p>
@@ -1517,6 +1519,9 @@ function verActa(){
       <button id="btnJson2" type="button">Copiar JSON del archivo</button>
     </div>`;
   pintarQrs($('#actaStage'));
+  const qa = $('#actaStage').querySelector('.abqr');
+  if(qa) qa.addEventListener('click', () => qrGrande(urlVerificacionAbs(S.id),
+    'Escanea este código para verificar la autenticidad de este informe.'));
   $('#actaStage').querySelector('[data-back]').addEventListener('click', () => {
     if(S.soloLectura){ loadTablero(); return; }
     go('vLive'); render();

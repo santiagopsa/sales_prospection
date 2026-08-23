@@ -125,12 +125,79 @@ def leer_formato(m, size):
     return ok_bch, nivel, mascara, (v2 == v)
 
 
+def revisar_patrones(mods, ver):
+    """Los patrones fijos, uno por uno.
+
+    Esta comprobación existe por un error que costó caro. El código decodificaba perfecto
+    —formato válido, síndromes en cero, texto exacto— y las cámaras no lo leían. La causa:
+    dos módulos mal en los patrones de sincronización. Este decodificador no los miraba
+    porque deduce la rejilla del ancho del localizador; un lector real hace lo contrario,
+    usa la sincronización para saber dónde cae cada módulo. Un QR puede ser válido en sus
+    datos y aun así ser ilegible si su andamiaje está mal.
+    """
+    n = len(mods)
+    f = []
+
+    # Localizadores: anillo exterior oscuro, anillo blanco, centro 3×3 oscuro.
+    for (cr, cc, donde) in [(3, 3, 'arriba-izquierda'), (3, n - 4, 'arriba-derecha'), (n - 4, 3, 'abajo-izquierda')]:
+        for dy in range(-3, 4):
+            for dx in range(-3, 4):
+                esperado = max(abs(dx), abs(dy)) != 2
+                if mods[cr + dy][cc + dx] != esperado:
+                    f.append(f'localizador {donde} mal en ({cr+dy},{cc+dx})')
+                    break
+            else:
+                continue
+            break
+        # Separador: el borde blanco alrededor del localizador.
+        for d in range(-4, 5):
+            for (r, c) in [(cr + d, cc - 4), (cr + d, cc + 4), (cr - 4, cc + d), (cr + 4, cc + d)]:
+                if 0 <= r < n and 0 <= c < n and mods[r][c]:
+                    f.append(f'separador {donde} manchado en ({r},{c})')
+                    break
+
+    # Sincronización: la referencia que usa la cámara para ubicar cada módulo.
+    for i in range(8, n - 8):
+        if mods[6][i] != (i % 2 == 0):
+            f.append(f'sincronización horizontal mal en la columna {i}')
+        if mods[i][6] != (i % 2 == 0):
+            f.append(f'sincronización vertical mal en la fila {i}')
+
+    # Alineación.
+    cen = ALIN[ver]
+    m = len(cen)
+    for i in range(m):
+        for j in range(m):
+            if (i, j) in [(0, 0), (0, m - 1), (m - 1, 0)]:
+                continue
+            for dy in range(-2, 3):
+                for dx in range(-2, 3):
+                    if mods[cen[i] + dy][cen[j] + dx] != (max(abs(dx), abs(dy)) != 1):
+                        f.append(f'alineación mal en ({cen[i]},{cen[j]})')
+                        break
+                else:
+                    continue
+                break
+
+    if not mods[n - 8][8]:
+        f.append('falta el módulo oscuro fijo en (size-8, 8)')
+
+    # Sin duplicados: un patrón roto genera muchas quejas iguales.
+    vistas, unicas = set(), []
+    for x in f:
+        if x not in vistas:
+            vistas.add(x); unicas.append(x)
+    return unicas
+
+
 def decodificar(mods, ver, texto_esperado):
     size = len(mods)
     fallas = []
     if size != 17 + 4 * ver:
         fallas.append(f'tamaño {size} no corresponde a la versión {ver}')
         return fallas
+
+    fallas.extend(revisar_patrones(mods, ver))
 
     ok_bch, nivel, mascara, copias_iguales = leer_formato(mods, size)
     if not ok_bch:

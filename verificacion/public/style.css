@@ -384,7 +384,8 @@ input,textarea,select{font:inherit;color:inherit}
 /* El QR va siempre negro sobre blanco, también en modo oscuro: hay lectores que no leen un
    código invertido, y este cuadro termina impreso en el PDF que recibe el cliente. */
 .abqr{flex:0 0 auto;text-align:center;background:#fff;border:1px solid var(--line);
-  border-radius:8px;padding:7px 7px 5px}
+  border-radius:8px;padding:7px 7px 5px;cursor:zoom-in;font:inherit}
+.abqr:hover{border-color:var(--acc)}
 .abqr svg{display:block}
 .abqr span{display:block;font-size:9px;letter-spacing:.05em;text-transform:uppercase;
   color:#565656;margin-top:4px}
