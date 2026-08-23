@@ -138,7 +138,42 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
     next();
   });
 
-  r.use(express.static(path.join(__dirname, 'public')));
+  // Los estáticos llevan una marca de versión que cambia con cada despliegue.
+  // Sin esto el navegador sirve el app.js y el style.css de la visita anterior, y el usuario
+  // ve la versión vieja de la aplicación aunque el servidor ya tenga la nueva.
+  const PUB = path.join(__dirname, 'public');
+  const VER = (() => {
+    try {
+      const h = require('crypto').createHash('sha1');
+      for (const f of ['app.js', 'style.css', 'index.html']) {
+        h.update(require('fs').readFileSync(path.join(PUB, f)));
+      }
+      return h.digest('hex').slice(0, 8);
+    } catch (e) { return String(Date.now()); }
+  })();
+
+  // El index se sirve siempre fresco y con las URLs de los assets versionadas.
+  const INDEX = (() => {
+    try {
+      return require('fs').readFileSync(path.join(PUB, 'index.html'), 'utf8')
+        .replace('href="style.css"', `href="style.css?v=${VER}"`)
+        .replace('src="app.js"', `src="app.js?v=${VER}"`);
+    } catch (e) { return null; }
+  })();
+  const servirIndex = (_req, res) => {
+    if (!INDEX) return res.status(500).send('falta public/index.html');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(INDEX);
+  };
+
+  r.get(['/', '/index.html'], servirIndex);
+  r.use(express.static(PUB, {
+    maxAge: '365d',        // los assets van versionados: cachearlos fuerte es seguro
+    setHeaders(res, ruta) {
+      if (ruta.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache');
+    },
+  }));
 
   // -------------------------------------------------------------------------
   // EXTRAER TEXTO DE UN ARCHIVO
@@ -887,7 +922,7 @@ ${!code ? `
   });
 
   // SPA fallback: cualquier otra ruta bajo el mount point sirve el index.
-  r.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+  r.get('*', servirIndex);
 
   return r;
 }

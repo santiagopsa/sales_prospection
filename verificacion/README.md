@@ -104,8 +104,10 @@ Aparte a propósito: son la parte que no puede fallar y la única con pruebas pr
 
 ```bash
 node verificacion/test/rules.test.js       # 38 pruebas de las reglas, sin dependencias
+node verificacion/test/assets.test.js      # que el versionado de estáticos siga enganchado
 python3 verificacion/test/e2e.py           # flujo completo en navegador, contra test/stub.js
 python3 verificacion/test/e2e_identidad.py # sondeo, cierre verificado, negativa y rostro que no corresponde
+python3 verificacion/test/e2e_historial.py # abrir una verificación anterior y retomar una a medias
 ```
 
 `test/stub.js` replica la API con `http` nativo y devuelve un levantamiento fijo en vez de llamar a Claude: prueba la interfaz sin API key, sin Postgres y sin `npm install`. Importa las reglas reales de `rules.js` y se monta en `/verificacion`, igual que en producción — así que lo que se prueba del semáforo, del acta y del punto de montaje es el código de verdad.
@@ -142,6 +144,16 @@ El acta imprime una dirección de este mismo servidor (`/verificacion/v/PKV-…`
 La página es pública y **no muestra el nombre del candidato ni sus calificaciones**. Confirma que el informe fue emitido, para qué cargo y cliente, si certificó identidad, y su firma de integridad. Publicar la evaluación de una persona en una URL adivinable sería otra cosa muy distinta.
 
 `GET /verificacion/api/v/:code` devuelve lo mismo en JSON.
+
+---
+
+## Por qué los estáticos van versionados
+
+`app.js` y `style.css` se enlazan con `?v=<hash del contenido>`, calculado al arrancar el servidor. Sin eso, el navegador sirve los archivos de la visita anterior y el usuario ve **la versión vieja de la aplicación aunque el servidor ya tenga la nueva** — un error desconcertante, porque el servidor está bien y aun así la pantalla está mal.
+
+El `index.html` se sirve con `Cache-Control: no-cache` (siempre revalida) y los assets con caché de un año, que es seguro justamente porque van versionados: si cambian, cambia su URL.
+
+`test/assets.test.js` verifica que el enganche siga en pie. Si alguien cambia cómo el HTML enlaza sus assets, el reemplazo del servidor dejaría de aplicar en silencio y el problema volvería sin aviso.
 
 ---
 
