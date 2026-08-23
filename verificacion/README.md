@@ -21,7 +21,7 @@ Después, para cada finalista, la app guía una sesión de 25 minutos contra eso
 | 2 | Análisis | Claude | Empresa, vacante y hasta 5 excluyentes · 20-40 s |
 | 3 | Revisión | Reclutador | Corrige lo que la IA no pilló y guarda |
 | 4 | Vacante | — | Ficha con los requisitos y su material de verificación |
-| 5 | Sesión | Reclutador | Apertura → un requisito por pantalla → contexto → cierre |
+| 5 | Sesión | Reclutador | Apertura → un requisito por pantalla → trayectoria → contexto → cierre |
 | 6 | Acta | — | Informe con firma de integridad, listo para PDF |
 
 ---
@@ -108,6 +108,7 @@ node verificacion/test/assets.test.js      # que el versionado de estáticos sig
 python3 verificacion/test/e2e.py           # flujo completo en navegador, contra test/stub.js
 python3 verificacion/test/e2e_identidad.py # sondeo, cierre verificado, negativa y rostro que no corresponde
 python3 verificacion/test/e2e_historial.py # abrir una verificación anterior y retomar una a medias
+python3 verificacion/test/e2e_cv.py        # con CV: preguntas del candidato, trayectoria y acta
 ```
 
 `test/stub.js` replica la API con `http` nativo y devuelve un levantamiento fijo en vez de llamar a Claude: prueba la interfaz sin API key, sin Postgres y sin `npm install`. Importa las reglas reales de `rules.js` y se monta en `/verificacion`, igual que en producción — así que lo que se prueba del semáforo, del acta y del punto de montaje es el código de verdad.
@@ -144,6 +145,28 @@ El acta imprime una dirección de este mismo servidor (`/verificacion/v/PKV-…`
 La página es pública y **no muestra el nombre del candidato ni sus calificaciones**. Confirma que el informe fue emitido, para qué cargo y cliente, si certificó identidad, y su firma de integridad. Publicar la evaluación de una persona en una URL adivinable sería otra cosa muy distinta.
 
 `GET /verificacion/api/v/:code` devuelve lo mismo en JSON.
+
+---
+
+## El CV del candidato
+
+Es opcional, pero cambia la entrevista. Se carga al abrir la sesión y Claude lo cruza contra los requisitos de esa vacante. Lo que devuelve:
+
+**Preguntas que citan lo que el candidato escribió.** No "cuéntame de tu experiencia en SAP", sino *"en tu CV dice que en Alpina lideraste el rollout de PP entre 2023 y 2024, llévame a ese proyecto"*. Una pregunta que serviría para cualquier candidato del cargo es una pregunta desperdiciada, y esas ya las tiene del levantamiento.
+
+**Cuándo el CV no cubre un requisito.** Es lo más valioso que puede reportar: significa que el evaluador va a sondear a ciegas y conviene que lo sepa antes, no a mitad de la pregunta.
+
+**La trayectoria declarada**, que se confirma tramo por tramo durante la sesión — confirmado, sin sostener o contradice. Eso alimenta el bloque de trayectoria del acta. *Confirmada* significa que el candidato narró ese trabajo con escena y detalle propios, no que aparezca en su hoja de vida.
+
+**Los puntos que no cuadran**: huecos de tiempo, solapamientos, un cargo cuyo nivel no corresponde al recorrido previo, descripciones en plural donde debería haber aporte individual. Cada uno con la pregunta que lo aclararía sin sonar a interrogatorio — casi siempre hay una explicación normal, y la pregunta busca esa explicación.
+
+**Del CV se guarda lo extraído, no el archivo.** El texto se descarta después del análisis: es un dato personal que ya cumplió su función. Lo que queda en la base son las preguntas y la trayectoria, que es lo que la sesión y el acta necesitan.
+
+Cuesta una llamada de IA por sesión (entre 0,03 y 0,08 USD). Si el análisis falla, la sesión arranca igual con las preguntas del cargo.
+
+### Lo que sigue sin estar en el acta
+
+El **inglés por sub-habilidad** y el **percentil contra la población evaluada** del informe original. Eso no sale de la sesión ni del CV: vive en la base de datos de PeakU, en las pruebas que ya aplicaron y en los perfiles que ya evaluaron. Conectarlo es leer de esa base y fusionarlo con lo que mide la sesión — un trabajo aparte, no una variante de este.
 
 ---
 

@@ -202,6 +202,7 @@ async function verSesion(id){
       kind: s.kind || 'sondeo', reqs,
       idc: s.identity || {}, sig: s.signals || {},
       dec: s.declara || {}, rec: s.recomendacion || {riesgos:[]},
+      cv: s.cv_analisis || null, tray: s.trayectoria || [],
       ident: {...(s.identidad || {}), didit_status: s.didit_status,
               face_verdict: s.face_verdict, face_score: s.face_score},
       doc: s.documento || null, hash: s.integrity_hash || null, diditUrl: s.didit_url || null,
@@ -561,6 +562,21 @@ function setupSesion(v){
       </div>
 
       <div class="fset">
+        <div class="fttl">CV del candidato <span style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--ink3)">— opcional, pero cambia mucho la entrevista</span></div>
+        <div class="drop" id="cvDrop">
+          <input type="file" id="cvFile" accept=".txt,.md,.docx,.pdf" hidden>
+          <div class="dropin">
+            <div class="dropic">↑</div>
+            <div>
+              <b id="cvTitle">Arrastra el CV aquí o haz clic para elegirlo</b>
+              <span id="cvSub">Con el CV, las preguntas citan lo que el candidato escribió en vez de ser genéricas del cargo.</span>
+            </div>
+          </div>
+        </div>
+        <div class="charc" id="cvChars"></div>
+      </div>
+
+      <div class="fset">
         <div class="fttl">Etapa del proceso</div>
         <div class="modes" id="setKind">
           <button class="mode sel" data-k="sondeo" type="button">
@@ -603,6 +619,33 @@ function setupSesion(v){
     mode = b.dataset.m;
     $('#setupStage').querySelectorAll('#setModes .mode').forEach(m => m.classList.toggle('sel', m===b));
   }));
+  let cvTexto = '';
+  const cvDrop = $('#cvDrop'), cvFile = $('#cvFile');
+  cvDrop.addEventListener('click', () => cvFile.click());
+  ['dragenter','dragover'].forEach(ev => cvDrop.addEventListener(ev, e => { e.preventDefault(); cvDrop.classList.add('over'); }));
+  ['dragleave','drop'].forEach(ev => cvDrop.addEventListener(ev, e => { e.preventDefault(); cvDrop.classList.remove('over'); }));
+  cvDrop.addEventListener('drop', e => { if(e.dataTransfer.files[0]) leerCV(e.dataTransfer.files[0]); });
+  cvFile.addEventListener('change', e => { if(e.target.files[0]) leerCV(e.target.files[0]); });
+
+  async function leerCV(f){
+    overlay(true, 'Leyendo el CV…', f.name);
+    try{
+      const b64 = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result).split(',')[1]);
+        r.onerror = rej; r.readAsDataURL(f);
+      });
+      const out = await api('/api/extract-text', {method:'POST', body:{filename:f.name, dataBase64:b64}});
+      if((out.text||'').trim().length < 150) throw new Error('El archivo tiene muy poco texto. ¿Es un PDF escaneado?');
+      cvTexto = out.text;
+      cvDrop.classList.add('has');
+      $('#cvTitle').textContent = f.name;
+      $('#cvSub').textContent = 'Listo. Se analiza contra los requisitos al iniciar la sesión.';
+      $('#cvChars').textContent = out.chars.toLocaleString('es-CO') + ' caracteres';
+    }catch(e){ toast(e.message); }
+    finally{ overlay(false); }
+  }
+
   const chk = () => { $('#btnIniciar').disabled = !$('#sCand').value.trim(); };
   $('#sCand').addEventListener('input', chk);
   $('#btnIniciar').addEventListener('click', async () => {
@@ -620,7 +663,21 @@ function setupSesion(v){
         reqs: (v.requirements||[]).map(r => ({rid:r.id, n:r.text, lvl:0, ev:'', r})),
         idc:{}, sig:{}, fase:0, t0:Date.now(), tFase:Date.now(), fin:false, fecha:null, hash:null,
       };
-      saveLocal(); drawSig(); render(); go('vLive');
+      saveLocal();
+
+      if(cvTexto){
+        overlay(true, 'Leyendo el CV contra los requisitos…', 'Claude está preparando las preguntas de este candidato. Toma unos 20 segundos.');
+        try{
+          const cv = await api(`/api/sessions/${S.sid}/cv`, {method:'POST', body:{cvText: cvTexto}});
+          S.cv = cv.analisis || null;
+          S.tray = cv.trayectoria || [];
+          saveLocal();
+        }catch(e){
+          toast('El CV no se pudo analizar: ' + e.message + '. La sesión sigue igual, con las preguntas del cargo.');
+        }
+      }
+
+      drawSig(); render(); go('vLive');
     }catch(e){ toast('No se pudo iniciar: ' + e.message); }
     finally{ overlay(false); }
   });
@@ -632,6 +689,7 @@ function setupSesion(v){
 function fases(){
   const f = [{k:'id', t:'Apertura', min:4}];
   S.reqs.forEach((r,i) => f.push({k:'req', i, t:r.n || ('Requisito '+(i+1)), min:6}));
+  if((S.tray || []).length) f.push({k:'tray', t:'Trayectoria', min:4});
   f.push({k:'ctx', t:'Contexto', min:4});
   f.push({k:'cierre', t:'Cierre', min:3});
   return f;
@@ -641,6 +699,7 @@ function drawNav(){
   $('#phaseNav').innerHTML = F.map((f,i) => {
     const done = f.k==='id' ? idChecksDe(S.kind).every(c=>S.idc[c.id])
       : f.k==='req' ? S.reqs[f.i].lvl>0
+      : f.k==='tray' ? (S.tray||[]).every(t => t.estado && t.estado !== 'sin_confirmar')
       : f.k==='ctx' ? !!(S.rec && S.rec.veredicto)
       : false;
     return `<button class="ph ${i===S.fase?'act':''} ${done?'done':''}" data-f="${i}" type="button"><span class="dot"></span>${esc(f.t.length>26?f.t.slice(0,26)+'…':f.t)}</button>`;
@@ -654,7 +713,7 @@ function goFase(i){ S.fase=i; S.tFase=Date.now(); saveLocal(); render();
 function cuerpoSesion(){
   return {
     identity: S.idc, signals: S.sig, data: {mode:S.mode, fase:S.fase},
-    declara: S.dec || {}, recomendacion: S.rec || {},
+    declara: S.dec || {}, recomendacion: S.rec || {}, trayectoria: S.tray || null,
     ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||''})),
   };
 }
@@ -753,6 +812,7 @@ function render(){
             </div></div>`;
           }).join('')}
         </div>
+        ${cvDeRequisito(r.n)}
         ${dets.length ? `<div class="detbox"><div class="dt">Detalles verificables — compara contra lo que responde</div>
           <div class="dets">${dets.map(d => `<div class="det"><span class="dq">${esc(d.detalle||'')}</span><span class="da">${esc(d.respuesta_esperada||'')}</span></div>`).join('')}</div></div>` : ''}
         ${sen.length ? `<div class="detbox"><div class="dt">Señales de impostor en este tema</div>
@@ -787,6 +847,51 @@ function render(){
     };
     st.querySelector('[data-notes]').addEventListener('input', e => { r.ev = e.target.value; evNote(); touch(); });
     evNote();
+  }
+
+  else if(f.k === 'tray'){
+    const T = S.tray || [];
+    const pts = (S.cv && S.cv.puntos_a_aclarar) || [];
+    st.innerHTML = `
+      <div class="card">
+        <h2>Trayectoria</h2>
+        <div class="cs" style="margin-bottom:16px">Lo que el CV declara. Marca cada tramo según lo que el candidato sostuvo en la sesión.</div>
+        <div class="say"><div class="lb">CÓMO SE MARCA</div><p style="font-style:normal"><b>Confirmado</b> es que narró ese trabajo con escena y detalle propios, no que lo mencionó. <b>Sin sostener</b> es que no logró aterrizarlo. <b>Contradice</b> es que lo que contó no cuadra con lo que dice el CV.</p></div>
+        ${T.map((t,i) => `
+          <div class="tray">
+            <div class="trayhd">
+              <div>
+                <b>${esc(t.cargo||'—')}</b>
+                <span>${esc(t.empresa||'')}${t.periodo?' · '+esc(t.periodo):''}</span>
+              </div>
+              <div class="trayb">
+                ${[['confirmado','Confirmado','ok'],['sin_sostener','Sin sostener','par'],['contradice','Contradice','no']].map(([k,tx,c]) =>
+                  `<button class="tb ${t.estado===k?'sel '+c:''}" data-tray="${i}" data-est="${k}" type="button">${tx}</button>`).join('')}
+              </div>
+            </div>
+            ${t.resumen ? `<div class="aev">${esc(t.resumen)}</div>` : ''}
+          </div>`).join('')}
+      </div>
+
+      ${pts.length ? `<div class="card">
+        <div class="fttl">Puntos que el CV deja abiertos</div>
+        ${pts.map(p => `<div class="gap"><span class="qm">?</span><div>
+            <b>${esc(p.punto||'')}</b>
+            ${p.evidencia ? `<span>${esc(p.evidencia)}</span>` : ''}
+            ${p.pregunta ? `<div class="sq" style="margin-top:6px">“${esc(p.pregunta)}”</div>` : ''}
+          </div></div>`).join('')}
+        <p class="hint">Casi siempre tienen una explicación normal. La pregunta busca la explicación, no la confesión.</p>
+      </div>` : ''}
+
+      <div class="nav">
+        <button data-prev type="button">Atrás</button>
+        <button class="pri" data-next type="button">Continuar</button>
+      </div>`;
+    st.querySelectorAll('[data-tray]').forEach(b => b.addEventListener('click', e => {
+      const i = +e.currentTarget.dataset.tray;
+      S.tray[i].estado = e.currentTarget.dataset.est;
+      touch(); render();
+    }));
   }
 
   else if(f.k === 'ctx'){
@@ -946,6 +1051,26 @@ function render(){
   st.querySelectorAll('[data-next]').forEach(b => b.addEventListener('click', () => goFase(Math.min(S.fase+1, fases().length-1))));
   st.querySelectorAll('[data-prev]').forEach(b => b.addEventListener('click', () => goFase(Math.max(S.fase-1, 0))));
   window.scrollTo({top:0, behavior:'instant'});
+}
+
+// Las preguntas que salieron del CV para este requisito. Citan lo que el candidato escribió,
+// así que valen mucho más que las genéricas del cargo — y si el CV no lo menciona, eso también se dice.
+function cvDeRequisito(nombre){
+  const p = ((S.cv && S.cv.por_requisito) || []).find(x =>
+    (x.requisito||'').trim().toLowerCase() === (nombre||'').trim().toLowerCase());
+  if(!p) return '';
+  if(p.cubierto_en_cv === false){
+    return `<div class="detbox" style="border-left:3px solid var(--warn)">
+      <div class="dt" style="color:var(--warn)">El CV no menciona nada de esto</div>
+      <p style="font-size:13.5px;color:var(--ink2);line-height:1.5">${esc(p.nota || 'Vas a tener que sondear sin apoyo del CV: pide la escena desde cero y no des por sentado que la tiene.')}</p>
+    </div>`;
+  }
+  const qs = (p.preguntas||[]).filter(Boolean);
+  if(!qs.length) return '';
+  return `<div class="detbox" style="border-left:3px solid var(--acc)">
+    <div class="dt">Del CV de ${esc((S.cand||'').split(' ')[0])}${p.donde?` · ${esc(p.donde)}`:''}</div>
+    ${qs.map(q => `<div class="sq" style="margin-top:6px">“${esc(q)}”</div>`).join('')}
+  </div>`;
 }
 
 /* ===================== identidad (solo en un cierre) ===================== */
@@ -1134,7 +1259,7 @@ async function emitirActa(){
   try{
     const out = await api('/api/sessions/'+S.sid+'/issue', {method:'POST', body:{
       candidate: S.cand, identity: S.idc, signals: S.sig, data:{mode:S.mode},
-      declara: S.dec || {}, recomendacion: S.rec || {},
+      declara: S.dec || {}, recomendacion: S.rec || {}, trayectoria: S.tray || null,
       ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||''})),
     }});
     S.fin = true; S.fecha = Date.now(); S.hash = out.integrity_hash;
@@ -1162,6 +1287,7 @@ function verActa(){
   const cierre = S.kind === 'cierre';
   const idOk = cierre && idn.estado === 'verificada';
   const nogo = (dec.nogo||'').split('\n').map(x=>x.trim()).filter(Boolean);
+  const tray = (S.tray || []).filter(t => t.empresa || t.cargo);
   const riesgos = (rec.riesgos||[]).filter(x => (x.r||'').trim());
   const VER = {si:['ok','Recomendado'], reserva:['par','Recomendado con una reserva'], no:['no','No recomendado']}[rec.veredicto] || null;
 
@@ -1171,6 +1297,8 @@ function verActa(){
     [true, 'Sesión supervisada en vivo'],
     [nSig === 0, nSig === 0 ? 'Sin señales de asistencia' : `${nSig} señal${nSig>1?'es':''} registrada${nSig>1?'s':''}`],
     [true, `${S.reqs.length} requisito${S.reqs.length>1?'s':''} medido${S.reqs.length>1?'s':''}`],
+    tray.length ? [tray.every(t => t.estado === 'confirmado'), tray.every(t => t.estado === 'confirmado')
+        ? 'Trayectoria confirmada' : 'Trayectoria contrastada con el CV'] : null,
   ].filter(Boolean);
 
   $('#actaStage').innerHTML = `
@@ -1225,6 +1353,19 @@ function verActa(){
         <div class="res"><div class="rn">Evidencia textual en cada requisito</div><span class="vd ok">REGISTRADA</span></div>
         ${nSig?`<div class="aev">Señales: ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(s.t)).join(' · ')}. Se reportan como observación factual; no constituyen un juicio sobre el candidato.</div>`:''}
       </div>
+
+      ${tray.length ? `
+      <div class="zona"><span class="zn">Trayectoria</span><h3>Confirmada frente a declarada</h3>
+        <span class="zs">Declarada en el CV · confirmada en la sesión</span></div>
+      <div class="zbox">
+        ${tray.map(t => {
+          const e = {confirmado:['ok','CONFIRMADA'], sin_sostener:['par','SIN SOSTENER'],
+                     contradice:['no','CONTRADICE'], sin_confirmar:['nv','NO SE ABORDÓ']}[t.estado||'sin_confirmar'];
+          return `<div class="res"><div class="rn">${esc(t.cargo||'—')}<small>${esc(t.empresa||'')}${t.periodo?' · '+esc(t.periodo):''}</small></div>
+                  <span class="vd ${e[0]}">${e[1]}</span></div>`;
+        }).join('')}
+        <p class="hint">Confirmada significa que el candidato narró ese trabajo con escena y detalle propios durante la sesión, no que aparezca en su hoja de vida.</p>
+      </div>` : ''}
 
       ${(dec.motivacion || nogo.length || dec.procesos) ? `
       <div class="zona"><span class="zn">Zona 2</span><h3>Lo que ${esc(S.cand.split(' ')[0])} declara</h3>

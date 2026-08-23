@@ -124,6 +124,11 @@ async function initSchema(pool) {
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS declara JSONB`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS recomendacion JSONB`,
     `CREATE INDEX IF NOT EXISTS idx_v_sess_code ON ${T.sessions}(report_code)`,
+    // Lo extraído del CV: preguntas por requisito, trayectoria y puntos a aclarar.
+    // El texto del CV NO se guarda — es dato personal y ya cumplió su función al analizarse.
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS cv_analisis JSONB`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS cv_at TIMESTAMPTZ`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS trayectoria JSONB`,
     `CREATE INDEX IF NOT EXISTS idx_v_sess_didit ON ${T.sessions}(didit_session_id)`,
     `ALTER TABLE ${T.vacancies} ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,

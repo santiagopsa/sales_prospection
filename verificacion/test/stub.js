@@ -163,7 +163,8 @@ const server = http.createServer(async (req, res) => {
     const ctx = {kind:s.kind, faceVerdict:s.face_verdict, diditStatus:s.didit_status, idNote:s.id_note};
     const sem = semaforo({identity:b.identity||{}, signals:b.signals||{}, ...ctx});
     Object.assign(s, {identity:b.identity||{}, signals:b.signals||{}, semaforo:sem.color,
-                      declara:b.declara||{}, recomendacion:b.recomendacion||{}});
+                      declara:b.declara||{}, recomendacion:b.recomendacion||{},
+                      ...(b.trayectoria ? {trayectoria:b.trayectoria} : {})});
     db.ratings = db.ratings.filter(r=>r.session_id!==s.id);
     (b.ratings||[]).forEach((r,i)=>db.ratings.push({id:nid(), session_id:s.id, req_text:r.req_text,
       requirement_id:r.requirement_id, ord:i, level:r.level, verdict:r.level?LVLTXT[r.level]:null, evidence:r.evidence}));
@@ -187,6 +188,37 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --- identidad simulada (no llama a Didit de verdad) ---
+  mm = p.match(/^\/api\/sessions\/(\d+)\/cv$/);
+  if(mm && m==='POST'){
+    const b = await body(req);
+    const s = db.sessions.find(x=>x.id===+mm[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    if(!b.cvText || b.cvText.trim().length < 150) return json(res,400,{error:'El CV está vacío o es muy corto (mínimo 150 caracteres).'});
+    const analisis = {
+      resumen:'Consultor SAP con recorrido en manufactura. Conviene mirar de cerca el periodo 2022-2023.',
+      por_requisito:[
+        {requisito:'Implementación de SAP PP en producción (5+ años)', cubierto_en_cv:true,
+         donde:'Alpina · 2023-2024',
+         preguntas:['En tu CV dice que en Alpina lideraste el rollout de PP entre 2023 y 2024, llévame a ese proyecto.',
+                    'Mencionas listas de materiales en Alpina: ¿cuántos materiales tenía el maestro cuando entraste?']},
+        {requisito:'Integración PP con MM y QM', cubierto_en_cv:false, donde:'',
+         preguntas:[], nota:'El CV no menciona MM ni QM en ningún empleo. Toca sondear desde cero.'}
+      ],
+      trayectoria:[
+        {empresa:'Alpina', cargo:'Consultor SAP PP', periodo:'2023 - actualidad', resumen:'Rollout de PP y soporte al maestro de materiales.'},
+        {empresa:'Quala', cargo:'Analista funcional', periodo:'2020 - 2022', resumen:'Soporte a producción y reportes.'}
+      ],
+      puntos_a_aclarar:[
+        {punto:'Hueco de casi un año entre Quala y Alpina', evidencia:'Quala hasta 2022, Alpina desde 2023',
+         pregunta:'Veo un periodo entre Quala y Alpina, ¿qué estuviste haciendo ahí?'}
+      ],
+      no_esta_en_el_cv:['Integración con QM']
+    };
+    const tray = analisis.trayectoria.map(t=>({...t, estado:'sin_confirmar'}));
+    s.cv_analisis = analisis; s.trayectoria = tray;
+    return json(res,200,{ok:true, analisis, trayectoria:tray});
+  }
+
   mm = p.match(/^\/api\/sessions\/(\d+)\/shot$/);
   if(mm && m==='POST'){
     const b = await body(req);

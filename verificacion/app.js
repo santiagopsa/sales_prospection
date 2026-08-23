@@ -10,7 +10,7 @@
 // No toca deals ni wishlist: sus tablas viven en el schema "verificacion".
 const express = require('express');
 const path = require('path');
-const { buildIntakePrompt } = require('./prompts');
+const { buildIntakePrompt, buildCvPrompt } = require('./prompts');
 const { LVLTXT, clean, esCierre, semaforo, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode } = require('./rules');
 const didit = require('./didit');
 const { T, initSchema } = require('./schema');
@@ -422,6 +422,78 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
   });
 
   // -------------------------------------------------------------------------
+  // CV DEL CANDIDATO
+  //
+  // Se analiza contra los requisitos de la vacante para darle al evaluador preguntas que
+  // citan lo que el candidato escribió — no las genéricas del cargo. El texto del CV no se
+  // guarda: se extrae lo que la sesión necesita y se descarta el resto.
+  // -------------------------------------------------------------------------
+  r.post('/api/sessions/:id/cv', async (req, res) => {
+    try {
+      if (!anthropic) return res.status(500).json({ error: 'ANTHROPIC_API_KEY no configurada' });
+      const id = Number(req.params.id);
+      const { cvText } = req.body || {};
+      if (!cvText || cvText.trim().length < 150) {
+        return res.status(400).json({ error: 'El CV está vacío o es muy corto (mínimo 150 caracteres).' });
+      }
+
+      // Los requisitos salen de la vacante de esta sesión.
+      let cargo = '', empresa = '', candidato = '', excluyentes = [];
+      if (pool) {
+        const q = await pool.query(`
+          SELECT s.candidate, v.id AS vid, v.title, c.name AS company
+          FROM ${T.sessions} s
+          LEFT JOIN ${T.vacancies} v ON v.id = s.vacancy_id
+          LEFT JOIN ${T.companies} c ON c.id = v.company_id
+          WHERE s.id = $1`, [id]);
+        if (!q.rows.length) return res.status(404).json({ error: 'not found' });
+        cargo = q.rows[0].title || ''; empresa = q.rows[0].company || ''; candidato = q.rows[0].candidate || '';
+        if (q.rows[0].vid) {
+          const rq = await pool.query(`SELECT text, criterio, detalles FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`, [q.rows[0].vid]);
+          excluyentes = rq.rows;
+        }
+      } else {
+        const s = mem.sessions.find(x => x.id === id);
+        if (!s) return res.status(404).json({ error: 'not found' });
+        const v = mem.vacancies.find(x => x.id === s.vacancy_id);
+        cargo = (v && v.title) || ''; empresa = (v && v.company_name) || ''; candidato = s.candidate || '';
+        excluyentes = mem.requirements.filter(q => q.vacancy_id === (v && v.id)).sort((x, y) => x.ord - y.ord);
+      }
+
+      const msg = await anthropic.messages.create({
+        model,
+        max_tokens: 6000,
+        messages: [{ role: 'user', content: buildCvPrompt(cvText, { cargo, empresa, excluyentes, candidato }) }],
+      });
+      const text = (msg.content && msg.content[0] && msg.content[0].text) || '';
+      let jsonText = text.trim();
+      const fenced = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (fenced) jsonText = fenced[1].trim();
+      let cv;
+      try { cv = JSON.parse(jsonText); }
+      catch (e) {
+        console.error('[verificacion/cv] JSON inválido:', e.message);
+        return res.status(502).json({ error: 'Claude devolvió JSON inválido' });
+      }
+
+      // La trayectoria arranca sin confirmar; se marca durante la sesión.
+      const tray = (cv.trayectoria || []).map(t => ({ ...t, estado: 'sin_confirmar' }));
+
+      if (pool) {
+        await pool.query(
+          `UPDATE ${T.sessions} SET cv_analisis=$2, trayectoria=$3, cv_at=NOW(), updated_at=NOW() WHERE id=$1`,
+          [id, JSON.stringify(cv), JSON.stringify(tray)]);
+      } else {
+        Object.assign(mem.sessions.find(x => x.id === id), { cv_analisis: cv, trayectoria: tray });
+      }
+      res.json({ ok: true, analisis: cv, trayectoria: tray, _usage: msg.usage });
+    } catch (e) {
+      console.error('[verificacion/cv]', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // IDENTIDAD (solo en sesiones de cierre)
   //
   // El candidato no muestra ningún documento en la llamada. Lo único que pasa durante
@@ -751,10 +823,12 @@ ${!code ? `
           await c.query('BEGIN');
           const up = await c.query(
             `UPDATE ${T.sessions} SET identity=$2, signals=$3, data=$4, semaforo=$5,
-                                      declara=$6, recomendacion=$7, updated_at=NOW()
+                                      declara=$6, recomendacion=$7,
+                                      trayectoria=COALESCE($8::jsonb, trayectoria), updated_at=NOW()
              WHERE id=$1 RETURNING id`,
             [id, JSON.stringify(identity), JSON.stringify(signals), JSON.stringify(b.data || {}), sem.color,
-             JSON.stringify(b.declara || {}), JSON.stringify(b.recomendacion || {})]
+             JSON.stringify(b.declara || {}), JSON.stringify(b.recomendacion || {}),
+             b.trayectoria ? JSON.stringify(b.trayectoria) : null]
           );
           if (!up.rows.length) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'not found' }); }
           await c.query(`DELETE FROM ${T.ratings} WHERE session_id=$1`, [id]);
@@ -777,7 +851,8 @@ ${!code ? `
       const s = mem.sessions.find(x => x.id === id);
       if (!s) return res.status(404).json({ error: 'not found' });
       Object.assign(s, { identity, signals, data: b.data || {}, semaforo: sem.color,
-                         declara: b.declara || {}, recomendacion: b.recomendacion || {} });
+                         declara: b.declara || {}, recomendacion: b.recomendacion || {},
+                         ...(b.trayectoria ? { trayectoria: b.trayectoria } : {}) });
       mem.ratings = mem.ratings.filter(x => x.session_id !== id);
       ratings.forEach((q, i) => mem.ratings.push({
         id: nextId(), session_id: id, requirement_id: q.requirement_id || null, req_text: clean(q.req_text),
