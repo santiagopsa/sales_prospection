@@ -227,9 +227,16 @@ Costo: entre 0,05 y 0,20 USD por levantamiento según el largo. Las sesiones no 
 
 ---
 
+## Historial
+
+Cada verificación del tablero se abre. Si fue emitida, el acta se **reconstruye desde la base de datos con el mismo render que la generó**, así que lo que se ve es exactamente lo que se emitió — no una aproximación. Si quedó a medias, muestra en qué punto quedó y ofrece **retomarla**: el avance vive en el servidor, no en el navegador, así que se puede seguir desde otro computador o después de cerrar la pestaña.
+
+El autoguardado corre 900 ms después de cada cambio, pero al salir de la sesión se fuerza el guardado, y si se cierra la pestaña de golpe se manda con `sendBeacon` (`POST /api/sessions/:id/beacon`), que sobrevive al cierre. Sin eso, lo último que escribió el reclutador se perdía.
+
+---
+
 ## Lo que falta
 
-- Detalle histórico de una sesión ya emitida (el tablero la lista pero no la abre).
 - Revisión de cuatro ojos dentro de la app: `reviewed_by` y `reviewed_at` ya están en la tabla, falta la pantalla.
 - Verificación pública del acta en `peaku.co/verificar/PKV-…` — el código ya se imprime en el informe.
 - Autenticación. Hoy cualquiera con el link entra, igual que el Sandler. Para piloto interno está bien; antes de mostrárselo a un cliente, no.

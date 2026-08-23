@@ -128,7 +128,9 @@ const server = http.createServer(async (req, res) => {
     if(!s) return json(res,404,{error:'not found'});
     const ctx = {kind:s.kind, faceVerdict:s.face_verdict, diditStatus:s.didit_status, idNote:s.id_note};
     const {shot, ...sinImagen} = s;
-    return json(res,200,{...sinImagen, tiene_captura:!!shot, identidad:estadoIdentidad(ctx),
+    const v = db.vacancies.find(x=>x.id===s.vacancy_id);
+    return json(res,200,{...sinImagen, vacancy_title:v&&v.title, company_name:v&&v.company_name,
+      tiene_captura:!!shot, identidad:estadoIdentidad(ctx),
       documento:tipoDocumento(ctx), ratings:db.ratings.filter(r=>r.session_id===s.id)});
   }
 
@@ -137,6 +139,20 @@ const server = http.createServer(async (req, res) => {
       const v=db.vacancies.find(x=>x.id===s.vacancy_id);
       return {...s, vacancy_title:v&&v.title, company_name:v&&v.company_name};
     }));
+  }
+
+  mm = p.match(/^\/api\/sessions\/(\d+)\/beacon$/);
+  if(mm && m==='POST'){
+    const b = await body(req);
+    const s = db.sessions.find(x=>x.id===+mm[1]);
+    if(s){
+      Object.assign(s, {identity:b.identity||{}, signals:b.signals||{},
+        declara:b.declara||{}, recomendacion:b.recomendacion||{}});
+      db.ratings = db.ratings.filter(r=>r.session_id!==s.id);
+      (b.ratings||[]).forEach((r,i)=>db.ratings.push({id:nid(), session_id:s.id, req_text:r.req_text,
+        requirement_id:r.requirement_id, ord:i, level:r.level, verdict:r.level?LVLTXT[r.level]:null, evidence:r.evidence}));
+    }
+    res.writeHead(204); return res.end();
   }
 
   mm = p.match(/^\/api\/sessions\/(\d+)$/);
@@ -149,8 +165,8 @@ const server = http.createServer(async (req, res) => {
     Object.assign(s, {identity:b.identity||{}, signals:b.signals||{}, semaforo:sem.color,
                       declara:b.declara||{}, recomendacion:b.recomendacion||{}});
     db.ratings = db.ratings.filter(r=>r.session_id!==s.id);
-    (b.ratings||[]).forEach((r,i)=>db.ratings.push({id:nid(), session_id:s.id, req_text:r.req_text, ord:i,
-      level:r.level, verdict:r.level?LVLTXT[r.level]:null, evidence:r.evidence}));
+    (b.ratings||[]).forEach((r,i)=>db.ratings.push({id:nid(), session_id:s.id, req_text:r.req_text,
+      requirement_id:r.requirement_id, ord:i, level:r.level, verdict:r.level?LVLTXT[r.level]:null, evidence:r.evidence}));
     return json(res,200,{ok:true, id:s.id, semaforo:sem, identidad:estadoIdentidad(ctx)});
   }
 

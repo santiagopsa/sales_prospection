@@ -119,7 +119,7 @@ let S = null;      // sesión en curso
 let VAC = null;    // vacante cargada para la sesión
 let tick = null, saveTimer = null;
 
-function saveLocal(){ try{ localStorage.setItem(KEY, JSON.stringify({S, VAC})); }catch(e){} }
+function saveLocal(){ if(S && S.soloLectura) return; try{ localStorage.setItem(KEY, JSON.stringify({S, VAC})); }catch(e){} }
 function loadLocal(){ try{ const r=localStorage.getItem(KEY); return r?JSON.parse(r):null; }catch(e){ return null; } }
 function clearLocal(){ try{ localStorage.removeItem(KEY); }catch(e){} }
 
@@ -127,10 +127,14 @@ function clearLocal(){ try{ localStorage.removeItem(KEY); }catch(e){} }
 function go(id){
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id===id));
   const live = (id==='vLive');
-  $('#sigBar').style.display = live ? 'block' : 'none';
-  $('#clockWrap').style.display = (live || id==='vActa') ? 'flex' : 'none';
-  $('#btnReset').style.display = (live || id==='vActa') ? 'block' : 'none';
-  $('#whoTop').innerHTML = (S && (live || id==='vActa')) ? `<b>${esc(S.cand)}</b> · ${esc(S.rol)}` : '';
+  const lectura = !!(S && S.soloLectura);
+  $('#sigBar').style.display = (live && !lectura) ? 'block' : 'none';
+  // En modo lectura no hay cronómetro que correr: la sesión ya pasó.
+  $('#clockWrap').style.display = ((live || id==='vActa') && !lectura) ? 'flex' : 'none';
+  $('#btnReset').style.display = ((live || id==='vActa')) ? 'block' : 'none';
+  $('#btnReset').textContent = lectura ? 'Volver a la lista' : 'Salir de la sesión';
+  $('#whoTop').innerHTML = (S && (live || id==='vActa'))
+    ? [`<b>${esc(S.cand)}</b>`, S.rol && esc(S.rol)].filter(Boolean).join(' · ') : '';
   window.scrollTo({top:0, behavior:'instant'});
 }
 
@@ -172,11 +176,78 @@ async function loadTablero(){
       </button>`;
     }).join('') : `<div class="empty">Ninguna verificación todavía.</div>`;
     $('#sesList').querySelectorAll('[data-ses]').forEach(b =>
-      b.addEventListener('click', () => toast('Sesión ' + b.dataset.ses + ' — el detalle histórico llega en la próxima versión')));
+      b.addEventListener('click', () => verSesion(+b.dataset.ses)));
   }catch(e){
     $('#vacList').innerHTML = `<div class="empty">No se pudo cargar: ${esc(e.message)}</div>`;
     $('#sesList').innerHTML = '';
   }
+}
+
+/* ===================== abrir una verificación anterior =====================
+   El acta se reconstruye desde la base de datos con el mismo render que la generó,
+   así que lo que se ve aquí es exactamente lo que se emitió. */
+async function verSesion(id){
+  if(S && S.sid && !S.fin && !S.soloLectura){
+    if(!confirm('Tienes una sesión en curso sin terminar.\n\nSi abres otra verificación la pierdes de vista, aunque queda guardada en el servidor. ¿Continuar?')) return;
+  }
+  overlay(true, 'Abriendo la verificación…', '');
+  try{
+    const s = await api('/api/sessions/' + id);
+    const reqs = (s.ratings || []).map(r => ({
+      rid: r.requirement_id, n: r.req_text, lvl: r.level, ev: r.evidence || '', r: {},
+    }));
+    S = {
+      sid: s.id, id: s.report_code, cand: s.candidate, rol: s.vacancy_title || '',
+      cli: s.company_name || '', eval: s.evaluator || '', mode: s.mode || 'B',
+      kind: s.kind || 'sondeo', reqs,
+      idc: s.identity || {}, sig: s.signals || {},
+      dec: s.declara || {}, rec: s.recomendacion || {riesgos:[]},
+      ident: {...(s.identidad || {}), didit_status: s.didit_status,
+              face_verdict: s.face_verdict, face_score: s.face_score},
+      doc: s.documento || null, hash: s.integrity_hash || null, diditUrl: s.didit_url || null,
+      fecha: s.issued_at ? new Date(s.issued_at).getTime() : Date.now(),
+      t0: null, tFase: null, fase: 0,
+      fin: s.status === 'issued', soloLectura: true,
+    };
+    if(s.status === 'issued'){ verActa(); }
+    else { verBorrador(s); }
+  }catch(e){
+    toast('No se pudo abrir: ' + e.message);
+  }finally{ overlay(false); }
+}
+
+// Una sesión sin emitir no tiene acta que mostrar: se muestra en qué quedó y se ofrece retomarla.
+function verBorrador(s){
+  const cal = S.reqs.filter(r => r.lvl > 0).length;
+  const nSig = Object.values(S.sig).filter(Boolean).length;
+  const i = S.ident || {};
+  $('#actaStage').innerHTML = `
+    <button class="back" data-home type="button">← Todas las verificaciones</button>
+    <div class="card">
+      <div class="cardhd">
+        <h2>${esc(S.cand)}</h2>
+        <span class="tag n">SIN EMITIR</span>
+      </div>
+      <div class="cs" style="margin-bottom:14px">${[esc(S.rol), S.cli && esc(S.cli), S.kind==='cierre'?'cierre verificado':'sondeo'].filter(Boolean).join(' · ')} · <span class="mono">${esc(S.id)}</span></div>
+      <div class="res"><div class="rn">Requisitos calificados</div><span class="rl">${cal} de ${S.reqs.length}</span></div>
+      <div class="res"><div class="rn">Señales observadas</div><span class="rl">${nSig}</span></div>
+      ${S.kind==='cierre' ? `<div class="res"><div class="rn">Verificación de identidad</div><span class="rl">${esc(i.texto || 'sin enviar')}</span></div>` : ''}
+      <p class="hint">Esta sesión quedó a medias. Puedes retomarla donde estaba: lo que ya registraste está guardado en el servidor, no en el navegador.</p>
+      <div class="tools" style="margin-top:12px">
+        <button data-home type="button">Volver</button>
+        <button class="pri" id="btnRetomar" type="button">Retomar la sesión</button>
+      </div>
+    </div>`;
+  $('#actaStage').querySelectorAll('[data-home]').forEach(b => b.addEventListener('click', loadTablero));
+  $('#actaStage').querySelector('#btnRetomar').addEventListener('click', () => {
+    S.soloLectura = false;
+    S.t0 = S.t0 || Date.now();
+    S.tFase = Date.now();
+    S.fase = 0;
+    saveLocal(); drawSig(); render(); go('vLive');
+    toast('Sesión retomada');
+  });
+  go('vActa');
 }
 
 /* ===================== levantamiento ===================== */
@@ -580,19 +651,39 @@ function drawNav(){
 function goFase(i){ S.fase=i; S.tFase=Date.now(); saveLocal(); render();
   if(fases()[i].k === 'cierre' && S.kind === 'cierre') recargarIdentidad(); }
 
+function cuerpoSesion(){
+  return {
+    identity: S.idc, signals: S.sig, data: {mode:S.mode, fase:S.fase},
+    declara: S.dec || {}, recomendacion: S.rec || {},
+    ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||''})),
+  };
+}
+
 function sync(){
-  if(!S || !S.sid) return;
+  if(!S || !S.sid || S.soloLectura) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
-    try{
-      await api('/api/sessions/'+S.sid, {method:'PATCH', body:{
-        identity: S.idc, signals: S.sig, data: {mode:S.mode, fase:S.fase},
-        declara: S.dec || {}, recomendacion: S.rec || {},
-        ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||''})),
-      }});
-    }catch(e){ /* el navegador ya lo tiene guardado local; no interrumpimos la entrevista */ }
+    try{ await api('/api/sessions/'+S.sid, {method:'PATCH', body: cuerpoSesion()}); }
+    catch(e){ /* el navegador ya lo tiene guardado local; no interrumpimos la entrevista */ }
   }, 900);
 }
+
+// Guarda ya, sin esperar el retardo. Se llama al salir de la sesión: si el reclutador
+// escribe y cierra enseguida, ese último medio segundo no se puede perder.
+async function flush(){
+  if(!S || !S.sid || S.soloLectura) return;
+  clearTimeout(saveTimer);
+  try{ await api('/api/sessions/'+S.sid, {method:'PATCH', body: cuerpoSesion()}); }catch(e){}
+}
+
+// Y si cierra la pestaña de golpe, se manda con sendBeacon, que sí sobrevive al cierre.
+window.addEventListener('pagehide', () => {
+  if(!S || !S.sid || S.soloLectura) return;
+  try{
+    navigator.sendBeacon?.(BASE + '/api/sessions/' + S.sid + '/beacon',
+      new Blob([JSON.stringify(cuerpoSesion())], {type:'application/json'}));
+  }catch(e){}
+});
 function touch(){ saveLocal(); sync(); }
 
 function render(){
@@ -1089,7 +1180,7 @@ function verActa(){
           <svg class="iso actaiso" viewBox="0 0 174.8 90.4" role="img" aria-label="PeakU" focusable="false"><path class="b" d="M 126.84 54.14 C 131.82 58.32 139.23 57.67 143.40 52.70 L 125.39 37.59 C 121.22 42.56 121.87 49.97 126.84 54.14"/><path class="b" d="M 167.13 6.13 C 162.16 1.96 154.75 2.61 150.58 7.58 L 168.58 22.69 C 172.75 17.71 172.11 10.30 167.13 6.13"/><path class="b" d="M 152.02 24.14 C 147.05 19.96 146.40 12.55 150.58 7.58 L 125.39 37.59 C 129.57 32.62 136.98 31.97 141.95 36.14 C 146.93 40.31 147.57 47.73 143.40 52.70 L 168.58 22.69 C 164.41 27.66 157.00 28.31 152.02 24.14"/><path class="b" d="M 141.95 36.14 C 136.98 31.97 129.57 32.62 125.39 37.59 L 143.40 52.70 C 147.57 47.73 146.93 40.31 141.95 36.14"/><path class="b" d="M 152.02 24.14 C 157.00 28.31 164.41 27.66 168.58 22.69 L 150.58 7.58 C 146.40 12.55 147.05 19.96 152.02 24.14"/><path class="a" d="M 73.12 6.13 C 68.14 1.96 60.73 2.61 56.56 7.58 L 44.90 21.48 L 62.62 36.92 L 74.56 22.69 C 78.73 17.71 78.09 10.30 73.12 6.13"/><path class="a" d="M 120.12 6.13 C 115.15 1.96 107.74 2.61 103.57 7.58 L 121.57 22.69 C 125.75 17.71 125.10 10.30 120.12 6.13"/><path class="a" d="M 105.02 24.14 C 109.99 28.31 117.40 27.66 121.57 22.69 L 103.57 7.58 C 99.39 12.55 100.04 19.96 105.02 24.14"/><path class="a" d="M 53.21 67.60 L 62.98 55.95 C 60.76 58.59 56.82 58.94 54.17 56.72 C 51.53 54.50 51.18 50.55 53.40 47.91 L 24.20 82.71 C 23.55 83.49 22.80 84.15 22.00 84.72 L 21.99 84.75 C 21.99 84.75 33.67 76.08 34.11 75.75 C 36.51 74.02 39.46 72.99 42.66 72.99 C 42.65 72.99 42.65 72.99 42.64 72.99 L 42.68 72.99 C 42.67 72.99 42.66 72.99 42.66 72.99 C 46.39 73.00 50.01 74.67 50.94 78.48 L 50.94 78.48 C 49.87 74.83 50.58 70.73 53.21 67.60"/><path class="a" d="M 58.01 24.14 C 53.04 19.96 52.39 12.55 56.56 7.58 L 6.20 67.60 C 10.37 62.62 17.78 61.98 22.75 66.15 C 25.79 68.70 27.20 72.45 26.90 76.12 C 26.71 78.46 25.83 80.77 24.20 82.71 L 53.40 47.91 L 74.56 22.69 C 70.39 27.66 62.98 28.31 58.01 24.14"/><path class="a" d="M 22.75 66.15 C 17.78 61.98 10.37 62.62 6.20 67.60 C 2.02 72.57 2.67 79.98 7.64 84.16 C 11.84 87.67 17.75 87.75 22.01 84.72 C 22.80 84.15 23.55 83.49 24.20 82.71 C 25.83 80.77 26.71 78.46 26.90 76.12 C 27.20 72.45 25.79 68.70 22.75 66.15"/><path class="a" d="M 121.57 22.69 C 117.40 27.66 109.99 28.31 105.02 24.14 C 100.04 19.96 99.39 12.55 103.57 7.58 L 62.98 55.95 L 53.21 67.60 C 54.60 65.94 56.35 64.77 58.25 64.10 C 62.05 62.74 66.45 63.37 69.76 66.15 C 74.73 70.32 75.38 77.73 71.21 82.71 Z M 121.57 22.69"/><path class="a" d="M 69.76 66.15 C 66.45 63.37 62.05 62.74 58.25 64.10 C 56.35 64.77 54.60 65.94 53.21 67.60 C 50.58 70.73 49.87 74.83 50.94 78.48 C 51.57 80.62 52.82 82.61 54.66 84.16 C 59.62 88.33 67.04 87.68 71.21 82.71 C 75.38 77.73 74.73 70.32 69.76 66.15"/></svg>
           <h2>${esc(S.cand)}</h2>
           <div class="cert">${esc(doc.titulo)} · PeakU Verificado</div>
-          <div class="rl2">${esc(S.rol)}${S.cli?' · <b>'+esc(S.cli)+'</b>':''}</div>
+          <div class="rl2">${[esc(S.rol), S.cli && '<b>'+esc(S.cli)+'</b>'].filter(Boolean).join(' · ')}</div>
         </div>
         <div class="mt">
           Informe <b class="mono">${esc(S.id)}</b><br>
@@ -1172,11 +1263,14 @@ function verActa(){
         (doc.tipo === 'acta') ? '; identidad verificada por proveedor externo y cotejada contra el rostro de la sesión' : ''}; sesión grabada y archivada.</p>
     </div>
     <div class="tools" style="margin-top:14px">
-      <button data-back type="button">Volver al cierre</button>
+      <button data-back type="button">${S.soloLectura ? 'Volver a la lista' : 'Volver al cierre'}</button>
       <button class="pri" id="btnPrint" type="button">Imprimir o guardar en PDF</button>
       <button id="btnJson2" type="button">Copiar JSON del archivo</button>
     </div>`;
-  $('#actaStage').querySelector('[data-back]').addEventListener('click', () => { go('vLive'); render(); });
+  $('#actaStage').querySelector('[data-back]').addEventListener('click', () => {
+    if(S.soloLectura){ loadTablero(); return; }
+    go('vLive'); render();
+  });
   $('#actaStage').querySelector('#btnPrint').addEventListener('click', () => window.print());
   $('#actaStage').querySelector('#btnJson2').addEventListener('click', copiarJSON);
   go('vActa');
@@ -1243,13 +1337,18 @@ async function salud(){
 
 function init(){
   initIntake();
-  $('#btnHome').addEventListener('click', () => { if(!S || S.fin || confirm('Hay una sesión en curso. ¿Salir de todos modos? Queda guardada.')) loadTablero(); });
+  $('#btnHome').addEventListener('click', async () => {
+    if(S && !S.fin && !S.soloLectura && !confirm('Hay una sesión en curso. ¿Salir de todos modos? Queda guardada.')) return;
+    await flush();
+    loadTablero();
+  });
   $('#btnNuevoIntake').addEventListener('click', () => go('vIntake'));
   $('#btnVerSesiones').addEventListener('click', () => { document.getElementById('sesCard').scrollIntoView({behavior:'smooth'}); });
   document.querySelectorAll('[data-home]').forEach(b => b.addEventListener('click', loadTablero));
   $('#btnReset').addEventListener('click', () => {
+    if(S && S.soloLectura){ S = null; loadTablero(); return; }
     if(confirm('¿Salir de esta sesión? Queda guardada en la base de datos y puedes seguir después.')){
-      S = null; VAC = null; clearLocal(); loadTablero();
+      flush().then(() => { S = null; VAC = null; clearLocal(); loadTablero(); });
     }
   });
 

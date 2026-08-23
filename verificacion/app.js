@@ -689,8 +689,17 @@ ${!code ? `
       el informe solo indica que tu identidad quedó verificada.</p></div></body></html>`);
   });
 
+  // sendBeacon solo sabe hacer POST y no espera respuesta: se usa el mismo guardado del PATCH.
+  r.post('/api/sessions/:id/beacon', (req, res, next) => {
+    req.method = 'PATCH';
+    res.status(204);
+    guardarAvance(req, res).catch(e => console.error('[verificacion/beacon]', e.message));
+  });
+
   // Autosave del avance.
-  r.patch('/api/sessions/:id', async (req, res) => {
+  r.patch('/api/sessions/:id', (req, res) => guardarAvance(req, res));
+
+  async function guardarAvance(req, res) {
     try {
       const id = Number(req.params.id);
       const b = req.body || {};
@@ -724,6 +733,7 @@ ${!code ? `
             );
           }
           await c.query('COMMIT');
+          if (res.headersSent || res.statusCode === 204) return res.end();
           return res.json({ ok: true, id, semaforo: sem, identidad: estadoIdentidad(ctx) });
         } catch (e) { await c.query('ROLLBACK'); throw e; }
         finally { c.release(); }
@@ -741,9 +751,9 @@ ${!code ? `
       res.json({ ok: true, id, semaforo: sem, identidad: estadoIdentidad(ctx) });
     } catch (e) {
       console.error('[verificacion/sessions.patch]', e.message);
-      res.status(500).json({ error: e.message });
+      if (!res.headersSent) res.status(500).json({ error: e.message });
     }
-  });
+  }
 
   // Emisión del acta. El servidor vuelve a aplicar la regla: sin carpeta completa no hay acta.
   r.post('/api/sessions/:id/issue', async (req, res) => {
