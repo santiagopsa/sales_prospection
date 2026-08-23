@@ -120,6 +120,10 @@ async function initSchema(pool) {
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS face_verdict TEXT`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS face_at TIMESTAMPTZ`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS id_note TEXT`,
+    // Lo que el candidato declara y la recomendación del evaluador: alimentan el acta.
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS declara JSONB`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS recomendacion JSONB`,
+    `CREATE INDEX IF NOT EXISTS idx_v_sess_code ON ${T.sessions}(report_code)`,
     `CREATE INDEX IF NOT EXISTS idx_v_sess_didit ON ${T.sessions}(didit_session_id)`,
     `ALTER TABLE ${T.vacancies} ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,

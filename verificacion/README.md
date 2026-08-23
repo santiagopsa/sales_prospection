@@ -21,7 +21,7 @@ Después, para cada finalista, la app guía una sesión de 25 minutos contra eso
 | 2 | Análisis | Claude | Empresa, vacante y hasta 5 excluyentes · 20-40 s |
 | 3 | Revisión | Reclutador | Corrige lo que la IA no pilló y guarda |
 | 4 | Vacante | — | Ficha con los requisitos y su material de verificación |
-| 5 | Sesión | Reclutador | Apertura → un requisito por pantalla → cierre |
+| 5 | Sesión | Reclutador | Apertura → un requisito por pantalla → contexto → cierre |
 | 6 | Acta | — | Informe con firma de integridad, listo para PDF |
 
 ---
@@ -118,6 +118,30 @@ curl -s localhost:3000/api/health               # el Sandler sigue vivo
 curl -s localhost:3000/verificacion/api/health  # {"ok":true,"app":"verificacion","db":true,...}
 curl -sI localhost:3000/verificacion | head -1  # 301 hacia /verificacion/
 ```
+
+---
+
+## El informe y su verificación pública
+
+El acta sigue el formato del informe rediseñado, no una versión reducida:
+
+- **Sellos** arriba, derivados de lo que de verdad se midió en la sesión: identidad, supervisión, señales, requisitos.
+- **Zona 1 · Lo que medimos** — cada requisito con su barra, la evidencia textual y **el ancla citada debajo**. Sin el ancla, un "4/5" es un número sin criterio detrás.
+- **Integridad** — identidad con el puntaje de cotejo, señales, grabación, evidencia.
+- **Zona 2 · Lo que declara** — pretensión, disponibilidad, motivación y no negociables, marcados como *sus palabras, no nuestra medición*.
+- **Zona 3 · Nuestra recomendación** — veredicto, texto y riesgos con mitigación. Lo único del acta que es opinión, y va firmado.
+
+Las zonas 2 y 3 se llenan en la fase **Contexto**, entre los requisitos y el cierre.
+
+Lo que **no** trae, porque no sale de la sesión: inglés por sub-habilidad, percentil contra la población evaluada y trayectoria confirmada vs. declarada. Eso vive en la base de datos de PeakU y en la verificación de referencias; conectarlo es un trabajo aparte.
+
+### La URL de autenticidad existe de verdad
+
+El acta imprime una dirección de este mismo servidor (`/verificacion/v/PKV-…`), armada con el dominio donde corre la app. Antes imprimía `peaku.co/verificar/…`, que no existía: una promesa impresa en un documento que va al cliente.
+
+La página es pública y **no muestra el nombre del candidato ni sus calificaciones**. Confirma que el informe fue emitido, para qué cargo y cliente, si certificó identidad, y su firma de integridad. Publicar la evaluación de una persona en una URL adivinable sería otra cosa muy distinta.
+
+`GET /verificacion/api/v/:code` devuelve lo mismo en JSON.
 
 ---
 

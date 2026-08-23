@@ -44,7 +44,19 @@ def calificar(pg):
     pg.click('[data-lv="5"]'); pg.fill("[data-notes]", "Rollout en Alpina 2023, nueve meses, lideró listas de materiales.")
     pg.wait_for_timeout(150); pg.click("[data-next]"); pg.wait_for_timeout(300)
     pg.click('[data-lv="4"]'); pg.fill("[data-notes]", "Explicó la integración con un caso propio y precisó los quiebres.")
-    pg.wait_for_timeout(200); pg.click("[data-next]"); pg.wait_for_timeout(500)
+    pg.wait_for_timeout(200); pg.click("[data-next]"); pg.wait_for_timeout(400)
+    # fase de contexto
+    pg.fill('[data-d="pretension"]', "3.500.000 COP / mes")
+    pg.fill('[data-d="disponibilidad"]', "2 semanas")
+    pg.fill('[data-d="motivacion"]', "Busca autonomia en la decision tecnica; su salida responde a un techo.")
+    pg.fill('[data-d="nogo"]', "Baja autonomia\nEntornos rigidos")
+    pg.click('[data-rec="reserva"]'); pg.wait_for_timeout(150)
+    pg.fill('[data-r="texto"]', "El nucleo del cargo esta medido y sostenido con evidencia.")
+    pg.click("#btnAddRiesgo"); pg.wait_for_timeout(200)
+    pg.fill('[data-ri="0"][data-k="r"]', "Integracion con QM sin caso propio")
+    pg.fill('[data-ri="0"][data-k="m"]', "Acompanar el primer cierre de mes")
+    pg.wait_for_timeout(200)
+    pg.click("[data-next]"); pg.wait_for_timeout(600)
 
 with sync_playwright() as pw:
     br = pw.chromium.launch(args=["--no-proxy-server"])

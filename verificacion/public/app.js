@@ -22,6 +22,16 @@ const ANCHORS = {
 };
 const LVLTXT = {5:'CUMPLE',4:'CUMPLE',3:'PARCIAL',2:'NO CUMPLE',1:'NO CUMPLE'};
 
+// Versión corta del ancla, para citar en el acta qué significó ese nivel.
+// Sin esto, un "4/5" es un número sin criterio detrás.
+const ANCLA_CORTA = {
+  5:'Ancla 5: escena específica + rol individual + fricción real narrada + 3/3 detalles verificables + criterio propio en el cruce.',
+  4:'Ancla 4: escena y rol claros + fricción real + 2/3 detalles verificables; cruce correcto aunque superficial.',
+  3:'Ancla 3: experiencia plausible pero escena genérica o fricción vaga; detalles parciales.',
+  2:'Ancla 2: solo definiciones y contexto; sin escena propia; confunde algún detalle verificable.',
+  1:'Ancla 1: no sostiene el tema — evasivas, incoherencias con el CV o detalles incorrectos.'
+};
+
 const SONDA = [
   {t:'Declaración', d:'“El cargo exige <em>[requisito]</em>. Cuéntame tu experiencia con eso.” Deja que hable un minuto sin interrumpir.'},
   {t:'Escena',      d:'Llévalo al último caso concreto: cuándo fue, en qué empresa, y qué hizo <em>él</em> — no el equipo, él. El impostor habla en general; el real aterriza en un día específico.'},
@@ -50,6 +60,12 @@ const idChecksDe = kind => IDCHECKS.filter(c => c.kinds.includes(kind));
 /* ===================== ruta base =====================
    La app se monta bajo un prefijo (/verificacion) dentro del servidor del Sandler.
    La base se deduce del propio <script> para no hardcodear el punto de montaje. */
+// URL pública de verificación del acta. Se arma con el dominio donde de verdad corre la app:
+// una dirección impresa en un documento que va al cliente tiene que existir.
+function urlVerificacion(codigo){
+  return `${location.host}${BASE}/v/${codigo}`;
+}
+
 const BASE = (function(){
   try{
     const s = document.currentScript && document.currentScript.src;
@@ -545,13 +561,17 @@ function setupSesion(v){
 function fases(){
   const f = [{k:'id', t:'Apertura', min:4}];
   S.reqs.forEach((r,i) => f.push({k:'req', i, t:r.n || ('Requisito '+(i+1)), min:6}));
+  f.push({k:'ctx', t:'Contexto', min:4});
   f.push({k:'cierre', t:'Cierre', min:3});
   return f;
 }
 function drawNav(){
   const F = fases();
   $('#phaseNav').innerHTML = F.map((f,i) => {
-    const done = f.k==='id' ? idChecksDe(S.kind).every(c=>S.idc[c.id]) : (f.k==='req' ? S.reqs[f.i].lvl>0 : false);
+    const done = f.k==='id' ? idChecksDe(S.kind).every(c=>S.idc[c.id])
+      : f.k==='req' ? S.reqs[f.i].lvl>0
+      : f.k==='ctx' ? !!(S.rec && S.rec.veredicto)
+      : false;
     return `<button class="ph ${i===S.fase?'act':''} ${done?'done':''}" data-f="${i}" type="button"><span class="dot"></span>${esc(f.t.length>26?f.t.slice(0,26)+'…':f.t)}</button>`;
   }).join('');
   $('#phaseNav').querySelectorAll('[data-f]').forEach(b =>
@@ -567,6 +587,7 @@ function sync(){
     try{
       await api('/api/sessions/'+S.sid, {method:'PATCH', body:{
         identity: S.idc, signals: S.sig, data: {mode:S.mode, fase:S.fase},
+        declara: S.dec || {}, recomendacion: S.rec || {},
         ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||''})),
       }});
     }catch(e){ /* el navegador ya lo tiene guardado local; no interrumpimos la entrevista */ }
@@ -675,6 +696,68 @@ function render(){
     };
     st.querySelector('[data-notes]').addEventListener('input', e => { r.ev = e.target.value; evNote(); touch(); });
     evNote();
+  }
+
+  else if(f.k === 'ctx'){
+    S.dec = S.dec || {};
+    S.rec = S.rec || {riesgos:[]};
+    const d = S.dec, rc = S.rec;
+    st.innerHTML = `
+      <div class="card">
+        <h2>Lo que el candidato declara</h2>
+        <div class="cs" style="margin-bottom:16px">Sus palabras, no tu medición. Va en el acta en una sección aparte, marcada como declarada.</div>
+        <div class="frow">
+          <div class="f"><label>Pretensión</label><input data-d="pretension" value="${esc(d.pretension||'')}" placeholder="3.500.000 COP / mes"></div>
+          <div class="f"><label>Disponibilidad</label><input data-d="disponibilidad" value="${esc(d.disponibilidad||'')}" placeholder="2 semanas"></div>
+        </div>
+        <div class="frow">
+          <div class="f"><label>Ubicación</label><input data-d="ubicacion" value="${esc(d.ubicacion||'')}" placeholder="Medellín · remoto"></div>
+          <div class="f"><label>Otros procesos activos</label><input data-d="procesos" value="${esc(d.procesos||'')}" placeholder="2, ninguno en oferta"></div>
+        </div>
+        <div class="frow one">
+          <div class="f"><label>Qué busca y por qué se movería</label><textarea data-d="motivacion" placeholder="En sus palabras: qué lo mueve, qué techo encontró donde está.">${esc(d.motivacion||'')}</textarea></div>
+        </div>
+        <div class="frow one">
+          <div class="f"><label>No negociables — uno por línea</label><textarea data-d="nogo" placeholder="Baja autonomía en la gestión&#10;Entornos rígidos">${esc(d.nogo||'')}</textarea></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Tu recomendación</h2>
+        <div class="cs" style="margin-bottom:16px">Lo único del acta que es opinión y no medición. Va firmado por ti.</div>
+        <div class="modes" id="recVer" style="grid-template-columns:repeat(3,1fr)">
+          ${[['si','Recomendado','El núcleo del cargo está medido y sostenido'],
+             ['reserva','Con una reserva','Cumple, pero hay algo que el cliente debe saber'],
+             ['no','No recomendado','No sostiene los excluyentes del cargo']].map(([k,t,s2]) =>
+            `<button class="mode ${rc.veredicto===k?'sel':''}" data-rec="${k}" type="button"><b>${t}</b><span>${s2}</span></button>`).join('')}
+        </div>
+        <div class="frow one" style="margin-top:12px">
+          <div class="f"><label>En dos o tres frases</label><textarea data-r="texto" placeholder="Qué quedó medido y sostenido con evidencia, y cuál es la reserva si la hay.">${esc(rc.texto||'')}</textarea></div>
+        </div>
+        <div class="fttl" style="margin:16px 0 9px">Riesgos y cómo mitigarlos</div>
+        <div id="riesgos"></div>
+        <button class="back" id="btnAddRiesgo" type="button" style="color:var(--acc);margin-top:4px">+ Agregar riesgo</button>
+      </div>
+
+      <div class="nav">
+        <button data-prev type="button">Atrás</button>
+        <button class="pri" data-next type="button">Ir al cierre</button>
+      </div>`;
+
+    st.querySelectorAll('[data-d]').forEach(el => el.addEventListener('input', e => {
+      S.dec[e.target.dataset.d] = e.target.value; touch();
+    }));
+    st.querySelectorAll('[data-r]').forEach(el => el.addEventListener('input', e => {
+      S.rec[e.target.dataset.r] = e.target.value; touch();
+    }));
+    st.querySelectorAll('[data-rec]').forEach(b => b.addEventListener('click', e => {
+      S.rec.veredicto = e.currentTarget.dataset.rec; touch(); render();
+    }));
+    st.querySelector('#btnAddRiesgo').addEventListener('click', () => {
+      S.rec.riesgos = S.rec.riesgos || [];
+      S.rec.riesgos.push({r:'', m:''}); touch(); drawRiesgos();
+    });
+    drawRiesgos();
   }
 
   else {
@@ -920,6 +1003,28 @@ async function subirCaptura(file){
   }finally{ overlay(false); }
 }
 
+function drawRiesgos(){
+  const L = $('#riesgos');
+  if(!L) return;
+  const rs = (S.rec && S.rec.riesgos) || [];
+  L.innerHTML = rs.length ? rs.map((x,i) => `
+    <div class="reqline">
+      <div class="num">!</div>
+      <div class="fields">
+        <div class="f"><input data-ri="${i}" data-k="r" value="${esc(x.r||'')}" placeholder="El riesgo, en una línea"></div>
+        <div class="f"><input data-ri="${i}" data-k="m" value="${esc(x.m||'')}" placeholder="Cómo mitigarlo"></div>
+      </div>
+      <button class="del" data-delr="${i}" type="button" aria-label="Quitar">×</button>
+    </div>`).join('')
+    : '<p class="hint" style="margin:0">Sin riesgos anotados. Si el candidato cumple sin reservas, está bien dejarlo vacío.</p>';
+  L.querySelectorAll('[data-ri]').forEach(el => el.addEventListener('input', e => {
+    S.rec.riesgos[+e.target.dataset.ri][e.target.dataset.k] = e.target.value; touch();
+  }));
+  L.querySelectorAll('[data-delr]').forEach(b => b.addEventListener('click', e => {
+    S.rec.riesgos.splice(+e.currentTarget.dataset.delr, 1); touch(); drawRiesgos();
+  }));
+}
+
 /* ===================== señales ===================== */
 function drawSig(){
   $('#sigChips').innerHTML = SIGNALS.map(s =>
@@ -938,6 +1043,7 @@ async function emitirActa(){
   try{
     const out = await api('/api/sessions/'+S.sid+'/issue', {method:'POST', body:{
       candidate: S.cand, identity: S.idc, signals: S.sig, data:{mode:S.mode},
+      declara: S.dec || {}, recomendacion: S.rec || {},
       ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||''})),
     }});
     S.fin = true; S.fecha = Date.now(); S.hash = out.integrity_hash;
@@ -959,13 +1065,30 @@ function firmaCorta(){
 function verActa(){
   const d = new Date(S.fecha || Date.now());
   const nSig = Object.values(S.sig).filter(Boolean).length;
+  const dec = S.dec || {}, rec = S.rec || {};
+  const doc = S.doc || {titulo:'Informe de verificación', alcance:'', tipo:'acta'};
+  const idn = S.ident || {};
+  const cierre = S.kind === 'cierre';
+  const idOk = cierre && idn.estado === 'verificada';
+  const nogo = (dec.nogo||'').split('\n').map(x=>x.trim()).filter(Boolean);
+  const riesgos = (rec.riesgos||[]).filter(x => (x.r||'').trim());
+  const VER = {si:['ok','Recomendado'], reserva:['par','Recomendado con una reserva'], no:['no','No recomendado']}[rec.veredicto] || null;
+
+  // Sellos: solo lo que de verdad se midió en esta sesión.
+  const sellos = [
+    cierre ? [idOk, idOk ? 'Identidad verificada' : 'Identidad no certificada'] : null,
+    [true, 'Sesión supervisada en vivo'],
+    [nSig === 0, nSig === 0 ? 'Sin señales de asistencia' : `${nSig} señal${nSig>1?'es':''} registrada${nSig>1?'s':''}`],
+    [true, `${S.reqs.length} requisito${S.reqs.length>1?'s':''} medido${S.reqs.length>1?'s':''}`],
+  ].filter(Boolean);
+
   $('#actaStage').innerHTML = `
     <div class="acta">
       <div class="ahd">
         <div>
           <svg class="iso actaiso" viewBox="0 0 174.8 90.4" role="img" aria-label="PeakU" focusable="false"><path class="b" d="M 126.84 54.14 C 131.82 58.32 139.23 57.67 143.40 52.70 L 125.39 37.59 C 121.22 42.56 121.87 49.97 126.84 54.14"/><path class="b" d="M 167.13 6.13 C 162.16 1.96 154.75 2.61 150.58 7.58 L 168.58 22.69 C 172.75 17.71 172.11 10.30 167.13 6.13"/><path class="b" d="M 152.02 24.14 C 147.05 19.96 146.40 12.55 150.58 7.58 L 125.39 37.59 C 129.57 32.62 136.98 31.97 141.95 36.14 C 146.93 40.31 147.57 47.73 143.40 52.70 L 168.58 22.69 C 164.41 27.66 157.00 28.31 152.02 24.14"/><path class="b" d="M 141.95 36.14 C 136.98 31.97 129.57 32.62 125.39 37.59 L 143.40 52.70 C 147.57 47.73 146.93 40.31 141.95 36.14"/><path class="b" d="M 152.02 24.14 C 157.00 28.31 164.41 27.66 168.58 22.69 L 150.58 7.58 C 146.40 12.55 147.05 19.96 152.02 24.14"/><path class="a" d="M 73.12 6.13 C 68.14 1.96 60.73 2.61 56.56 7.58 L 44.90 21.48 L 62.62 36.92 L 74.56 22.69 C 78.73 17.71 78.09 10.30 73.12 6.13"/><path class="a" d="M 120.12 6.13 C 115.15 1.96 107.74 2.61 103.57 7.58 L 121.57 22.69 C 125.75 17.71 125.10 10.30 120.12 6.13"/><path class="a" d="M 105.02 24.14 C 109.99 28.31 117.40 27.66 121.57 22.69 L 103.57 7.58 C 99.39 12.55 100.04 19.96 105.02 24.14"/><path class="a" d="M 53.21 67.60 L 62.98 55.95 C 60.76 58.59 56.82 58.94 54.17 56.72 C 51.53 54.50 51.18 50.55 53.40 47.91 L 24.20 82.71 C 23.55 83.49 22.80 84.15 22.00 84.72 L 21.99 84.75 C 21.99 84.75 33.67 76.08 34.11 75.75 C 36.51 74.02 39.46 72.99 42.66 72.99 C 42.65 72.99 42.65 72.99 42.64 72.99 L 42.68 72.99 C 42.67 72.99 42.66 72.99 42.66 72.99 C 46.39 73.00 50.01 74.67 50.94 78.48 L 50.94 78.48 C 49.87 74.83 50.58 70.73 53.21 67.60"/><path class="a" d="M 58.01 24.14 C 53.04 19.96 52.39 12.55 56.56 7.58 L 6.20 67.60 C 10.37 62.62 17.78 61.98 22.75 66.15 C 25.79 68.70 27.20 72.45 26.90 76.12 C 26.71 78.46 25.83 80.77 24.20 82.71 L 53.40 47.91 L 74.56 22.69 C 70.39 27.66 62.98 28.31 58.01 24.14"/><path class="a" d="M 22.75 66.15 C 17.78 61.98 10.37 62.62 6.20 67.60 C 2.02 72.57 2.67 79.98 7.64 84.16 C 11.84 87.67 17.75 87.75 22.01 84.72 C 22.80 84.15 23.55 83.49 24.20 82.71 C 25.83 80.77 26.71 78.46 26.90 76.12 C 27.20 72.45 25.79 68.70 22.75 66.15"/><path class="a" d="M 121.57 22.69 C 117.40 27.66 109.99 28.31 105.02 24.14 C 100.04 19.96 99.39 12.55 103.57 7.58 L 62.98 55.95 L 53.21 67.60 C 54.60 65.94 56.35 64.77 58.25 64.10 C 62.05 62.74 66.45 63.37 69.76 66.15 C 74.73 70.32 75.38 77.73 71.21 82.71 Z M 121.57 22.69"/><path class="a" d="M 69.76 66.15 C 66.45 63.37 62.05 62.74 58.25 64.10 C 56.35 64.77 54.60 65.94 53.21 67.60 C 50.58 70.73 49.87 74.83 50.94 78.48 C 51.57 80.62 52.82 82.61 54.66 84.16 C 59.62 88.33 67.04 87.68 71.21 82.71 C 75.38 77.73 74.73 70.32 69.76 66.15"/></svg>
           <h2>${esc(S.cand)}</h2>
-          <div class="cert">${esc((S.doc && S.doc.titulo) || 'Informe de verificación')} · PeakU Verificado</div>
+          <div class="cert">${esc(doc.titulo)} · PeakU Verificado</div>
           <div class="rl2">${esc(S.rol)}${S.cli?' · <b>'+esc(S.cli)+'</b>':''}</div>
         </div>
         <div class="mt">
@@ -976,28 +1099,77 @@ function verActa(){
         </div>
       </div>
 
-      <div class="asec">Lo que medimos — requisitos definidos por el cliente</div>
-      ${S.reqs.map(r => {
-        const v = r.lvl>=4?'ok':(r.lvl===3?'par':'no');
-        return `<div class="res"><div class="rn">${esc(r.n)}</div><div class="rl">${r.lvl} / 5</div><span class="vd ${v}">${LVLTXT[r.lvl]}</span></div>
-                ${r.ev?`<div class="aev">${esc(r.ev)}</div>`:''}`;
-      }).join('')}
+      <div class="sellos">
+        ${sellos.map(([ok,t]) => `<span class="sello ${ok?'ok':'nv'}">${ok?'✓':'○'} ${esc(t)}</span>`).join('')}
+      </div>
 
-      <div class="asec">Integridad de la sesión</div>
-      ${S.kind === 'cierre' ? actaIdentidad() : ''}
-      <div class="res"><div class="rn">Señales de asistencia durante la sesión</div><span class="vd ${nSig?'par':'ok'}">${nSig?nSig+' REGISTRADA'+(nSig>1?'S':''):'NINGUNA'}</span></div>
-      <div class="res"><div class="rn">Grabación y bitácora</div><span class="vd ok">DISPONIBLES</span></div>
-      ${nSig?`<div class="aev">Señales: ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(s.t)).join(' · ')}. Se reportan como observación factual; no constituyen un juicio sobre el candidato.</div>`:''}
+      ${(dec.ubicacion||dec.disponibilidad||dec.pretension) ? `<div class="datos">
+        ${dec.ubicacion ? `<div class="dato"><b>Ubicación</b> · ${esc(dec.ubicacion)}</div>` : ''}
+        ${dec.disponibilidad ? `<div class="dato"><b>Disponibilidad</b> · ${esc(dec.disponibilidad)}</div>` : ''}
+        ${dec.pretension ? `<div class="dato"><b>Pretensión</b> · ${esc(dec.pretension)}</div>` : ''}
+      </div>` : ''}
+
+      <div class="zona"><span class="zn">Zona 1</span><h3>Lo que medimos</h3>
+        <span class="zs">Evidencia de la sesión · escala anclada 1-5</span></div>
+      <div class="zbox">
+        ${S.reqs.map(r => {
+          const v = r.lvl>=4?'ok':(r.lvl===3?'par':'no');
+          return `<div class="req">
+            <div class="reqhd">
+              <div class="reqn">${esc(r.n)}</div>
+              <div class="reqv"><span class="rl">${r.lvl} / 5</span><span class="vd ${v}">${LVLTXT[r.lvl]}</span></div>
+            </div>
+            <div class="barra"><span class="fill ${v}" style="width:${r.lvl*20}%"></span></div>
+            ${r.ev?`<div class="aev">${esc(r.ev)}</div>`:''}
+            <div class="ancla">${ANCLA_CORTA[r.lvl]||''}</div>
+          </div>`;
+        }).join('')}
+      </div>
+
+      <div class="zona"><span class="zn">Integridad</span><h3>Cómo se sostuvo la sesión</h3></div>
+      <div class="zbox">
+        ${cierre ? actaIdentidad() : ''}
+        <div class="res"><div class="rn">Señales de asistencia durante la sesión</div><span class="vd ${nSig?'par':'ok'}">${nSig?nSig+' REGISTRADA'+(nSig>1?'S':''):'NINGUNA'}</span></div>
+        <div class="res"><div class="rn">Grabación y bitácora</div><span class="vd ok">DISPONIBLES</span></div>
+        <div class="res"><div class="rn">Evidencia textual en cada requisito</div><span class="vd ok">REGISTRADA</span></div>
+        ${nSig?`<div class="aev">Señales: ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(s.t)).join(' · ')}. Se reportan como observación factual; no constituyen un juicio sobre el candidato.</div>`:''}
+      </div>
+
+      ${(dec.motivacion || nogo.length || dec.procesos) ? `
+      <div class="zona"><span class="zn">Zona 2</span><h3>Lo que ${esc(S.cand.split(' ')[0])} declara</h3>
+        <span class="zs">Sus palabras, no nuestra medición</span></div>
+      <div class="zbox dos">
+        ${dec.motivacion ? `<div><div class="mini">Qué busca</div><p class="dtx">${esc(dec.motivacion)}</p>
+          ${nogo.length ? `<div class="mini" style="margin-top:12px">No negociables</div>
+            <ul class="lst">${nogo.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>` : ''}</div>` : '<div></div>'}
+        <div>
+          <div class="mini">Condiciones declaradas</div>
+          ${dec.pretension ? `<div class="res"><div class="rn">Pretensión</div><span class="rl">${esc(dec.pretension)}</span></div>` : ''}
+          ${dec.disponibilidad ? `<div class="res"><div class="rn">Disponibilidad</div><span class="rl">${esc(dec.disponibilidad)}</span></div>` : ''}
+          ${dec.procesos ? `<div class="res"><div class="rn">Otros procesos activos</div><span class="rl">${esc(dec.procesos)}</span></div>` : ''}
+          <p class="hint" style="margin-top:8px">No verificado contra desprendibles ni contra terceros.</p>
+        </div>
+      </div>` : ''}
+
+      ${(VER || rec.texto || riesgos.length) ? `
+      <div class="zona"><span class="zn">Zona 3</span><h3>Nuestra recomendación</h3>
+        <span class="zs">Opinión del evaluador · lo único que no es medición</span></div>
+      <div class="zbox rec">
+        ${VER ? `<div class="recver"><span class="vd ${VER[0]}">${esc(VER[1].toUpperCase())}</span></div>` : ''}
+        ${rec.texto ? `<p class="dtx" style="margin-top:${VER?'10px':'0'}">${esc(rec.texto)}</p>` : ''}
+        ${riesgos.length ? `<div class="mini" style="margin-top:14px">Riesgos</div>
+          ${riesgos.map(x=>`<div class="riesgo"><b>${esc(x.r)}</b>${x.m?`<span>Mitigación: ${esc(x.m)}</span>`:''}</div>`).join('')}` : ''}
+      </div>` : ''}
 
       <div class="aback">
         <h4>PeakU responde por este informe.</h4>
-        <p>${(S.doc && S.doc.tipo === 'acta')
+        <p>${(doc.tipo === 'acta')
           ? `Si la persona no es quien este informe dice que es, o su desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo.`
-          : `Si el desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo. <b>Este informe no certifica la identidad de la persona</b>: certifica lo observado sobre los requisitos del cargo.`} Verifique la autenticidad en <b>peaku.co/verificar/${esc(S.id)}</b>.</p>
+          : `Si el desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo. <b>Este informe no certifica la identidad de la persona</b>: certifica lo observado sobre los requisitos del cargo.`} Verifique la autenticidad en <b>${esc(urlVerificacion(S.id))}</b>.</p>
         <span class="sig">Firma de integridad: ${esc(firmaCorta())} · Evaluó: ${esc(S.eval||'—')} · Revisión de calidad: pendiente de cuatro ojos · Rúbrica anclada 1-5</span>
       </div>
-      <p class="hint" style="margin-top:14px">${esc((S.doc && S.doc.alcance) || '')} Metodología: entrevista estructurada con escalas ancladas (1-5) sobre los requisitos definidos por el cliente${
-        (S.doc && S.doc.tipo === 'acta') ? '; identidad verificada por proveedor externo y cotejada contra el rostro de la sesión' : ''}; sesión grabada y archivada.</p>
+      <p class="hint" style="margin-top:14px">${esc(doc.alcance || '')} Metodología: entrevista estructurada con escalas ancladas (1-5) sobre los requisitos definidos por el cliente${
+        (doc.tipo === 'acta') ? '; identidad verificada por proveedor externo y cotejada contra el rostro de la sesión' : ''}; sesión grabada y archivada.</p>
     </div>
     <div class="tools" style="margin-top:14px">
       <button data-back type="button">Volver al cierre</button>
@@ -1010,6 +1182,8 @@ function verActa(){
   go('vActa');
 }
 
+// Fila de identidad del acta: distingue verificada, dudosa, rechazada y no superada.
+// Que el candidato no haya querido verificarse no se cuenta igual que una verificación fallida.
 function actaIdentidad(){
   const i = S.ident || {};
   const est = i.estado || 'pendiente';

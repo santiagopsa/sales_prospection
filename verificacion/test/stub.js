@@ -146,7 +146,8 @@ const server = http.createServer(async (req, res) => {
     if(!s) return json(res,404,{error:'not found'});
     const ctx = {kind:s.kind, faceVerdict:s.face_verdict, diditStatus:s.didit_status, idNote:s.id_note};
     const sem = semaforo({identity:b.identity||{}, signals:b.signals||{}, ...ctx});
-    Object.assign(s, {identity:b.identity||{}, signals:b.signals||{}, semaforo:sem.color});
+    Object.assign(s, {identity:b.identity||{}, signals:b.signals||{}, semaforo:sem.color,
+                      declara:b.declara||{}, recomendacion:b.recomendacion||{}});
     db.ratings = db.ratings.filter(r=>r.session_id!==s.id);
     (b.ratings||[]).forEach((r,i)=>db.ratings.push({id:nid(), session_id:s.id, req_text:r.req_text, ord:i,
       level:r.level, verdict:r.level?LVLTXT[r.level]:null, evidence:r.evidence}));
@@ -216,6 +217,15 @@ const server = http.createServer(async (req, res) => {
   if(p === '/api/__simular' && m==='POST'){ db.simular = await body(req); return json(res,200,{ok:true}); }
 
   if(p === '/api/didit/estado') return json(res,200,{activo:true, falta:[], webhookFirmado:true, umbrales:{aprueba:70,duda:50}});
+
+  mm = p.match(/^\/v\/(.+)$/);
+  if(mm && m==='GET'){
+    const s = db.sessions.find(x=>(x.report_code||'').toUpperCase()===decodeURIComponent(mm[1]).toUpperCase() && x.status==='issued');
+    res.writeHead(s?200:404,{'Content-Type':'text/html; charset=utf-8'});
+    return res.end(s
+      ? `<html><body><h1>INFORME AUTÉNTICO</h1><p>${s.report_code}</p><p>Identidad verificada: ${s.face_verdict==='coincide'?'Sí':'No'}</p></body></html>`
+      : `<html><body><h1>NO ENCONTRADO</h1></body></html>`);
+  }
 
   // Una ruta /api inexistente responde 404 JSON, no la aplicación.
   if(p.startsWith('/api/')){

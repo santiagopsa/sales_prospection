@@ -109,6 +109,19 @@ with sync_playwright() as pw:
     pg.click('[data-sg="lat"]'); pg.wait_for_timeout(200)
     if pg.inner_text("#sigCount") != "1": errs.append("el contador de señales no marcó 1")
 
+    pg.click("[data-next]"); pg.wait_for_timeout(500)
+
+    # --- contexto ---
+    pg.fill('[data-d="pretension"]', "3.500.000 COP / mes")
+    pg.fill('[data-d="disponibilidad"]', "2 semanas")
+    pg.fill('[data-d="motivacion"]', "Busca autonomía en la decisión técnica; su salida responde a un techo, no a un conflicto.")
+    pg.fill('[data-d="nogo"]', "Baja autonomía\nEntornos rígidos")
+    pg.click('[data-rec="reserva"]'); pg.wait_for_timeout(150)
+    pg.fill('[data-r="texto"]', "El núcleo del cargo está medido y sostenido con evidencia. La reserva es la integración con QM.")
+    pg.click("#btnAddRiesgo"); pg.wait_for_timeout(200)
+    pg.fill('[data-ri="0"][data-k="r"]', "Integración con QM sin caso propio")
+    pg.fill('[data-ri="0"][data-k="m"]', "Acompañar el primer cierre de mes")
+    pg.wait_for_timeout(200)
     pg.click("[data-next]"); pg.wait_for_timeout(600)
 
     # --- cierre ---

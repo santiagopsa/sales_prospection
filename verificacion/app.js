@@ -528,6 +528,131 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
     }
   });
 
+  // -------------------------------------------------------------------------
+  // VERIFICACIÓN PÚBLICA DE AUTENTICIDAD
+  //
+  // Quien recibe un acta necesita poder comprobar que es real. Esta página es abierta,
+  // así que NO muestra el nombre del candidato ni sus calificaciones: solo confirma que
+  // el documento salió de aquí, para qué cargo y qué cliente, y si certificó identidad.
+  // Publicar la evaluación de una persona en una URL adivinable sería otra cosa muy distinta.
+  // -------------------------------------------------------------------------
+  async function actaPublica(code) {
+    if (pool) {
+      const q = await pool.query(`
+        SELECT s.report_code, s.issued_at, s.status, s.kind, s.semaforo, s.integrity_hash,
+               s.didit_status, s.face_verdict, s.id_note,
+               v.title AS vacancy_title, c.name AS company_name
+        FROM ${T.sessions} s
+        LEFT JOIN ${T.vacancies} v ON v.id = s.vacancy_id
+        LEFT JOIN ${T.companies} c ON c.id = v.company_id
+        WHERE UPPER(s.report_code) = UPPER($1) AND s.status = 'issued'`, [code]);
+      return q.rows[0] || null;
+    }
+    const s = mem.sessions.find(x => (x.report_code || '').toUpperCase() === code.toUpperCase() && x.status === 'issued');
+    if (!s) return null;
+    const v = mem.vacancies.find(x => x.id === s.vacancy_id);
+    return { ...s, vacancy_title: v && v.title, company_name: v && v.company_name };
+  }
+
+  r.get('/api/v/:code', async (req, res) => {
+    try {
+      const s = await actaPublica(String(req.params.code || ''));
+      if (!s) return res.status(404).json({ autentico: false, motivo: 'No existe un informe emitido con ese código.' });
+      const doc = tipoDocumento({ kind: s.kind, diditStatus: s.didit_status, faceVerdict: s.face_verdict, idNote: s.id_note });
+      const id = estadoIdentidad({ kind: s.kind, diditStatus: s.didit_status, faceVerdict: s.face_verdict, idNote: s.id_note });
+      res.json({
+        autentico: true,
+        codigo: s.report_code,
+        emitido: s.issued_at,
+        documento: doc.titulo,
+        alcance: doc.alcance,
+        cargo: s.vacancy_title || null,
+        cliente: s.company_name || null,
+        identidad_verificada: id.estado === 'verificada',
+        firma: s.integrity_hash || null,
+      });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  r.get('/v/:code?', async (req, res) => {
+    const code = String(req.params.code || '').trim();
+    let s = null;
+    try { if (code) s = await actaPublica(code); } catch (e) {}
+    const doc = s ? tipoDocumento({ kind: s.kind, diditStatus: s.didit_status, faceVerdict: s.face_verdict, idNote: s.id_note }) : null;
+    const id = s ? estadoIdentidad({ kind: s.kind, diditStatus: s.didit_status, faceVerdict: s.face_verdict, idNote: s.id_note }) : null;
+    const fecha = s && s.issued_at ? new Date(s.issued_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
+    const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Verificar un informe · PeakU</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap">
+<style>
+:root{--bg:#F5FAFC;--panel:#fff;--ink:#2A2E31;--ink2:#565656;--ink3:#8B8F92;--line:#DCE6EB;
+ --brand:#00C3FF;--acc:#006D8F;--good:#157A57;--good-soft:#E5F3EE;--crit:#9E2318;--crit-soft:#FAE9E7}
+@media(prefers-color-scheme:dark){:root{--bg:#15191C;--panel:#1E2327;--ink:#EDF2F4;--ink2:#A8AEB2;
+ --ink3:#7B8285;--line:#2A3237;--acc:#5CD3FF;--good:#5FC79A;--good-soft:#122019;--crit:#F19286;--crit-soft:#26120F}}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Montserrat,system-ui,sans-serif;background:var(--bg);color:var(--ink);
+ display:grid;place-items:center;min-height:100vh;padding:22px;line-height:1.5}
+.c{background:var(--panel);border-radius:14px;padding:30px 30px 26px;max-width:470px;width:100%;
+ box-shadow:0 4px 22px rgba(20,40,50,.07);border-top:3px solid var(--brand)}
+.iso{width:44px;height:auto;display:block;margin-bottom:16px}
+h1{font-size:19px;font-weight:800;letter-spacing:-.02em;margin-bottom:5px}
+.sub{font-size:13.5px;color:var(--ink2);margin-bottom:20px}
+.badge{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;letter-spacing:.04em;
+ padding:6px 12px;border-radius:20px;margin-bottom:18px}
+.ok{background:var(--good-soft);color:var(--good);border:1px solid var(--good)}
+.no{background:var(--crit-soft);color:var(--crit);border:1px solid var(--crit)}
+.row{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.row:last-of-type{border-bottom:none}
+.row .k{color:var(--ink2)} .row .v{font-weight:600;text-align:right}
+.firma{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--ink3);
+ word-break:break-all;margin-top:14px;line-height:1.5}
+.nota{font-size:12px;color:var(--ink3);margin-top:16px;line-height:1.55}
+form{display:flex;gap:8px;margin-top:16px}
+input{flex:1;font:inherit;font-size:14px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;
+ background:var(--bg);color:var(--ink);text-transform:uppercase}
+button{font:inherit;font-weight:700;font-size:14px;padding:10px 18px;border:none;border-radius:8px;
+ background:var(--acc);color:#fff;cursor:pointer}
+@media(prefers-color-scheme:dark){button{color:#15191C}}
+</style></head><body><div class="c">
+<svg class="iso" viewBox="0 0 174.8 90.4" aria-label="PeakU"><style>.a{fill:#00C3FF}.b{fill:#3E9DBD}</style><path class="b" d="M 126.84 54.14 C 131.82 58.32 139.23 57.67 143.40 52.70 L 125.39 37.59 C 121.22 42.56 121.87 49.97 126.84 54.14"/><path class="b" d="M 167.13 6.13 C 162.16 1.96 154.75 2.61 150.58 7.58 L 168.58 22.69 C 172.75 17.71 172.11 10.30 167.13 6.13"/><path class="b" d="M 152.02 24.14 C 147.05 19.96 146.40 12.55 150.58 7.58 L 125.39 37.59 C 129.57 32.62 136.98 31.97 141.95 36.14 C 146.93 40.31 147.57 47.73 143.40 52.70 L 168.58 22.69 C 164.41 27.66 157.00 28.31 152.02 24.14"/><path class="b" d="M 141.95 36.14 C 136.98 31.97 129.57 32.62 125.39 37.59 L 143.40 52.70 C 147.57 47.73 146.93 40.31 141.95 36.14"/><path class="b" d="M 152.02 24.14 C 157.00 28.31 164.41 27.66 168.58 22.69 L 150.58 7.58 C 146.40 12.55 147.05 19.96 152.02 24.14"/><path class="a" d="M 73.12 6.13 C 68.14 1.96 60.73 2.61 56.56 7.58 L 44.90 21.48 L 62.62 36.92 L 74.56 22.69 C 78.73 17.71 78.09 10.30 73.12 6.13"/><path class="a" d="M 120.12 6.13 C 115.15 1.96 107.74 2.61 103.57 7.58 L 121.57 22.69 C 125.75 17.71 125.10 10.30 120.12 6.13"/><path class="a" d="M 105.02 24.14 C 109.99 28.31 117.40 27.66 121.57 22.69 L 103.57 7.58 C 99.39 12.55 100.04 19.96 105.02 24.14"/><path class="a" d="M 53.21 67.60 L 62.98 55.95 C 60.76 58.59 56.82 58.94 54.17 56.72 C 51.53 54.50 51.18 50.55 53.40 47.91 L 24.20 82.71 C 23.55 83.49 22.80 84.15 22.00 84.72 L 21.99 84.75 C 21.99 84.75 33.67 76.08 34.11 75.75 C 36.51 74.02 39.46 72.99 42.66 72.99 C 42.65 72.99 42.65 72.99 42.64 72.99 L 42.68 72.99 C 42.67 72.99 42.66 72.99 42.66 72.99 C 46.39 73.00 50.01 74.67 50.94 78.48 L 50.94 78.48 C 49.87 74.83 50.58 70.73 53.21 67.60"/><path class="a" d="M 58.01 24.14 C 53.04 19.96 52.39 12.55 56.56 7.58 L 6.20 67.60 C 10.37 62.62 17.78 61.98 22.75 66.15 C 25.79 68.70 27.20 72.45 26.90 76.12 C 26.71 78.46 25.83 80.77 24.20 82.71 L 53.40 47.91 L 74.56 22.69 C 70.39 27.66 62.98 28.31 58.01 24.14"/><path class="a" d="M 22.75 66.15 C 17.78 61.98 10.37 62.62 6.20 67.60 C 2.02 72.57 2.67 79.98 7.64 84.16 C 11.84 87.67 17.75 87.75 22.01 84.72 C 22.80 84.15 23.55 83.49 24.20 82.71 C 25.83 80.77 26.71 78.46 26.90 76.12 C 27.20 72.45 25.79 68.70 22.75 66.15"/><path class="a" d="M 121.57 22.69 C 117.40 27.66 109.99 28.31 105.02 24.14 C 100.04 19.96 99.39 12.55 103.57 7.58 L 62.98 55.95 L 53.21 67.60 C 54.60 65.94 56.35 64.77 58.25 64.10 C 62.05 62.74 66.45 63.37 69.76 66.15 C 74.73 70.32 75.38 77.73 71.21 82.71 Z M 121.57 22.69"/><path class="a" d="M 69.76 66.15 C 66.45 63.37 62.05 62.74 58.25 64.10 C 56.35 64.77 54.60 65.94 53.21 67.60 C 50.58 70.73 49.87 74.83 50.94 78.48 C 51.57 80.62 52.82 82.61 54.66 84.16 C 59.62 88.33 67.04 87.68 71.21 82.71 C 75.38 77.73 74.73 70.32 69.76 66.15"/></svg>
+${!code ? `
+  <h1>Verificar un informe</h1>
+  <p class="sub">Escribe el código que aparece en el documento para comprobar que salió de PeakU.</p>
+  <form method="get" onsubmit="location.href='./'+this.q.value.trim();return false">
+    <input name="q" placeholder="PKV-2026-000000" autofocus>
+    <button type="submit">Verificar</button>
+  </form>`
+: s ? `
+  <span class="badge ok">✓ INFORME AUTÉNTICO</span>
+  <h1>${esc(doc.titulo)}</h1>
+  <p class="sub">${esc(doc.alcance)}</p>
+  <div class="row"><span class="k">Código</span><span class="v">${esc(s.report_code)}</span></div>
+  <div class="row"><span class="k">Emitido</span><span class="v">${esc(fecha || '—')}</span></div>
+  ${s.vacancy_title ? `<div class="row"><span class="k">Cargo</span><span class="v">${esc(s.vacancy_title)}</span></div>` : ''}
+  ${s.company_name ? `<div class="row"><span class="k">Cliente</span><span class="v">${esc(s.company_name)}</span></div>` : ''}
+  <div class="row"><span class="k">Identidad verificada</span><span class="v">${id.estado === 'verificada' ? 'Sí' : 'No'}</span></div>
+  <div class="firma">Firma de integridad: ${esc(s.integrity_hash || '—')}</div>
+  <p class="nota">Esta página confirma que el documento fue emitido por PeakU y no ha sido alterado.
+  Por privacidad no muestra el nombre de la persona evaluada ni sus calificaciones: eso está en el informe
+  que recibiste. Si el contenido de tu copia no coincide con lo aquí descrito, escríbenos.</p>`
+: `
+  <span class="badge no">✕ NO ENCONTRADO</span>
+  <h1>Ese código no corresponde a ningún informe</h1>
+  <p class="sub">Revisa que esté completo y sin espacios. Tiene la forma <b>PKV-2026-000000</b>.</p>
+  <form method="get" onsubmit="location.href='../v/'+this.q.value.trim();return false">
+    <input name="q" value="${esc(code)}" autofocus>
+    <button type="submit">Reintentar</button>
+  </form>
+  <p class="nota">Si lo copiaste tal cual del documento y sigue sin aparecer, es posible que el informe
+  no haya sido emitido o que la copia no sea auténtica.</p>`}
+</div></body></html>`);
+  });
+
   r.get('/api/didit/estado', (_req, res) => res.json(didit.estado()));
 
   // Abrir el webhook en el navegador es un GET, y el webhook es POST. En vez de un 404 seco,
@@ -581,9 +706,11 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         try {
           await c.query('BEGIN');
           const up = await c.query(
-            `UPDATE ${T.sessions} SET identity=$2, signals=$3, data=$4, semaforo=$5, updated_at=NOW()
+            `UPDATE ${T.sessions} SET identity=$2, signals=$3, data=$4, semaforo=$5,
+                                      declara=$6, recomendacion=$7, updated_at=NOW()
              WHERE id=$1 RETURNING id`,
-            [id, JSON.stringify(identity), JSON.stringify(signals), JSON.stringify(b.data || {}), sem.color]
+            [id, JSON.stringify(identity), JSON.stringify(signals), JSON.stringify(b.data || {}), sem.color,
+             JSON.stringify(b.declara || {}), JSON.stringify(b.recomendacion || {})]
           );
           if (!up.rows.length) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'not found' }); }
           await c.query(`DELETE FROM ${T.ratings} WHERE session_id=$1`, [id]);
@@ -604,7 +731,8 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
 
       const s = mem.sessions.find(x => x.id === id);
       if (!s) return res.status(404).json({ error: 'not found' });
-      Object.assign(s, { identity, signals, data: b.data || {}, semaforo: sem.color });
+      Object.assign(s, { identity, signals, data: b.data || {}, semaforo: sem.color,
+                         declara: b.declara || {}, recomendacion: b.recomendacion || {} });
       mem.ratings = mem.ratings.filter(x => x.session_id !== id);
       ratings.forEach((q, i) => mem.ratings.push({
         id: nextId(), session_id: id, requirement_id: q.requirement_id || null, req_text: clean(q.req_text),

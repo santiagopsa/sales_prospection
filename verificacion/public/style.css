@@ -360,6 +360,48 @@ input,textarea,select{font:inherit;color:inherit}
 .aback .sig{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:10.5px;color:var(--ink3);margin-top:6px;
   display:block;word-break:break-all}
 
+/* ---- sellos, zonas y barras del acta ---- */
+.sellos{display:flex;flex-wrap:wrap;gap:7px;margin:16px 0 4px}
+.sello{font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:20px;border:1px solid;
+  display:inline-flex;align-items:center;gap:5px}
+.sello.ok{background:var(--good-soft);color:var(--good);border-color:var(--good)}
+.sello.nv{background:var(--sunk);color:var(--ink3);border-color:var(--line2)}
+
+.datos{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.dato{flex:1;min-width:170px;background:var(--sunk);border-radius:8px;padding:8px 12px;font-size:12.5px;color:var(--ink2)}
+.dato b{color:var(--ink);font-weight:600}
+
+.zona{display:flex;align-items:baseline;gap:10px;margin:22px 0 9px;flex-wrap:wrap}
+.zona .zn{font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:9.5px;font-weight:800;
+  letter-spacing:.09em;text-transform:uppercase;background:var(--acc-soft);color:var(--acc-ink);
+  padding:3px 8px;border-radius:5px;border:1px solid var(--acc)}
+.zona h3{font-size:16px;font-weight:750;letter-spacing:-.015em}
+.zona .zs{font-size:11.5px;color:var(--ink3);margin-left:auto}
+.zbox{border:1px solid var(--line);border-radius:11px;padding:15px 17px}
+.zbox.dos{display:grid;grid-template-columns:1.25fr 1fr;gap:20px}
+.zbox.rec{border-left:3px solid var(--acc)}
+
+.req{padding:11px 0;border-bottom:1px solid var(--line)}
+.req:last-child{border-bottom:none}
+.reqhd{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.reqn{font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:14.5px;font-weight:700;flex:1}
+.reqv{display:flex;align-items:center;gap:9px;flex:none}
+.barra{height:5px;border-radius:3px;background:var(--sunk);margin:7px 0 8px;overflow:hidden}
+.barra .fill{display:block;height:100%;border-radius:3px}
+.barra .fill.ok{background:var(--good)} .barra .fill.par{background:var(--warn)} .barra .fill.no{background:var(--crit)}
+.ancla{font-size:11.5px;color:var(--ink3);font-style:italic;margin-top:4px;line-height:1.45}
+
+.dtx{font-size:13.5px;color:var(--ink2);line-height:1.55}
+.lst{margin:4px 0 0 16px;font-size:13px;color:var(--ink2);line-height:1.6}
+.recver{display:flex}
+.riesgo{padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;line-height:1.5}
+.riesgo:last-child{border-bottom:none}
+.riesgo b{display:block;color:var(--ink);font-weight:600}
+.riesgo span{color:var(--ink3);font-size:12.5px}
+
+@media (max-width:640px){ .zbox.dos{grid-template-columns:1fr} .zona .zs{margin-left:0;width:100%} }
+@media print{ .zbox{break-inside:avoid} .req{break-inside:avoid} }
+
 /* ============ overlay y toast ============ */
 .overlay{position:fixed;inset:0;z-index:90;background:rgba(17,24,32,.55);backdrop-filter:blur(2px);
   display:none;place-items:center;padding:20px}
