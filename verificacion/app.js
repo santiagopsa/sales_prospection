@@ -15,21 +15,34 @@ const { LVLTXT, clean, esCierre, semaforo, estadoIdentidad, bloqueos, tipoDocume
 const didit = require('./didit');
 const { T, initSchema } = require('./schema');
 
+// Versión del formato del acta. Queda grabada en cada documento emitido: si mañana el acta
+// cambia, el informe viejo sigue diciendo con qué formato se dibujó.
+const FORMATO_ACTA = 'v3-2026-08';
+
 // Fallback en memoria para correr sin Postgres (pruebas locales). Se pierde al reiniciar.
 const mem = { companies: [], vacancies: [], requirements: [], sessions: [], ratings: [], seq: 1 };
 const nextId = () => mem.seq++;
 
 // --- Auxiliares de identidad -------------------------------------------------
 
+// Trae también cargo, cliente y trayectoria porque al emitir hay que congelarlos en el acta.
 async function leerSesion(pool, id) {
   if (pool) {
     const q = await pool.query(
-      `SELECT id, report_code, candidate, candidate_email, kind, didit_session_id, didit_status,
-              face_verdict, face_score, id_note, shot_mime
-       FROM ${T.sessions} WHERE id=$1`, [id]);
+      `SELECT s.id, s.report_code, s.candidate, s.candidate_email, s.evaluator, s.kind,
+              s.didit_session_id, s.didit_status, s.face_verdict, s.face_score, s.id_note,
+              s.shot_mime, s.trayectoria,
+              v.title AS vacancy_title, c.name AS company_name
+       FROM ${T.sessions} s
+       LEFT JOIN ${T.vacancies} v ON v.id = s.vacancy_id
+       LEFT JOIN ${T.companies} c ON c.id = v.company_id
+       WHERE s.id=$1`, [id]);
     return q.rows[0] || null;
   }
-  return mem.sessions.find(x => x.id === id) || null;
+  const s = mem.sessions.find(x => x.id === id);
+  if (!s) return null;
+  const v = mem.vacancies.find(x => x.id === s.vacancy_id);
+  return { ...s, vacancy_title: (v && v.title) || null, company_name: (v && v.company_name) || null };
 }
 
 async function leerCaptura(pool, id) {
@@ -145,7 +158,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
   const VER = (() => {
     try {
       const h = require('crypto').createHash('sha1');
-      for (const f of ['app.js', 'style.css', 'index.html']) {
+      for (const f of ['app.js', 'style.css', 'index.html', 'qr.js']) {
         h.update(require('fs').readFileSync(path.join(PUB, f)));
       }
       return h.digest('hex').slice(0, 8);
@@ -157,6 +170,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
     try {
       return require('fs').readFileSync(path.join(PUB, 'index.html'), 'utf8')
         .replace('href="style.css"', `href="style.css?v=${VER}"`)
+        .replace('src="qr.js"', `src="qr.js?v=${VER}"`)
         .replace('src="app.js"', `src="app.js?v=${VER}"`);
     } catch (e) { return null; }
   })();
@@ -661,23 +675,37 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
     return { ...s, vacancy_title: v && v.title, company_name: v && v.company_name };
   }
 
+  // Lo que se muestra sale del snapshot congelado al emitir. Un informe viejo, emitido antes
+  // de que existiera el snapshot, no se puede reconstruir con honestidad: se dice eso en vez de
+  // afirmar un tipo de documento que hoy significaría otra cosa.
+  function vistaPublica(s) {
+    const snap = s.snapshot || null;
+    const base = {
+      codigo: s.report_code,
+      emitido: s.issued_at,
+      cargo: (snap && snap.cargo) || s.vacancy_title || null,
+      cliente: (snap && snap.cliente) || s.company_name || null,
+      firma: s.integrity_hash || null,
+      formato: s.formato || null,
+    };
+    if (!snap) {
+      return { ...base, documento: null, alcance: null, identidad_verificada: null,
+               nota: 'Este informe se emitió con una versión anterior del formato. Confirmamos que salió de PeakU y que su firma corresponde, pero el contenido de referencia es la copia que se entregó.' };
+    }
+    return {
+      ...base,
+      documento: snap.documento && snap.documento.titulo,
+      alcance: snap.documento && snap.documento.alcance,
+      identidad_verificada: !!(snap.identidad && snap.identidad.estado === 'verificada'),
+    };
+  }
+
   r.get('/api/v/:code', async (req, res) => {
     try {
       const s = await actaPublica(String(req.params.code || ''));
       if (!s) return res.status(404).json({ autentico: false, motivo: 'No existe un informe emitido con ese código.' });
-      const doc = tipoDocumento({ kind: s.kind, diditStatus: s.didit_status, faceVerdict: s.face_verdict, idNote: s.id_note });
-      const id = estadoIdentidad({ kind: s.kind, diditStatus: s.didit_status, faceVerdict: s.face_verdict, idNote: s.id_note });
-      res.json({
-        autentico: true,
-        codigo: s.report_code,
-        emitido: s.issued_at,
-        documento: doc.titulo,
-        alcance: doc.alcance,
-        cargo: s.vacancy_title || null,
-        cliente: s.company_name || null,
-        identidad_verificada: id.estado === 'verificada',
-        firma: s.integrity_hash || null,
-      });
+      const v = vistaPublica(s);
+      res.json({ autentico: true, ...v });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
@@ -685,8 +713,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
     const code = String(req.params.code || '').trim();
     let s = null;
     try { if (code) s = await actaPublica(code); } catch (e) {}
-    const doc = s ? tipoDocumento({ kind: s.kind, diditStatus: s.didit_status, faceVerdict: s.face_verdict, idNote: s.id_note }) : null;
-    const id = s ? estadoIdentidad({ kind: s.kind, diditStatus: s.didit_status, faceVerdict: s.face_verdict, idNote: s.id_note }) : null;
+    const v = s ? vistaPublica(s) : null;
     const fecha = s && s.issued_at ? new Date(s.issued_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
     const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -736,15 +763,16 @@ ${!code ? `
   </form>`
 : s ? `
   <span class="badge ok">✓ INFORME AUTÉNTICO</span>
-  <h1>${esc(doc.titulo)}</h1>
-  <p class="sub">${esc(doc.alcance)}</p>
+  <h1>${esc(v.documento || 'Informe de PeakU Verificado')}</h1>
+  <p class="sub">${esc(v.alcance || v.nota || '')}</p>
   <div class="row"><span class="k">Código</span><span class="v">${esc(s.report_code)}</span></div>
   <div class="row"><span class="k">Emitido</span><span class="v">${esc(fecha || '—')}</span></div>
-  ${s.vacancy_title ? `<div class="row"><span class="k">Cargo</span><span class="v">${esc(s.vacancy_title)}</span></div>` : ''}
-  ${s.company_name ? `<div class="row"><span class="k">Cliente</span><span class="v">${esc(s.company_name)}</span></div>` : ''}
-  <div class="row"><span class="k">Identidad verificada</span><span class="v">${id.estado === 'verificada' ? 'Sí' : 'No'}</span></div>
+  ${v.cargo ? `<div class="row"><span class="k">Cargo</span><span class="v">${esc(v.cargo)}</span></div>` : ''}
+  ${v.cliente ? `<div class="row"><span class="k">Cliente</span><span class="v">${esc(v.cliente)}</span></div>` : ''}
+  ${v.identidad_verificada === null ? '' :
+    `<div class="row"><span class="k">Identidad verificada</span><span class="v">${v.identidad_verificada ? 'Sí' : 'No'}</span></div>`}
   <div class="firma">Firma de integridad: ${esc(s.integrity_hash || '—')}</div>
-  <p class="nota">Esta página confirma que el documento fue emitido por PeakU y no ha sido alterado.
+  <p class="nota">${v.nota ? esc(v.nota) + ' ' : 'Esta página confirma que el documento fue emitido por PeakU y no ha sido alterado. '}
   Por privacidad no muestra el nombre de la persona evaluada ni sus calificaciones: eso está en el informe
   que recibiste. Si el contenido de tu copia no coincide con lo aquí descrito, escríbenos.</p>`
 : `
@@ -888,19 +916,52 @@ ${!code ? `
         faceScore: s0.face_score ?? null, at: new Date().toISOString(),
       });
 
+      // El documento se congela aquí: lo que se emitió es lo que se verá dentro de un año,
+      // aunque para entonces el formato haya cambiado tres veces.
+      const snapshot = {
+        formato: FORMATO_ACTA,
+        emitido: new Date().toISOString(),
+        documento: doc,
+        candidato: clean(b.candidate),
+        cargo: s0.vacancy_title || null,
+        cliente: s0.company_name || null,
+        evaluador: clean(b.evaluator) || s0.evaluator || null,
+        kind: s0.kind,
+        ratings: ratings.map(x => ({ req_text: x.req_text, level: x.level, evidence: x.evidence || '' })),
+        identity, signals,
+        identidad,
+        face_score: s0.face_score ?? null,
+        declara: b.declara || {},
+        recomendacion: b.recomendacion || {},
+        trayectoria: b.trayectoria || s0.trayectoria || [],
+        semaforo: sem.color,
+        integrity_hash: hash,
+      };
+
       if (pool) {
         const q = await pool.query(
           `UPDATE ${T.sessions} SET status='issued', semaforo=$2, identity=$3, signals=$4, data=$5,
-                                    integrity_hash=$6, issued_at=NOW(), updated_at=NOW()
+                                    integrity_hash=$6, declara=COALESCE($7::jsonb, declara),
+                                    recomendacion=COALESCE($8::jsonb, recomendacion),
+                                    trayectoria=COALESCE($9::jsonb, trayectoria),
+                                    snapshot=$10::jsonb, formato=$11,
+                                    issued_at=NOW(), updated_at=NOW()
            WHERE id=$1 RETURNING id, report_code, issued_at, integrity_hash`,
-          [id, sem.color, JSON.stringify(identity), JSON.stringify(signals), JSON.stringify(b.data || {}), hash]
+          [id, sem.color, JSON.stringify(identity), JSON.stringify(signals), JSON.stringify(b.data || {}), hash,
+           b.declara ? JSON.stringify(b.declara) : null,
+           b.recomendacion ? JSON.stringify(b.recomendacion) : null,
+           b.trayectoria ? JSON.stringify(b.trayectoria) : null,
+           JSON.stringify(snapshot), FORMATO_ACTA]
         );
         if (!q.rows.length) return res.status(404).json({ error: 'not found' });
         return res.json({ ok: true, semaforo: sem, identidad, documento: doc, ...q.rows[0] });
       }
       const s = mem.sessions.find(x => x.id === id);
       if (!s) return res.status(404).json({ error: 'not found' });
-      Object.assign(s, { status: 'issued', semaforo: sem.color, identity, signals, data: b.data || {}, integrity_hash: hash, issued_at: new Date().toISOString() });
+      Object.assign(s, { status: 'issued', semaforo: sem.color, identity, signals, data: b.data || {},
+                         integrity_hash: hash, snapshot, formato: FORMATO_ACTA,
+                         ...(b.trayectoria ? { trayectoria: b.trayectoria } : {}),
+                         issued_at: new Date().toISOString() });
       res.json({ ok: true, semaforo: sem, identidad, documento: doc, id, report_code: s.report_code, issued_at: s.issued_at, integrity_hash: hash });
     } catch (e) {
       console.error('[verificacion/sessions.issue]', e.message);

@@ -65,6 +65,22 @@ const idChecksDe = kind => IDCHECKS.filter(c => c.kinds.includes(kind));
 function urlVerificacion(codigo){
   return `${location.host}${BASE}/v/${codigo}`;
 }
+// La misma dirección, completa, para meterla en un QR: un lector necesita el esquema.
+function urlVerificacionAbs(codigo){
+  return `${location.origin}${BASE}/v/${codigo}`;
+}
+
+// QR generado aquí mismo (public/qr.js), sin pedirle la imagen a nadie.
+// Si por lo que sea el codificador no cargó, no se dibuja un cuadro roto: se devuelve vacío
+// y queda la URL escrita, que es la que manda. El QR es una comodidad, no la fuente de verdad.
+function qrSvg(texto, px, alt){
+  try{
+    if(!texto || typeof QR === 'undefined') return '';
+    // Siempre negro sobre blanco, incluso en modo oscuro: hay lectores que no leen un QR
+    // invertido, y este código tiene que funcionar en una pantalla compartida y en papel.
+    return QR.svg(texto, {px: px || 132, fondo: '#fff', color: '#000', alt: alt || 'Código QR'});
+  }catch(e){ console.warn('[qr]', e.message); return ''; }
+}
 
 const BASE = (function(){
   try{
@@ -193,20 +209,31 @@ async function verSesion(id){
   overlay(true, 'Abriendo la verificación…', '');
   try{
     const s = await api('/api/sessions/' + id);
-    const reqs = (s.ratings || []).map(r => ({
+    // Un documento emitido se dibuja desde lo que se congeló al emitirlo, no desde el estado
+    // actual de la base: si no, un acta de hace seis meses cambiaría de contenido sola.
+    const snap = s.snapshot || null;
+    const fuente = snap || s;
+    const reqs = (snap ? snap.ratings : (s.ratings || [])).map(r => ({
       rid: r.requirement_id, n: r.req_text, lvl: r.level, ev: r.evidence || '', r: {},
     }));
     S = {
-      sid: s.id, id: s.report_code, cand: s.candidate, rol: s.vacancy_title || '',
-      cli: s.company_name || '', eval: s.evaluator || '', mode: s.mode || 'B',
-      kind: s.kind || 'sondeo', reqs,
-      idc: s.identity || {}, sig: s.signals || {},
-      dec: s.declara || {}, rec: s.recomendacion || {riesgos:[]},
-      cv: s.cv_analisis || null, tray: s.trayectoria || [],
-      ident: {...(s.identidad || {}), didit_status: s.didit_status,
-              face_verdict: s.face_verdict, face_score: s.face_score},
-      doc: s.documento || null, hash: s.integrity_hash || null, diditUrl: s.didit_url || null,
-      fecha: s.issued_at ? new Date(s.issued_at).getTime() : Date.now(),
+      sid: s.id, id: s.report_code,
+      cand: (snap && snap.candidato) || s.candidate,
+      rol: (snap && snap.cargo) || s.vacancy_title || '',
+      cli: (snap && snap.cliente) || s.company_name || '',
+      eval: (snap && snap.evaluador) || s.evaluator || '', mode: s.mode || 'B',
+      kind: fuente.kind || 'sondeo', reqs,
+      idc: fuente.identity || {}, sig: fuente.signals || {},
+      dec: fuente.declara || {}, rec: fuente.recomendacion || {riesgos:[]},
+      cv: s.cv_analisis || null, tray: fuente.trayectoria || [],
+      ident: snap ? {...(snap.identidad || {}), face_score: snap.face_score}
+                  : {...(s.identidad || {}), didit_status: s.didit_status,
+                     face_verdict: s.face_verdict, face_score: s.face_score},
+      doc: (snap && snap.documento) || s.documento || null,
+      formato: s.formato || null, sinSnapshot: !!(s.status === 'issued' && !snap),
+      hash: s.integrity_hash || null, diditUrl: s.didit_url || null,
+      fecha: (snap && snap.emitido) ? new Date(snap.emitido).getTime()
+             : s.issued_at ? new Date(s.issued_at).getTime() : Date.now(),
       t0: null, tFase: null, fase: 0,
       fin: s.status === 'issued', soloLectura: true,
     };
@@ -1101,6 +1128,15 @@ function bloqueIdentidad(){
           <button class="ir" id="btnCopiarLink" type="button">Copiar</button>
         </div>
         <p class="hint">Mándaselo por donde ya vienen hablando. Cuando lo complete, esta pantalla se actualiza sola.</p>
+        <div class="qrid">
+          <div class="qrbox">${qrSvg(S.diditUrl, 150, 'Verificación de identidad')}</div>
+          <div class="qrtx">
+            <b>O compártele la pantalla con este código.</b>
+            <p>Lo escanea con el celular y hace la verificación ahí mismo, antes de colgar. El documento y la
+            prueba de vida salen mejor con la cámara del celular que con la del computador, y no hay que
+            esperar a que revise el correo.</p>
+          </div>
+        </div>
       ` : ''}
 
       <div class="tools" style="margin-top:12px">
@@ -1282,7 +1318,9 @@ function verActa(){
   const d = new Date(S.fecha || Date.now());
   const nSig = Object.values(S.sig).filter(Boolean).length;
   const dec = S.dec || {}, rec = S.rec || {};
-  const doc = S.doc || {titulo:'Informe de verificación', alcance:'', tipo:'acta'};
+  const doc = S.sinSnapshot
+    ? {titulo:'Informe de verificación', alcance:'', tipo:'antiguo'}
+    : (S.doc || {titulo:'Informe de verificación', alcance:'', tipo:'acta'});
   const idn = S.ident || {};
   const cierre = S.kind === 'cierre';
   const idOk = cierre && idn.estado === 'verificada';
@@ -1302,6 +1340,12 @@ function verActa(){
   ].filter(Boolean);
 
   $('#actaStage').innerHTML = `
+    ${S.sinSnapshot ? `<div class="aviso">
+      <b>Este informe se emitió con una versión anterior del formato.</b>
+      Lo que ves está reconstruido con los datos que quedaron guardados, así que puede no
+      coincidir exactamente con la copia que se entregó — esa copia es la referencia.
+      Los informes emitidos de ahora en adelante se congelan al emitirse y se ven siempre igual.
+    </div>` : ''}
     <div class="acta">
       <div class="ahd">
         <div>
@@ -1394,11 +1438,17 @@ function verActa(){
       </div>` : ''}
 
       <div class="aback">
-        <h4>PeakU responde por este informe.</h4>
-        <p>${(doc.tipo === 'acta')
-          ? `Si la persona no es quien este informe dice que es, o su desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo.`
-          : `Si el desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo. <b>Este informe no certifica la identidad de la persona</b>: certifica lo observado sobre los requisitos del cargo.`} Verifique la autenticidad en <b>${esc(urlVerificacion(S.id))}</b>.</p>
-        <span class="sig">Firma de integridad: ${esc(firmaCorta())} · Evaluó: ${esc(S.eval||'—')} · Revisión de calidad: pendiente de cuatro ojos · Rúbrica anclada 1-5</span>
+        <div class="abtx">
+          <h4>PeakU responde por este informe.</h4>
+          <p>${(doc.tipo === 'acta')
+            ? `Si la persona no es quien este informe dice que es, o su desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo.`
+            : `Si el desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo. <b>Este informe no certifica la identidad de la persona</b>: certifica lo observado sobre los requisitos del cargo.`} Verifique la autenticidad en <b>${esc(urlVerificacion(S.id))}</b>.</p>
+          <span class="sig">Firma de integridad: ${esc(firmaCorta())} · Evaluó: ${esc(S.eval||'—')} · Revisión de calidad: pendiente de cuatro ojos · Rúbrica anclada 1-5</span>
+        </div>
+        ${S.id ? `<div class="abqr" title="${esc(urlVerificacionAbs(S.id))}">
+          ${qrSvg(urlVerificacionAbs(S.id), 108, 'Verificar la autenticidad de este informe')}
+          <span>Escanee para verificar</span>
+        </div>` : ''}
       </div>
       <p class="hint" style="margin-top:14px">${esc(doc.alcance || '')} Metodología: entrevista estructurada con escalas ancladas (1-5) sobre los requisitos definidos por el cliente${
         (doc.tipo === 'acta') ? '; identidad verificada por proveedor externo y cotejada contra el rostro de la sesión' : ''}; sesión grabada y archivada.</p>

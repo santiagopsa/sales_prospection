@@ -19,9 +19,21 @@ t('index.html enlaza el js tal como el servidor espera reemplazarlo', () => {
   assert.ok(html.includes('src="app.js"'), 'el <script> cambió de forma');
   assert.ok(app.includes(`'src="app.js"'`), 'el servidor busca otro patrón');
 });
+t('el codificador de QR va versionado y carga antes que la app', () => {
+  assert.ok(html.includes('src="qr.js"'), 'falta el <script> de qr.js');
+  assert.ok(html.indexOf('src="qr.js"') < html.indexOf('src="app.js"'), 'qr.js tiene que cargar antes que app.js');
+  assert.ok(app.includes(`'src="qr.js"'`), 'el servidor no versiona qr.js');
+  assert.ok(app.includes(`'index.html', 'qr.js'`), 'qr.js no entra en el hash de versión');
+});
+t('el QR no depende de ningún servicio externo', () => {
+  const qr = fs.readFileSync(path.join(__dirname, '..', 'public', 'qr.js'), 'utf8');
+  assert.ok(!/https?:\/\/(?!www\.w3\.org)/.test(qr), 'qr.js no puede pedirle la imagen a un tercero');
+  assert.ok(!/fetch\(|XMLHttpRequest/.test(qr), 'el QR se genera en el cliente, sin red');
+});
 t('las rutas son relativas, no absolutas', () => {
   assert.ok(!html.includes('href="/style.css"'), 'una ruta absoluta rompe el montaje bajo /verificacion');
   assert.ok(!html.includes('src="/app.js"'), 'una ruta absoluta rompe el montaje bajo /verificacion');
+  assert.ok(!html.includes('src="/qr.js"'), 'una ruta absoluta rompe el montaje bajo /verificacion');
 });
 t('el índice se sirve sin caché y los assets con caché larga', () => {
   assert.ok(app.includes("'Cache-Control', 'no-cache'"), 'el index debe revalidarse siempre');

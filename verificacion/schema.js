@@ -129,6 +129,11 @@ async function initSchema(pool) {
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS cv_analisis JSONB`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS cv_at TIMESTAMPTZ`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS trayectoria JSONB`,
+    // Un documento emitido no puede cambiar porque el software evolucionó. Al emitir se congela
+    // todo lo que el acta necesita para volver a dibujarse igual, y de ahí se lee después.
+    // La firma de integridad promete justamente eso: que el documento no fue alterado.
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS snapshot JSONB`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS formato TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_v_sess_didit ON ${T.sessions}(didit_session_id)`,
     `ALTER TABLE ${T.vacancies} ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,

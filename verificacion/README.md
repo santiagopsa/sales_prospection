@@ -109,6 +109,9 @@ python3 verificacion/test/e2e.py           # flujo completo en navegador, contra
 python3 verificacion/test/e2e_identidad.py # sondeo, cierre verificado, negativa y rostro que no corresponde
 python3 verificacion/test/e2e_historial.py # abrir una verificación anterior y retomar una a medias
 python3 verificacion/test/e2e_cv.py        # con CV: preguntas del candidato, trayectoria y acta
+python3 verificacion/test/qr_verify.py     # decodifica los QR desde cero y comprueba el Reed-Solomon
+python3 verificacion/test/e2e_qr.py        # los dos QR, escaneados desde el DOM real
+python3 verificacion/test/e2e_viejas.py    # que un informe ya emitido no cambie de contenido
 ```
 
 `test/stub.js` replica la API con `http` nativo y devuelve un levantamiento fijo en vez de llamar a Claude: prueba la interfaz sin API key, sin Postgres y sin `npm install`. Importa las reglas reales de `rules.js` y se monta en `/verificacion`, igual que en producción — así que lo que se prueba del semáforo, del acta y del punto de montaje es el código de verdad.
@@ -145,6 +148,19 @@ El acta imprime una dirección de este mismo servidor (`/verificacion/v/PKV-…`
 La página es pública y **no muestra el nombre del candidato ni sus calificaciones**. Confirma que el informe fue emitido, para qué cargo y cliente, si certificó identidad, y su firma de integridad. Publicar la evaluación de una persona en una URL adivinable sería otra cosa muy distinta.
 
 `GET /verificacion/api/v/:code` devuelve lo mismo en JSON.
+
+### El QR: dos, y ninguno pasa por un tercero
+
+Una URL que hay que transcribir a mano es una URL que nadie verifica. Hay dos códigos:
+
+1. **En el acta**, junto al bloque de respaldo: lleva a la página de autenticidad de ese informe. El que recibe el PDF apunta el celular y ve la confirmación.
+2. **En el cierre**, junto al link de identidad: el reclutador comparte pantalla y el candidato lo escanea **antes de colgar**. Hace la verificación en el celular —donde está la cámara buena para el documento y la prueba de vida— en vez de esperar a que revise el correo cuando la llamada ya se enfrió.
+
+Los genera `public/qr.js`, escrito aquí: modo byte, corrección nivel M, versiones 1 a 10, salida SVG. **No se usa un servicio externo** (`api.qrserver.com` y parecidos) por dos razones: ese tercero quedaría con el registro de qué informe se consulta y cuándo, y el día que se caiga, un acta ya impresa queda con un cuadro roto. Un documento no puede depender de la infraestructura de nadie más.
+
+El QR va siempre negro sobre blanco, también en modo oscuro: hay lectores que no leen un código invertido.
+
+Cómo se sabe que funciona, sin librería de referencia contra la cual comparar: `test/qr_verify.py` vuelve a implementar el **decodificador** desde la norma, en otro lenguaje, y comprueba que los bits de formato pasan su BCH, que los síndromes Reed-Solomon de cada bloque dan cero y que el texto que sale es idéntico al que entró. `test/e2e_qr.py` va más allá y decodifica el SVG que el navegador de verdad dibujó, comprueba que coincide con la URL impresa al lado, y **abre esa dirección** para confirmar que responde.
 
 ---
 
@@ -264,7 +280,11 @@ Costo: entre 0,05 y 0,20 USD por levantamiento según el largo. Las sesiones no 
 
 ## Historial
 
-Cada verificación del tablero se abre. Si fue emitida, el acta se **reconstruye desde la base de datos con el mismo render que la generó**, así que lo que se ve es exactamente lo que se emitió — no una aproximación. Si quedó a medias, muestra en qué punto quedó y ofrece **retomarla**: el avance vive en el servidor, no en el navegador, así que se puede seguir desde otro computador o después de cerrar la pestaña.
+Cada verificación del tablero se abre. Si fue emitida, el acta se dibuja **desde el snapshot que se congeló al emitirla** (`sessions.snapshot`, con su `formato`), así que lo que se ve es exactamente lo que se entregó.
+
+Esto arregla un problema real: antes el tipo de documento se **recalculaba** al abrir el informe. Un acta entregada como *"Informe de verificación"* pasó a mostrarse como *"Ficha de sondeo"* en cuanto cambió el modelo de sesiones — el software estaba reescribiendo un documento ya entregado, que es exactamente lo contrario de lo que promete su firma de integridad.
+
+Los informes emitidos **antes** de que existiera el snapshot no se pueden reconstruir con honestidad, así que no se finge: se dibujan con lo que quedó guardado y llevan un aviso arriba diciendo que la copia entregada es la referencia. La página pública de esos informes confirma que son auténticos y que la firma corresponde, pero **no afirma un tipo de documento** que hoy significaría otra cosa. Si quedó a medias, muestra en qué punto quedó y ofrece **retomarla**: el avance vive en el servidor, no en el navegador, así que se puede seguir desde otro computador o después de cerrar la pestaña.
 
 El autoguardado corre 900 ms después de cada cambio, pero al salir de la sesión se fuerza el guardado, y si se cierra la pestaña de golpe se manda con `sendBeacon` (`POST /api/sessions/:id/beacon`), que sobrevive al cierre. Sin eso, lo último que escribió el reclutador se perdía.
 
@@ -273,5 +293,4 @@ El autoguardado corre 900 ms después de cada cambio, pero al salir de la sesió
 ## Lo que falta
 
 - Revisión de cuatro ojos dentro de la app: `reviewed_by` y `reviewed_at` ya están en la tabla, falta la pantalla.
-- Verificación pública del acta en `peaku.co/verificar/PKV-…` — el código ya se imprime en el informe.
 - Autenticación. Hoy cualquiera con el link entra, igual que el Sandler. Para piloto interno está bien; antes de mostrárselo a un cliente, no.

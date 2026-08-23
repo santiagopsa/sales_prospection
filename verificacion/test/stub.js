@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const PUB = path.join(__dirname, '..', 'public');
 const MOUNT = '/verificacion'; // igual que en el servidor real
 const { LVLTXT, semaforo, bloqueos, estadoIdentidad, tipoDocumento } = require('../rules'); // reglas reales del servidor
+const FORMATO_ACTA = 'v3-2026-08'; // igual que en app.js
 const db = { companies:[], vacancies:[], requirements:[], sessions:[], ratings:[], seq:1 };
 const nid = () => db.seq++;
 const clean = s => (s==null?'':String(s)).trim();
@@ -182,8 +183,22 @@ const server = http.createServer(async (req, res) => {
     const { faltas, identidad } = bloqueos({identity:b.identity||{}, signals:b.signals||{}, ratings, ...ctx});
     if(faltas.length) return json(res,409,{error:'No se puede emitir el documento', faltas, semaforo:sem, identidad});
     const hash = crypto.createHash('sha256').update(JSON.stringify({c:b.candidate, r:ratings.map(r=>[r.req_text,r.level])})).digest('hex');
-    Object.assign(s, {status:'issued', semaforo:sem.color, integrity_hash:hash, issued_at:new Date().toISOString()});
-    return json(res,200,{ok:true, semaforo:sem, identidad, documento:tipoDocumento(ctx),
+    const v = db.vacancies.find(x=>x.id===s.vacancy_id);
+    const doc = tipoDocumento(ctx);
+    const snapshot = {formato:FORMATO_ACTA, emitido:new Date().toISOString(), documento:doc,
+      candidato:b.candidate, cargo:(v&&v.title)||null, cliente:(v&&v.company_name)||null,
+      evaluador:b.evaluator||s.evaluator||null, kind:s.kind,
+      ratings:ratings.map(r=>({req_text:r.req_text, level:r.level, evidence:r.evidence||''})),
+      identity:b.identity||{}, signals:b.signals||{}, identidad,
+      face_score:s.face_score??null, declara:b.declara||{}, recomendacion:b.recomendacion||{},
+      trayectoria:b.trayectoria||s.trayectoria||[], semaforo:sem.color, integrity_hash:hash};
+    Object.assign(s, {status:'issued', semaforo:sem.color, integrity_hash:hash,
+      snapshot, formato:FORMATO_ACTA,
+      identity:b.identity||{}, signals:b.signals||{},
+      declara:b.declara||{}, recomendacion:b.recomendacion||{},
+      ...(b.trayectoria ? {trayectoria:b.trayectoria} : {}),
+      issued_at:new Date().toISOString()});
+    return json(res,200,{ok:true, semaforo:sem, identidad, documento:doc,
       id:s.id, report_code:s.report_code, issued_at:s.issued_at, integrity_hash:hash});
   }
 
@@ -264,7 +279,36 @@ const server = http.createServer(async (req, res) => {
 
   if(p === '/api/__simular' && m==='POST'){ db.simular = await body(req); return json(res,200,{ok:true}); }
 
+  // Solo para pruebas: deja una sesión emitida como quedaban las de antes del snapshot,
+  // que es exactamente la fila que hay hoy en producción para los informes ya entregados.
+  mm = p.match(/^\/api\/__sin_snapshot\/(\d+)$/);
+  if(mm && m==='POST'){
+    const s = db.sessions.find(x=>x.id===+mm[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    delete s.snapshot; delete s.formato;
+    return json(res,200,{ok:true});
+  }
+
   if(p === '/api/didit/estado') return json(res,200,{activo:true, falta:[], webhookFirmado:true, umbrales:{aprueba:70,duda:50}});
+
+  // Espejo de vistaPublica del servidor: lo que se muestra sale del snapshot congelado.
+  mm = p.match(/^\/api\/v\/(.+)$/);
+  if(mm && m==='GET'){
+    const s = db.sessions.find(x=>(x.report_code||'').toUpperCase()===decodeURIComponent(mm[1]).toUpperCase() && x.status==='issued');
+    if(!s) return json(res,404,{autentico:false, motivo:'No existe un informe emitido con ese código.'});
+    const v = db.vacancies.find(x=>x.id===s.vacancy_id);
+    const snap = s.snapshot || null;
+    const base = {codigo:s.report_code, emitido:s.issued_at,
+      cargo:(snap&&snap.cargo)||(v&&v.title)||null, cliente:(snap&&snap.cliente)||(v&&v.company_name)||null,
+      firma:s.integrity_hash||null, formato:s.formato||null};
+    if(!snap) return json(res,200,{autentico:true, ...base, documento:null, alcance:null,
+      identidad_verificada:null,
+      nota:'Este informe se emitió con una versión anterior del formato. Confirmamos que salió de PeakU y que su firma corresponde, pero el contenido de referencia es la copia que se entregó.'});
+    return json(res,200,{autentico:true, ...base,
+      documento: snap.documento && snap.documento.titulo,
+      alcance: snap.documento && snap.documento.alcance,
+      identidad_verificada: !!(snap.identidad && snap.identidad.estado === 'verificada')});
+  }
 
   mm = p.match(/^\/v\/(.+)$/);
   if(mm && m==='GET'){
