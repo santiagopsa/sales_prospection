@@ -488,3 +488,36 @@ input,textarea,select{font:inherit;color:inherit}
   .actaiso{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .stage{padding:0}
 }
+
+/* Señal de que un botón de navegación sí hizo algo, aunque la página no tenga scroll. */
+.destacar{animation:destello 1.4s ease-out}
+@keyframes destello{
+  0%{box-shadow:0 0 0 0 rgba(0,195,255,.55); border-color:var(--acc)}
+  60%{box-shadow:0 0 0 9px rgba(0,195,255,0); border-color:var(--acc)}
+  100%{box-shadow:0 0 0 0 rgba(0,195,255,0)}
+}
+@media (prefers-reduced-motion:reduce){ .destacar{animation:none; border-color:var(--acc)} }
+
+/* ============ editar una vacante ============
+   Recrearla no era alternativa: las sesiones apuntan a la vacante, así que borrarla deja
+   huérfanas las verificaciones ya hechas. Esto permite corregirla conservando el historial. */
+.herohd{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.herohd h1{flex:1;min-width:0}
+.herohd .tbtn{flex:none;margin-top:6px}
+
+.rq{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:var(--bg)}
+.rq:last-of-type{margin-bottom:0}
+.rqhd{display:flex;align-items:center;gap:10px;padding:9px 11px}
+.rqhd .num{flex:none;width:24px;height:24px;border-radius:50%;background:var(--acc);color:var(--on-acc);
+  display:grid;place-items:center;font-size:12px;font-weight:800}
+.rqt{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line2);border-radius:7px;
+  padding:8px 10px;font-size:14px;font-weight:600}
+.rqt::placeholder{color:var(--ink3);font-weight:400}
+.rqacc{flex:none;display:flex;gap:4px}
+.ib{width:29px;height:29px;border:1px solid var(--line2);border-radius:7px;display:grid;place-items:center;
+  font-size:14px;color:var(--ink2);transition:.12s;background:var(--panel)}
+.ib:hover:not(:disabled){border-color:var(--acc);color:var(--acc)}
+.ib:disabled{opacity:.35;cursor:not-allowed}
+.ib.del:hover{border-color:var(--crit);color:var(--crit)}
+.rqbd{padding:4px 11px 13px;border-top:1px solid var(--line)}
+.rqbd .fttl{margin-top:12px;margin-bottom:8px}

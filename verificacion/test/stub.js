@@ -109,7 +109,41 @@ const server = http.createServer(async (req, res) => {
   if(mm && m==='GET'){
     const v = db.vacancies.find(x=>x.id===+mm[1]);
     if(!v) return json(res,404,{error:'not found'});
-    return json(res,200,{...v, requirements: db.requirements.filter(q=>q.vacancy_id===v.id).sort((a,b)=>a.ord-b.ord)});
+    const ses = db.sessions.filter(s=>s.vacancy_id===v.id);
+    return json(res,200,{...v, session_count:ses.length, issued_count:ses.filter(s=>s.status==='issued').length,
+      requirements: db.requirements.filter(q=>q.vacancy_id===v.id).sort((a,b)=>a.ord-b.ord)});
+  }
+
+  // Editar la vacante: mismos campos y mismas reglas que el servidor real.
+  if(mm && m==='PATCH'){
+    const b = await body(req);
+    const v = db.vacancies.find(x=>x.id===+mm[1]);
+    if(!v) return json(res,404,{error:'not found'});
+    if(b.title !== undefined && !clean(b.title)) return json(res,400,{error:'El título del cargo no puede quedar vacío.'});
+    const reqs = Array.isArray(b.requirements) ? b.requirements.filter(x=>clean(x.text)) : null;
+    if(reqs && !reqs.length) return json(res,400,{error:'La vacante necesita al menos un requisito excluyente.'});
+
+    for(const k of ['title','seniority','modality','city','salary_text','context','recruiter','status'])
+      if(b[k] !== undefined) v[k] = clean(b[k]) || null;
+    if(clean(b.company_name)){
+      let c = db.companies.find(x=>x.name.toLowerCase()===clean(b.company_name).toLowerCase());
+      if(!c){ c={id:nid(), name:clean(b.company_name)}; db.companies.push(c); }
+      v.company_id = c.id; v.company_name = c.name;
+    }
+    if(reqs){
+      const vivos = new Set(reqs.map(x=>Number(x.id)).filter(Boolean));
+      db.requirements = db.requirements.filter(q => q.vacancy_id !== v.id || vivos.has(q.id));
+      reqs.forEach((q,i)=>{
+        const base = {vacancy_id:v.id, text:clean(q.text), ord:i, kind:clean(q.kind)||'excluyente',
+          criterio:clean(q.criterio)||null, q_escena:clean(q.q_escena)||null,
+          q_friccion:clean(q.q_friccion)||null, q_cruce:clean(q.q_cruce)||null,
+          detalles:q.detalles||null, senales:q.senales||null};
+        const ya = Number(q.id) && db.requirements.find(x=>x.id===Number(q.id));
+        if(ya) Object.assign(ya, base); else db.requirements.push({id:nid(), ...base});
+      });
+    }
+    return json(res,200,{ok:true, ...v,
+      requirements: db.requirements.filter(q=>q.vacancy_id===v.id).sort((a,b2)=>a.ord-b2.ord)});
   }
 
   if(p === '/api/sessions' && m==='POST'){

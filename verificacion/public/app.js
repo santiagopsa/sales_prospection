@@ -560,7 +560,10 @@ async function verVacante(id){
     $('#vacStage').innerHTML = `
       <button class="back" data-home type="button">← Todas las vacantes</button>
       <div class="hero" style="padding-bottom:16px">
-        <h1>${esc(v.title)}</h1>
+        <div class="herohd">
+          <h1>${esc(v.title)}</h1>
+          <button class="tbtn" id="btnEditarVac" type="button">Editar vacante</button>
+        </div>
         <p class="lede" style="margin-bottom:12px">${esc(v.company_name||'')}${v.seniority?' · '+esc(v.seniority):''}${v.modality?' · '+esc(v.modality):''}${v.city?' · '+esc(v.city):''}${v.salary_text?' · '+esc(v.salary_text):''}</p>
         ${v.context ? `<p style="color:var(--ink2);max-width:64ch">${esc(v.context)}</p>` : ''}
       </div>
@@ -590,10 +593,201 @@ async function verVacante(id){
     `;
     $('#vacStage').querySelector('[data-home]').addEventListener('click', loadTablero);
     $('#btnNuevaSesion').addEventListener('click', () => setupSesion(v));
+    $('#btnEditarVac').addEventListener('click', () => editarVacante(v));
     go('vVacante');
   }catch(e){
     toast('No se pudo abrir: ' + e.message);
     loadTablero();
+  }finally{ overlay(false); }
+}
+
+
+/* ===================== editar una vacante =====================
+   Recrear una vacante no era alternativa: las sesiones apuntan a vacancy_id, así que
+   borrarla deja huérfanas las verificaciones ya hechas, y además tira un análisis de la
+   transcripción que costó tiempo y tokens. Lo que se corrige aquí rige de aquí en adelante;
+   las actas ya emitidas están congeladas en su snapshot y no se mueven. */
+let EDIT = null;
+
+function editarVacante(v){
+  EDIT = {
+    id: v.id,
+    campos: {
+      title: v.title || '', company_name: v.company_name || '', seniority: v.seniority || '',
+      modality: v.modality || '', city: v.city || '', salary_text: v.salary_text || '',
+      recruiter: v.recruiter || '', context: v.context || '',
+    },
+    reqs: (v.requirements || []).map(r => ({
+      id: r.id, text: r.text || '', criterio: r.criterio || '',
+      q_escena: r.q_escena || '', q_friccion: r.q_friccion || '', q_cruce: r.q_cruce || '',
+      detalles: Array.isArray(r.detalles) ? r.detalles.map(d => ({...d})) : [],
+      senales: Array.isArray(r.senales) ? r.senales.slice() : [],
+      abierto: false,
+    })),
+    sesiones: v.session_count || 0,
+    emitidas: v.issued_count || 0,
+  };
+  pintarEdicion();
+  go('vEditar');
+}
+
+function pintarEdicion(){
+  const e = EDIT, c = e.campos;
+  const campo = (k, etq, ph) =>
+    `<div class="f"><label>${etq}</label><input data-c="${k}" value="${esc(c[k])}" placeholder="${esc(ph||'')}"></div>`;
+
+  $('#editStage').innerHTML = `
+    <button class="back" data-volver type="button">← Volver a la vacante</button>
+    <div class="setup" style="max-width:820px">
+      <h1>Editar la vacante</h1>
+      <p class="lede">Corrige lo que haga falta sin perder el historial. Las verificaciones que ya
+      emitiste quedan como están: cada acta guarda adentro el texto de sus requisitos.</p>
+
+      ${e.emitidas ? `<div class="aviso">
+        <b>Esta vacante ya tiene ${e.emitidas} informe${e.emitidas>1?'s':''} emitido${e.emitidas>1?'s':''}.</b>
+        Lo que cambies aquí aplica a las verificaciones de aquí en adelante. Los informes ya
+        entregados no cambian — se congelaron al emitirse.
+      </div>` : ''}
+
+      <div class="fset">
+        <div class="fttl">El cargo</div>
+        <div class="frow">${campo('title','Título del cargo')}${campo('company_name','Empresa')}</div>
+        <div class="frow">${campo('seniority','Seniority','Senior, semi-senior…')}${campo('modality','Modalidad','Remoto, híbrido…')}</div>
+        <div class="frow">${campo('city','Ciudad')}${campo('salary_text','Salario','Como se lo dijiste al cliente')}</div>
+        <div class="frow one">${campo('recruiter','Reclutador a cargo')}</div>
+        <div class="f"><label>Contexto</label>
+          <textarea data-c="context" rows="3" placeholder="Por qué existe el cargo, con qué equipo trabaja, qué lo hace difícil">${esc(c.context)}</textarea></div>
+      </div>
+
+      <div class="fset">
+        <div class="fttl">Lo que se verifica · ${e.reqs.length} requisito${e.reqs.length===1?'':'s'}</div>
+        <p class="hint" style="margin:0 0 12px">Estos son los que se miden en la entrevista y los que
+        aparecen en el acta. Cámbiales el orden con las flechas.</p>
+        <div id="reqEdit">${e.reqs.map((r,i) => filaRequisito(r,i,e.reqs.length)).join('')}</div>
+        <button class="tbtn" id="btnAddReq" type="button" style="margin-top:12px">+ Agregar requisito</button>
+      </div>
+
+      <div class="tools">
+        <button data-volver type="button">Cancelar</button>
+        <button class="pri" id="btnGuardarEdit" type="button">Guardar cambios</button>
+      </div>
+      <p class="hint" id="editMsg"></p>
+    </div>`;
+
+  const st = $('#editStage');
+  st.querySelectorAll('[data-volver]').forEach(b =>
+    b.addEventListener('click', () => verVacante(EDIT.id)));
+  st.querySelectorAll('[data-c]').forEach(el =>
+    el.addEventListener('input', () => { EDIT.campos[el.dataset.c] = el.value; }));
+  st.querySelector('#btnAddReq').addEventListener('click', () => {
+    EDIT.reqs.push({ id:null, text:'', criterio:'', q_escena:'', q_friccion:'', q_cruce:'',
+                     detalles:[], senales:[], abierto:true });
+    pintarEdicion();
+    const ult = $('#reqEdit').querySelector('.rq:last-child [data-r="text"]');
+    if(ult) ult.focus();
+  });
+  st.querySelector('#btnGuardarEdit').addEventListener('click', guardarEdicion);
+  montarRequisitos(st);
+}
+
+function filaRequisito(r, i, total){
+  const det = r.detalles || [], sen = r.senales || [];
+  return `<div class="rq" data-i="${i}">
+    <div class="rqhd">
+      <div class="num">${i+1}</div>
+      <input class="rqt" data-r="text" data-i="${i}" value="${esc(r.text)}" placeholder="Ej: Implementación de SAP PP en producción (5+ años)">
+      <div class="rqacc">
+        <button class="ib" data-mv="-1" data-i="${i}" type="button" title="Subir" ${i===0?'disabled':''}>↑</button>
+        <button class="ib" data-mv="1" data-i="${i}" type="button" title="Bajar" ${i===total-1?'disabled':''}>↓</button>
+        <button class="ib" data-open="${i}" type="button" title="Detalle">${r.abierto?'▾':'▸'}</button>
+        <button class="ib del" data-del="${i}" type="button" title="Quitar">×</button>
+      </div>
+    </div>
+    ${r.abierto ? `<div class="rqbd">
+      <div class="frow one"><div class="f"><label>Qué debe poder narrar</label>
+        <textarea data-r="criterio" data-i="${i}" rows="2">${esc(r.criterio)}</textarea></div></div>
+      <div class="frow">
+        <div class="f"><label>Pregunta de escena</label>
+          <textarea data-r="q_escena" data-i="${i}" rows="2">${esc(r.q_escena)}</textarea></div>
+        <div class="f"><label>Pregunta de fricción</label>
+          <textarea data-r="q_friccion" data-i="${i}" rows="2">${esc(r.q_friccion)}</textarea></div>
+      </div>
+      <div class="frow one"><div class="f"><label>Pregunta de cruce</label>
+        <textarea data-r="q_cruce" data-i="${i}" rows="2">${esc(r.q_cruce)}</textarea></div></div>
+
+      <div class="fttl" style="margin-top:14px">Detalles verificables</div>
+      ${det.map((d,j) => `<div class="frow">
+        <div class="f"><input data-d="detalle" data-i="${i}" data-j="${j}" value="${esc(d.detalle||'')}" placeholder="Qué se le pregunta"></div>
+        <div class="f" style="display:flex;gap:8px;align-items:center">
+          <input data-d="respuesta_esperada" data-i="${i}" data-j="${j}" value="${esc(d.respuesta_esperada||'')}" placeholder="Qué debería responder">
+          <button class="ib del" data-deld="${i}-${j}" type="button" title="Quitar">×</button>
+        </div>
+      </div>`).join('')}
+      <button class="tbtn" data-addd="${i}" type="button">+ Detalle</button>
+
+      <div class="fttl" style="margin-top:14px">Señales de impostor</div>
+      <div class="frow one"><div class="f"><label>Una por línea</label>
+        <textarea data-s="senales" data-i="${i}" rows="3" placeholder="Habla en plural cuando se le pide su rol">${esc(sen.join('\n'))}</textarea></div></div>
+    </div>` : ''}
+  </div>`;
+}
+
+function montarRequisitos(st){
+  const R = EDIT.reqs;
+  st.querySelectorAll('[data-r]').forEach(el => el.addEventListener('input', () => {
+    R[+el.dataset.i][el.dataset.r] = el.value;
+  }));
+  st.querySelectorAll('[data-d]').forEach(el => el.addEventListener('input', () => {
+    R[+el.dataset.i].detalles[+el.dataset.j][el.dataset.d] = el.value;
+  }));
+  st.querySelectorAll('[data-s]').forEach(el => el.addEventListener('input', () => {
+    R[+el.dataset.i].senales = el.value.split('\n').map(x => x.trim()).filter(Boolean);
+  }));
+  st.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.open; R[i].abierto = !R[i].abierto; pintarEdicion();
+  }));
+  st.querySelectorAll('[data-mv]').forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.i, j = i + (+b.dataset.mv);
+    if(j < 0 || j >= R.length) return;
+    [R[i], R[j]] = [R[j], R[i]];
+    pintarEdicion();
+  }));
+  st.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.del;
+    if(R.length === 1){ toast('La vacante necesita al menos un requisito.'); return; }
+    if(!confirm(`¿Quitar "${R[i].text || 'este requisito'}"?\n\nLas verificaciones ya emitidas conservan su texto: no se tocan.`)) return;
+    R.splice(i, 1); pintarEdicion();
+  }));
+  st.querySelectorAll('[data-addd]').forEach(b => b.addEventListener('click', () => {
+    R[+b.dataset.addd].detalles.push({detalle:'', respuesta_esperada:''}); pintarEdicion();
+  }));
+  st.querySelectorAll('[data-deld]').forEach(b => b.addEventListener('click', () => {
+    const [i, j] = b.dataset.deld.split('-').map(Number);
+    R[i].detalles.splice(j, 1); pintarEdicion();
+  }));
+}
+
+async function guardarEdicion(){
+  const e = EDIT;
+  if(!e.campos.title.trim()){ toast('El título del cargo no puede quedar vacío.'); return; }
+  const vacios = e.reqs.filter(r => !r.text.trim()).length;
+  if(vacios){ toast(`Hay ${vacios} requisito${vacios>1?'s':''} sin texto.`); return; }
+
+  overlay(true, 'Guardando…', 'Actualizando la vacante y sus requisitos.');
+  try{
+    await api('/api/vacancies/'+e.id, {method:'PATCH', body:{
+      ...e.campos,
+      requirements: e.reqs.map(r => ({
+        id: r.id, text: r.text, criterio: r.criterio,
+        q_escena: r.q_escena, q_friccion: r.q_friccion, q_cruce: r.q_cruce,
+        detalles: r.detalles.filter(d => (d.detalle||'').trim()),
+        senales: r.senales,
+      })),
+    }});
+    toast('Vacante actualizada');
+    await verVacante(e.id);
+  }catch(err){
+    toast('No se pudo guardar: ' + err.message);
   }finally{ overlay(false); }
 }
 
@@ -1598,7 +1792,18 @@ function init(){
     loadTablero();
   });
   $('#btnNuevoIntake').addEventListener('click', () => go('vIntake'));
-  $('#btnVerSesiones').addEventListener('click', () => { document.getElementById('sesCard').scrollIntoView({behavior:'smooth'}); });
+  // Ojo: esto era solo un scrollIntoView, y en un tablero corto la página no tiene scroll,
+  // así que el botón no hacía absolutamente nada visible. Un botón que no da señal de haber
+  // funcionado es, para quien lo usa, un botón roto. Ahora además resalta la tarjeta.
+  $('#btnVerSesiones').addEventListener('click', () => {
+    const c = document.getElementById('sesCard');
+    if(!c) return;
+    c.scrollIntoView({behavior:'smooth', block:'center'});
+    c.classList.remove('destacar');
+    void c.offsetWidth;              // reinicia la animación si se hace clic dos veces seguidas
+    c.classList.add('destacar');
+    setTimeout(() => c.classList.remove('destacar'), 1400);
+  });
   document.querySelectorAll('[data-home]').forEach(b => b.addEventListener('click', loadTablero));
   $('#btnReset').addEventListener('click', () => {
     if(S && S.soloLectura){ S = null; loadTablero(); return; }

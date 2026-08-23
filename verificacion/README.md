@@ -113,6 +113,7 @@ python3 verificacion/test/qr_verify.py     # decodifica los QR desde cero y comp
 python3 verificacion/test/e2e_qr.py        # los dos QR, escaneados desde el DOM real
 python3 verificacion/test/e2e_qr_pixeles.py # el QR rasterizado, a 100%, 125%, 150% y 200%
 python3 verificacion/test/e2e_viejas.py    # que un informe ya emitido no cambie de contenido
+python3 verificacion/test/e2e_editar.py    # editar una vacante sin tocar las actas ya emitidas
 ```
 
 `test/stub.js` replica la API con `http` nativo y devuelve un levantamiento fijo en vez de llamar a Claude: prueba la interfaz sin API key, sin Postgres y sin `npm install`. Importa las reglas reales de `rules.js` y se monta en `/verificacion`, igual que en producción — así que lo que se prueba del semáforo, del acta y del punto de montaje es el código de verdad.
@@ -296,6 +297,20 @@ Costo: entre 0,05 y 0,20 USD por levantamiento según el largo. Las sesiones no 
 
 ---
 
+## Editar una vacante
+
+`PATCH /api/vacancies/:id` y su pantalla. Se corrigen los datos del cargo —título, empresa, seniority, modalidad, ciudad, salario, reclutador, contexto— y también **los requisitos**: texto, criterio, las tres preguntas, los detalles verificables y las señales de impostor, con agregar, quitar y reordenar.
+
+Existe porque **recrear la vacante no era alternativa**:
+
+- Las sesiones apuntan a `vacancy_id` con `ON DELETE SET NULL`. Borrar y volver a crear deja huérfanas todas las verificaciones ya hechas: aparecerían como "sin vacante".
+- Cada levantamiento es una llamada a Claude sobre la transcripción completa. Recrear una vacante para corregir la ciudad es caro por partida doble.
+- Lo valioso son los requisitos, que salen de la reunión con el cliente más el criterio del reclutador. Ese es el activo.
+
+**Editar los requisitos no altera las actas ya emitidas.** Cada acta se congeló en su `snapshot` con el texto de sus propios requisitos, así que lo que se cambie aquí rige de aquí en adelante. Si la vacante ya tiene informes emitidos, la pantalla lo dice antes de dejar tocar nada. Al borrar un requisito, las calificaciones viejas conservan su `req_text` — solo se pone en NULL la referencia.
+
+Sobre la empresa: si se cambia el nombre no se renombra la empresa existente, porque arrastraría a las otras vacantes del mismo cliente. Se busca una que se llame así y, si no hay, se crea, y se reengancha la vacante.
+
 ## Historial
 
 Cada verificación del tablero se abre. Si fue emitida, el acta se dibuja **desde el snapshot que se congeló al emitirla** (`sessions.snapshot`, con su `formato`), así que lo que se ve es exactamente lo que se entregó.
@@ -311,4 +326,5 @@ El autoguardado corre 900 ms después de cada cambio, pero al salir de la sesió
 ## Lo que falta
 
 - Revisión de cuatro ojos dentro de la app: `reviewed_by` y `reviewed_at` ya están en la tabla, falta la pantalla.
+- Volver a analizar una transcripción sobre una vacante existente, conservando su historial.
 - Autenticación. Hoy cualquiera con el link entra, igual que el Sandler. Para piloto interno está bien; antes de mostrárselo a un cliente, no.

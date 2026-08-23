@@ -379,7 +379,9 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       const id = Number(req.params.id);
       if (pool) {
         const v = await pool.query(`
-          SELECT v.*, c.name AS company_name, c.sector, c.contact
+          SELECT v.*, c.name AS company_name, c.sector, c.contact,
+                 (SELECT COUNT(*) FROM ${T.sessions} s WHERE s.vacancy_id=v.id)::int AS session_count,
+                 (SELECT COUNT(*) FROM ${T.sessions} s WHERE s.vacancy_id=v.id AND s.status='issued')::int AS issued_count
           FROM ${T.vacancies} v LEFT JOIN ${T.companies} c ON c.id=v.company_id WHERE v.id=$1`, [id]);
         if (!v.rows.length) return res.status(404).json({ error: 'not found' });
         const q = await pool.query(`SELECT * FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`, [id]);
@@ -387,8 +389,117 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       }
       const v = mem.vacancies.find(x => x.id === id);
       if (!v) return res.status(404).json({ error: 'not found' });
-      res.json({ ...v, requirements: mem.requirements.filter(q => q.vacancy_id === id).sort((a, b) => a.ord - b.ord) });
+      const sesiones = mem.sessions.filter(s => s.vacancy_id === id);
+      res.json({ ...v, session_count: sesiones.length,
+                 issued_count: sesiones.filter(s => s.status === 'issued').length,
+                 requirements: mem.requirements.filter(q => q.vacancy_id === id).sort((a, b) => a.ord - b.ord) });
     } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Editar una vacante. Existe porque recrearla no era una alternativa: las sesiones
+  // apuntan a vacancy_id, así que borrar y volver a crear deja huérfanas las verificaciones
+  // ya hechas, y además tira a la basura un análisis de la transcripción que costó plata.
+  //
+  // Tocar los requisitos NO altera las actas ya emitidas: cada una se congeló con el texto
+  // de sus requisitos adentro (columna snapshot). Lo que cambie aquí rige de aquí en adelante.
+  // Al borrar un requisito, las calificaciones viejas conservan su req_text — la referencia
+  // se pone en NULL, el texto no se pierde.
+  r.patch('/api/vacancies/:id', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const b = req.body || {};
+      const campos = ['title', 'seniority', 'modality', 'city', 'salary_text', 'context', 'recruiter', 'status'];
+      if (b.title !== undefined && !clean(b.title)) {
+        return res.status(400).json({ error: 'El título del cargo no puede quedar vacío.' });
+      }
+      const reqs = Array.isArray(b.requirements) ? b.requirements.filter(x => clean(x.text)) : null;
+      if (reqs && !reqs.length) {
+        return res.status(400).json({ error: 'La vacante necesita al menos un requisito excluyente.' });
+      }
+      const jsonb = v => (v == null ? null : JSON.stringify(v));
+
+      if (pool) {
+        const c = await pool.connect();
+        try {
+          await c.query('BEGIN');
+
+          // La empresa vive en su propia tabla. Si cambia el nombre no se renombra la
+          // empresa existente —arrastraría a las otras vacantes del mismo cliente—: se
+          // busca una que se llame así y, si no hay, se crea, y se reengancha la vacante.
+          if (clean(b.company_name)) {
+            const hay = await c.query(
+              `SELECT id FROM ${T.companies} WHERE LOWER(TRIM(name))=LOWER(TRIM($1)) LIMIT 1`, [b.company_name]);
+            const companyId = hay.rows.length ? hay.rows[0].id
+              : (await c.query(`INSERT INTO ${T.companies} (name) VALUES ($1) RETURNING id`, [clean(b.company_name)])).rows[0].id;
+            await c.query(`UPDATE ${T.vacancies} SET company_id=$2 WHERE id=$1`, [id, companyId]);
+          }
+
+          const set = [], val = [id];
+          for (const k of campos) {
+            if (b[k] !== undefined) { val.push(clean(b[k]) || null); set.push(`${k}=$${val.length}`); }
+          }
+          set.push('updated_at=NOW()');
+          const up = await c.query(`UPDATE ${T.vacancies} SET ${set.join(', ')} WHERE id=$1 RETURNING id`, val);
+          if (!up.rows.length) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'not found' }); }
+
+          if (reqs) {
+            const vivos = reqs.map(x => Number(x.id)).filter(Boolean);
+            await c.query(
+              `DELETE FROM ${T.requirements} WHERE vacancy_id=$1 ${vivos.length ? `AND NOT (id = ANY($2::int[]))` : ''}`,
+              vivos.length ? [id, vivos] : [id]);
+            for (let i = 0; i < reqs.length; i++) {
+              const q = reqs[i];
+              const datos = [clean(q.text), i, clean(q.kind) || 'excluyente',
+                q.years == null || q.years === '' ? null : Number(q.years),
+                clean(q.criterio) || null, clean(q.q_escena) || null, clean(q.q_friccion) || null,
+                clean(q.q_cruce) || null, jsonb(q.detalles || null), jsonb(q.senales || null)];
+              if (Number(q.id)) {
+                await c.query(
+                  `UPDATE ${T.requirements} SET text=$3, ord=$4, kind=$5, years=$6, criterio=$7,
+                          q_escena=$8, q_friccion=$9, q_cruce=$10, detalles=$11::jsonb, senales=$12::jsonb
+                   WHERE id=$2 AND vacancy_id=$1`, [id, Number(q.id), ...datos]);
+              } else {
+                await c.query(
+                  `INSERT INTO ${T.requirements} (vacancy_id, text, ord, kind, years, criterio,
+                     q_escena, q_friccion, q_cruce, detalles, senales)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb)`, [id, ...datos]);
+              }
+            }
+          }
+          await c.query('COMMIT');
+        } catch (e) { await c.query('ROLLBACK'); throw e; }
+        finally { c.release(); }
+
+        const v = await pool.query(`
+          SELECT v.*, c.name AS company_name FROM ${T.vacancies} v
+          LEFT JOIN ${T.companies} c ON c.id=v.company_id WHERE v.id=$1`, [id]);
+        const q = await pool.query(`SELECT * FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`, [id]);
+        return res.json({ ok: true, ...v.rows[0], requirements: q.rows });
+      }
+
+      const v = mem.vacancies.find(x => x.id === id);
+      if (!v) return res.status(404).json({ error: 'not found' });
+      for (const k of campos) if (b[k] !== undefined) v[k] = clean(b[k]) || null;
+      if (clean(b.company_name)) v.company_name = clean(b.company_name);
+      v.updated_at = new Date().toISOString();
+      if (reqs) {
+        const vivos = new Set(reqs.map(x => Number(x.id)).filter(Boolean));
+        mem.requirements = mem.requirements.filter(q => q.vacancy_id !== id || vivos.has(q.id));
+        reqs.forEach((q, i) => {
+          const base = { vacancy_id: id, text: clean(q.text), ord: i, kind: clean(q.kind) || 'excluyente',
+            years: q.years == null || q.years === '' ? null : Number(q.years),
+            criterio: clean(q.criterio) || null, q_escena: clean(q.q_escena) || null,
+            q_friccion: clean(q.q_friccion) || null, q_cruce: clean(q.q_cruce) || null,
+            detalles: q.detalles || null, senales: q.senales || null };
+          const ya = Number(q.id) && mem.requirements.find(x => x.id === Number(q.id));
+          if (ya) Object.assign(ya, base); else mem.requirements.push({ id: nextId(), ...base });
+        });
+      }
+      res.json({ ok: true, ...v, requirements: mem.requirements.filter(q => q.vacancy_id === id).sort((a, b2) => a.ord - b2.ord) });
+    } catch (e) {
+      console.error('[verificacion/vacancies.patch]', e.message);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   r.delete('/api/vacancies/:id', async (req, res) => {
