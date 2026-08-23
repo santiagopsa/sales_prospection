@@ -278,6 +278,18 @@
   }
 
   // SVG con un solo path: pesa poco y escala sin perder filo al imprimir.
+  //
+  // El tamaño se define en PÍXELES POR MÓDULO, no en píxeles totales, y esa no es una
+  // preferencia de estilo: es la diferencia entre que el código se lea y que no.
+  // Con shape-rendering="crispEdges" el navegador ajusta cada módulo a píxeles enteros;
+  // si el módulo mide 2.6px, unos salen de 2 y otros de 3 y la rejilla deja de ser regular.
+  // Un lector busca una rejilla uniforme: con módulos desiguales no encuentra nada, aunque
+  // a simple vista el cuadrito se vea perfecto. Midiendo por módulo, el lado total siempre
+  // es múltiplo entero — y sigue siéndolo con el escalado de Windows al 125% y al 150%.
+  //
+  // Menos de 3px por módulo no se lee en una pantalla normal. Por debajo de eso no se baja.
+  var MODULO_MIN = 3;
+
   function svg(texto, opciones) {
     var o = opciones || {};
     var q = o.margen == null ? 4 : o.margen;          // zona tranquila, 4 módulos por norma
@@ -286,14 +298,20 @@
     var r = matriz(texto), n = r.size, total = n + q * 2, d = '';
     for (var i = 0; i < n; i++) for (var j = 0; j < n; j++)
       if (r.modulos[i][j]) d += 'M' + (j + q) + ' ' + (i + q) + 'h1v1h-1z';
-    var lado = o.px ? ' width="' + o.px + '" height="' + o.px + '"' : '';
-    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + total + ' ' + total + '"' + lado +
+
+    // px es un objetivo aproximado: se redondea al múltiplo entero más cercano.
+    var mod = o.modulo || (o.px ? Math.round(o.px / total) : 4);
+    mod = Math.max(MODULO_MIN, Math.round(mod));
+    var lado = total * mod;
+
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + total + ' ' + total + '"' +
+      ' width="' + lado + '" height="' + lado + '" data-modulo="' + mod + '"' +
       ' shape-rendering="crispEdges" role="img" aria-label="' + (o.alt || 'Código QR') + '">' +
       (fondo ? '<rect width="' + total + '" height="' + total + '" fill="' + fondo + '"/>' : '') +
       '<path fill="' + color + '" d="' + d + '"/></svg>';
   }
 
-  var API = { matriz: matriz, svg: svg, capacidad: capacidad, versionPara: versionPara };
+  var API = { matriz: matriz, svg: svg, capacidad: capacidad, versionPara: versionPara, MODULO_MIN: MODULO_MIN };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else raiz.QR = API;
 })(typeof self !== 'undefined' ? self : this);

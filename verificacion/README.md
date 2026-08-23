@@ -111,6 +111,7 @@ python3 verificacion/test/e2e_historial.py # abrir una verificación anterior y 
 python3 verificacion/test/e2e_cv.py        # con CV: preguntas del candidato, trayectoria y acta
 python3 verificacion/test/qr_verify.py     # decodifica los QR desde cero y comprueba el Reed-Solomon
 python3 verificacion/test/e2e_qr.py        # los dos QR, escaneados desde el DOM real
+python3 verificacion/test/e2e_qr_pixeles.py # el QR rasterizado, a 100%, 125%, 150% y 200%
 python3 verificacion/test/e2e_viejas.py    # que un informe ya emitido no cambie de contenido
 ```
 
@@ -160,7 +161,13 @@ Los genera `public/qr.js`, escrito aquí: modo byte, corrección nivel M, versio
 
 El QR va siempre negro sobre blanco, también en modo oscuro: hay lectores que no leen un código invertido.
 
+**El tamaño se pide en píxeles por módulo, no en píxeles totales.** No es una preferencia de estilo, es la diferencia entre que escanee y que no. Con `shape-rendering="crispEdges"` el navegador ajusta cada módulo a píxeles enteros; si el módulo mide 2.6px, unos salen de 2 y otros de 3, la rejilla deja de ser regular y ningún lector la encuentra — aunque a simple vista el cuadrito se vea impecable. Midiendo por módulo, el lado siempre es múltiplo entero, y lo sigue siendo con el escalado de Windows al 125% y al 150%. El mínimo es 4px por módulo al 100%: por debajo, una cámara no lo resuelve.
+
+Tamaños: **4** en el acta, **6** en el cierre, y el botón *Ampliar para compartir pantalla* lo pone a pantalla completa calculando el módulo contra el tamaño de la ventana. Ese botón existe porque compartir pantalla en una videollamada comprime la imagen, y lo primero que se pierde en una compresión es justo el detalle fino de un QR.
+
 Cómo se sabe que funciona, sin librería de referencia contra la cual comparar: `test/qr_verify.py` vuelve a implementar el **decodificador** desde la norma, en otro lenguaje, y comprueba que los bits de formato pasan su BCH, que los síndromes Reed-Solomon de cada bloque dan cero y que el texto que sale es idéntico al que entró. `test/e2e_qr.py` va más allá y decodifica el SVG que el navegador de verdad dibujó, comprueba que coincide con la URL impresa al lado, y **abre esa dirección** para confirmar que responde.
+
+Y `test/e2e_qr_pixeles.py` decodifica desde los **píxeles rasterizados**, al 100%, 125%, 150% y 200%. Esa prueba existe porque el error de arriba pasó de verdad: el codificador estaba bien, la matriz decodificaba perfecto, y el QR no escaneaba. Solo mirando el resultado pintado se ve.
 
 ---
 

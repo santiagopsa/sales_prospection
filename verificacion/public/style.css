@@ -179,7 +179,20 @@ input,textarea,select{font:inherit;color:inherit}
 .qrtx{min-width:0}
 .qrtx b{font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:13.5px;font-weight:700;display:block}
 .qrtx p{font-size:12.5px;color:var(--ink3);line-height:1.5;margin-top:4px}
+.qrmas{margin-top:9px;font-size:12.5px;padding:6px 12px}
 @media (max-width:560px){ .qrid{flex-direction:column;align-items:center;text-align:center} }
+
+/* QR a pantalla completa para compartir en la llamada. */
+.qrfull{position:fixed;inset:0;z-index:95;background:rgba(10,39,49,.92);display:grid;place-items:center;
+  padding:24px;cursor:pointer}
+.qrfin{text-align:center;max-width:min(92vw,560px)}
+.qrbig{background:#fff;border-radius:14px;padding:18px;display:inline-block;line-height:0}
+/* Sin max-width: el tamaño ya se calculó contra la pantalla en módulos enteros.
+   Dejar que el CSS lo encoja devolvería módulos fraccionarios y el QR dejaría de leerse. */
+.qrbig svg{display:block}
+.qrfin p{color:#fff;font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:17px;
+  font-weight:600;margin-top:18px;line-height:1.4}
+.qrfin span{display:block;color:rgba(255,255,255,.6);font-size:12.5px;margin-top:7px}
 
 /* ============ dropzone ============ */
 .drop{border:2px dashed var(--line2);border-radius:10px;padding:20px;cursor:pointer;transition:.14s;background:var(--bg)}

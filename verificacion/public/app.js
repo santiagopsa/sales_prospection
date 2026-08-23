@@ -73,12 +73,16 @@ function urlVerificacionAbs(codigo){
 // QR generado aquí mismo (public/qr.js), sin pedirle la imagen a nadie.
 // Si por lo que sea el codificador no cargó, no se dibuja un cuadro roto: se devuelve vacío
 // y queda la URL escrita, que es la que manda. El QR es una comodidad, no la fuente de verdad.
-function qrSvg(texto, px, alt){
+// El tamaño se pide en píxeles POR MÓDULO, no en píxeles totales: así el lado siempre es
+// múltiplo entero del número de módulos y la rejilla sale pareja. Con un tamaño total fijo,
+// un código de 41 módulos en 108px da módulos de 2.6px que el navegador redondea a 2 y a 3,
+// y ningún lector encuentra la rejilla — se ve bien y no escanea.
+function qrSvg(texto, modulo, alt){
   try{
     if(!texto || typeof QR === 'undefined') return '';
     // Siempre negro sobre blanco, incluso en modo oscuro: hay lectores que no leen un QR
     // invertido, y este código tiene que funcionar en una pantalla compartida y en papel.
-    return QR.svg(texto, {px: px || 132, fondo: '#fff', color: '#000', alt: alt || 'Código QR'});
+    return QR.svg(texto, {modulo: modulo || 4, fondo: '#fff', color: '#000', alt: alt || 'Código QR'});
   }catch(e){ console.warn('[qr]', e.message); return ''; }
 }
 
@@ -1129,12 +1133,13 @@ function bloqueIdentidad(){
         </div>
         <p class="hint">Mándaselo por donde ya vienen hablando. Cuando lo complete, esta pantalla se actualiza sola.</p>
         <div class="qrid">
-          <div class="qrbox">${qrSvg(S.diditUrl, 150, 'Verificación de identidad')}</div>
+          <div class="qrbox">${qrSvg(S.diditUrl, 6, 'Verificación de identidad')}</div>
           <div class="qrtx">
             <b>O compártele la pantalla con este código.</b>
             <p>Lo escanea con el celular y hace la verificación ahí mismo, antes de colgar. El documento y la
             prueba de vida salen mejor con la cámara del celular que con la del computador, y no hay que
             esperar a que revise el correo.</p>
+            <button class="qrmas" id="btnQrGrande" type="button">Ampliar para compartir pantalla</button>
           </div>
         </div>
       ` : ''}
@@ -1147,7 +1152,34 @@ function bloqueIdentidad(){
     </div>`;
 }
 
+// El QR a pantalla completa. Compartir pantalla en una videollamada comprime la imagen,
+// y lo primero que se pierde en una compresión es justo el detalle fino de un QR.
+// Grande sobrevive a eso; pequeño no.
+function qrGrande(url){
+  // El módulo se calcula contra la pantalla, no se deja que el CSS encoja el SVG:
+  // escalar por CSS devuelve módulos fraccionarios y arruina justo lo que se quería mejorar.
+  let modulo = 11;
+  try{
+    const total = QR.matriz(url).size + 8;                       // módulos + zona tranquila
+    const cabe = Math.min(innerWidth * 0.78, innerHeight * 0.62);
+    modulo = Math.max(4, Math.floor(cabe / total));
+  }catch(e){}
+  const capa = document.createElement('div');
+  capa.className = 'qrfull';
+  capa.innerHTML = `<div class="qrfin">
+      <div class="qrbig">${qrSvg(url, modulo, 'Verificación de identidad')}</div>
+      <p>Escanea este código con tu celular para verificar tu identidad.</p>
+      <span>Toca en cualquier parte para cerrar</span>
+    </div>`;
+  capa.addEventListener('click', () => capa.remove());
+  const esc = e => { if(e.key === 'Escape'){ capa.remove(); document.removeEventListener('keydown', esc); } };
+  document.addEventListener('keydown', esc);
+  document.body.appendChild(capa);
+}
+
 function montarIdentidad(st){
+  const bq = st.querySelector('#btnQrGrande');
+  if(bq) bq.addEventListener('click', () => qrGrande(S.diditUrl));
   const b1 = st.querySelector('#btnEnviarId');
   if(b1) b1.addEventListener('click', async () => {
     overlay(true, 'Creando la verificación…', 'Pidiéndole a Didit un link para este candidato.');
@@ -1446,7 +1478,7 @@ function verActa(){
           <span class="sig">Firma de integridad: ${esc(firmaCorta())} · Evaluó: ${esc(S.eval||'—')} · Revisión de calidad: pendiente de cuatro ojos · Rúbrica anclada 1-5</span>
         </div>
         ${S.id ? `<div class="abqr" title="${esc(urlVerificacionAbs(S.id))}">
-          ${qrSvg(urlVerificacionAbs(S.id), 108, 'Verificar la autenticidad de este informe')}
+          ${qrSvg(urlVerificacionAbs(S.id), 4, 'Verificar la autenticidad de este informe')}
           <span>Escanee para verificar</span>
         </div>` : ''}
       </div>

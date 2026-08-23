@@ -121,6 +121,25 @@ with sync_playwright() as pw:
         comprobar(caja.evaluate("e => e.outerHTML"), url, "QR de identidad")
     pg.screenshot(path="/tmp/pk/qr_01_identidad.png", full_page=True)
 
+    # --- 1b. El mismo código a pantalla completa, para compartir en la llamada ---
+    if not pg.query_selector("#btnQrGrande"):
+        errs.append("no hay forma de ampliar el QR para compartir pantalla")
+    else:
+        pg.click("#btnQrGrande"); pg.wait_for_timeout(400)
+        grande = pg.query_selector(".qrfull .qrbig svg")
+        if not grande:
+            errs.append("el QR ampliado no apareció")
+        else:
+            url = pg.inner_text(".linkbox .lk").strip()
+            comprobar(grande.evaluate("e => e.outerHTML"), url, "QR ampliado")
+            lado = grande.evaluate("e => e.getBoundingClientRect().width")
+            if lado > pg.evaluate("() => innerWidth") or lado > pg.evaluate("() => innerHeight"):
+                errs.append(f"el QR ampliado ({lado}px) no cabe en la pantalla")
+            pg.screenshot(path="/tmp/pk/qr_04_ampliado.png")
+        pg.click(".qrfull"); pg.wait_for_timeout(300)
+        if pg.query_selector(".qrfull"):
+            errs.append("el QR ampliado no se cierra al hacer clic")
+
     pg.click("#btnRefrescarId"); pg.wait_for_timeout(1000)
     pg.click("#btnActa"); pg.wait_for_selector("#vActa.on", timeout=9000); pg.wait_for_timeout(500)
 
