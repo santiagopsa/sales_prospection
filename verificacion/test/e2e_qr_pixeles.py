@@ -23,15 +23,23 @@ SALIDA = os.environ.get('QR_TMP', '/tmp')
 
 # Los tamaños que usa la aplicación, y URLs de distinto largo para tocar varias versiones.
 CASOS = [
-    ('acta',            4,  'https://peaku.co/verificacion/v/PKV-2026-483920'),
-    ('acta en Render',  4,  'https://sandler-coach-peaku.onrender.com/verificacion/v/PKV-2026-483920'),
-    ('identidad',       6,  'https://verify.didit.me/es/session/sess_9f2c1d4e77aa4b1c'),
+    ('acta',            6,  'https://peaku.co/verificacion/v/PKV-2026-483920'),
+    ('acta en Render',  6,  'https://sandler-coach-peaku.onrender.com/verificacion/v/PKV-2026-483920'),
+    ('identidad',       7,  'https://verify.didit.me/es/session/sess_9f2c1d4e77aa4b1c'),
     ('pantalla completa', 11, 'https://verify.didit.me/es/session/sess_9f2c1d4e77aa4b1c'),
 ]
-ESCALAS = [1, 1.25, 1.5, 2]     # 100%, y los escalados de Windows, y pantallas Retina
+# 100%, los escalados de fábrica de Windows, Retina, y los zooms sueltos del navegador.
+# Los fraccionarios (110%, 90%, 175%) son los que rompían la rejilla: un módulo "entero"
+# en píxeles CSS cae en 4.4 o 5.4 píxeles físicos y el navegador redondea unos sí y otros no.
+ESCALAS = [1, 1.1, 1.25, 1.5, 1.75, 2, 0.9]
 MODULO_MINIMO = 4               # px por módulo al 100%: por debajo, una cámara no lo resuelve
 
 errs = []
+
+
+def modulo_para(objetivo, dpr):
+    """El mismo ajuste que hace la aplicación: entero en píxeles FÍSICOS, no en CSS."""
+    return max(1, round(objetivo * dpr)) / dpr
 
 
 def svg_de(url, modulo):
@@ -72,17 +80,17 @@ def modulos_desde_pixeles(im):
     return (mods, (n - 17) // 4), f'{n} módulos a {esc:.2f}px'
 
 
-html = '<body style="margin:0;background:#fff">' + ''.join(
-    f'<div id="c{i}" style="padding:12px;width:max-content">{svg_de(u, m)}</div>'
-    for i, (_, m, u) in enumerate(CASOS)) + '</body>'
-ruta = os.path.join(SALIDA, 'qr_pixeles.html')
-open(ruta, 'w').write(html)
-
 print('QR decodificado desde los píxeles del navegador\n')
 with sync_playwright() as pw:
     br = pw.chromium.launch()
     for escala in ESCALAS:
-        pg = br.new_page(viewport={'width': 900, 'height': 800}, device_scale_factor=escala)
+        # El SVG se genera con el módulo ajustado a esta escala, igual que en el navegador.
+        html = '<body style="margin:0;background:#fff">' + ''.join(
+            f'<div id="c{i}" style="padding:12px;width:max-content">{svg_de(u, modulo_para(m, escala))}</div>'
+            for i, (_, m, u) in enumerate(CASOS)) + '</body>'
+        ruta = os.path.join(SALIDA, f'qr_pixeles_{escala}.html')
+        open(ruta, 'w').write(html)
+        pg = br.new_page(viewport={'width': 1100, 'height': 900}, device_scale_factor=escala)
         pg.goto('file://' + ruta)
         pg.wait_for_timeout(150)
         print(f'  pantalla al {int(escala * 100)}%')
@@ -106,13 +114,15 @@ with sync_playwright() as pw:
             # sin ruido. Una cámara trabaja con enfoque, ángulo y compresión, así que el
             # módulo tiene que ser cómodamente grande, no apenas suficiente.
             paso = float(nota.split('a ')[1].replace('px', ''))
-            entero = abs(paso - round(paso)) < 0.01
-            if escala == 1:
-                if paso < MODULO_MINIMO:
-                    errs.append(f'{nombre}: módulos de {paso:.2f}px al 100%, por debajo del mínimo de {MODULO_MINIMO}')
-                if not entero:
-                    errs.append(f'{nombre}: al 100% el módulo mide {paso:.2f}px y no un número entero '
-                                f'de píxeles — la rejilla sale despareja y el lector no la encuentra')
+            pct = int(escala * 100)
+            # En píxeles FÍSICOS el módulo tiene que ser entero, en cualquier escala.
+            if abs(paso - round(paso)) > 0.02:
+                errs.append(f'{nombre} al {pct}%: el módulo mide {paso:.2f} píxeles físicos y no un número '
+                            f'entero — la rejilla sale despareja y el lector no la encuentra')
+            # Y en tamaño real no puede quedar por debajo del mínimo que resuelve una cámara.
+            if paso / escala < MODULO_MINIMO - 0.01:
+                errs.append(f'{nombre} al {pct}%: quedan {paso/escala:.2f}px CSS por módulo, '
+                            f'por debajo del mínimo de {MODULO_MINIMO}')
         pg.close()
     br.close()
 

@@ -379,7 +379,7 @@ input,textarea,select{font:inherit;color:inherit}
   text-transform:uppercase;color:var(--ink3);margin:20px 0 10px}
 .aev{font-size:13px;color:var(--ink2);line-height:1.5;margin-top:5px}
 .aback{margin-top:20px;border:1.5px solid var(--ink);border-radius:9px;padding:14px 17px;
-  display:flex;gap:18px;align-items:flex-start}
+  display:flex;gap:18px;align-items:center}
 .aback .abtx{flex:1;min-width:0}
 /* El QR va siempre negro sobre blanco, también en modo oscuro: hay lectores que no leen un
    código invertido, y este cuadro termina impreso en el PDF que recibe el cliente. */
@@ -388,7 +388,10 @@ input,textarea,select{font:inherit;color:inherit}
 .abqr svg{display:block}
 .abqr span{display:block;font-size:9px;letter-spacing:.05em;text-transform:uppercase;
   color:#565656;margin-top:4px}
-@media print{ .abqr{border-color:#bbb} .aback{break-inside:avoid} }
+/* En pantalla va grande porque una cámara necesita módulos gruesos. En papel se puede
+   achicar sin riesgo: una impresora trabaja a 300ppp o más, así que cada módulo sigue
+   teniendo una docena de puntos aunque el cuadro mida menos. */
+@media print{ .abqr{border-color:#bbb} .aback{break-inside:avoid} .abqr svg{width:160px;height:160px} }
 @media (max-width:620px){ .aback{flex-direction:column-reverse;align-items:center} }
 .aback h4{font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:13.5px;font-weight:750;margin-bottom:3px}
 .aback p{font-size:12px;color:var(--ink2);line-height:1.5}

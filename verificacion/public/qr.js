@@ -299,9 +299,12 @@
     for (var i = 0; i < n; i++) for (var j = 0; j < n; j++)
       if (r.modulos[i][j]) d += 'M' + (j + q) + ' ' + (i + q) + 'h1v1h-1z';
 
-    // px es un objetivo aproximado: se redondea al múltiplo entero más cercano.
-    var mod = o.modulo || (o.px ? Math.round(o.px / total) : 4);
-    mod = Math.max(MODULO_MIN, Math.round(mod));
+    // El módulo puede venir fraccionario a propósito: quien llama ajusta el valor para que
+    // módulo × devicePixelRatio dé un número entero de píxeles físicos, que es lo que de
+    // verdad importa. Con zoom del navegador al 110% o al 90%, un módulo "entero" en px CSS
+    // aterriza en 4.4 píxeles físicos y la rejilla vuelve a salir despareja.
+    var mod = o.modulo || (o.px ? o.px / total : 4);
+    mod = Math.max(MODULO_MIN, mod);
     var lado = total * mod;
 
     return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + total + ' ' + total + '"' +

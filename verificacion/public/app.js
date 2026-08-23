@@ -80,11 +80,36 @@ function urlVerificacionAbs(codigo){
 function qrSvg(texto, modulo, alt){
   try{
     if(!texto || typeof QR === 'undefined') return '';
+    // El módulo se ajusta al zoom real de la pantalla. Lo que tiene que ser entero no es el
+    // módulo en píxeles CSS, sino en píxeles FÍSICOS: con el navegador al 110%, un módulo de
+    // 4px CSS aterriza en 4.4 píxeles físicos, el navegador redondea unos a 4 y otros a 5,
+    // y la rejilla deja de ser regular. Esa es exactamente la falla que no se ve a simple vista.
+    const dpr = window.devicePixelRatio || 1;
+    const obj = modulo || 6;
+    const mod = Math.max(1, Math.round(obj * dpr)) / dpr;
     // Siempre negro sobre blanco, incluso en modo oscuro: hay lectores que no leen un QR
     // invertido, y este código tiene que funcionar en una pantalla compartida y en papel.
-    return QR.svg(texto, {modulo: modulo || 4, fondo: '#fff', color: '#000', alt: alt || 'Código QR'});
+    return QR.svg(texto, {modulo: mod, fondo: '#fff', color: '#000', alt: alt || 'Código QR'});
   }catch(e){ console.warn('[qr]', e.message); return ''; }
 }
+
+// Los QR se pintan en su contenedor después de armar el HTML, y se vuelven a pintar si
+// cambia el zoom. Un QR dibujado al 100% y mirado al 125% ya no tiene la rejilla pareja.
+function pintarQrs(raiz){
+  (raiz || document).querySelectorAll('[data-qr]').forEach(el => {
+    const url = el.getAttribute('data-qr');
+    if(!url) return;
+    el.innerHTML = qrSvg(url, Number(el.getAttribute('data-qr-mod')) || 6, el.getAttribute('data-qr-alt') || '');
+  });
+}
+function huecoQr(url, modulo, alt){
+  return `<div data-qr="${esc(url)}" data-qr-mod="${modulo}" data-qr-alt="${esc(alt||'')}"></div>`;
+}
+let dprAnterior = window.devicePixelRatio || 1;
+window.addEventListener('resize', () => {
+  const ahora = window.devicePixelRatio || 1;
+  if(ahora !== dprAnterior){ dprAnterior = ahora; pintarQrs(); }
+});
 
 const BASE = (function(){
   try{
@@ -1133,7 +1158,7 @@ function bloqueIdentidad(){
         </div>
         <p class="hint">Mándaselo por donde ya vienen hablando. Cuando lo complete, esta pantalla se actualiza sola.</p>
         <div class="qrid">
-          <div class="qrbox">${qrSvg(S.diditUrl, 6, 'Verificación de identidad')}</div>
+          <div class="qrbox">${huecoQr(S.diditUrl, 7, 'Verificación de identidad')}</div>
           <div class="qrtx">
             <b>O compártele la pantalla con este código.</b>
             <p>Lo escanea con el celular y hace la verificación ahí mismo, antes de colgar. El documento y la
@@ -1178,6 +1203,7 @@ function qrGrande(url){
 }
 
 function montarIdentidad(st){
+  pintarQrs(st);
   const bq = st.querySelector('#btnQrGrande');
   if(bq) bq.addEventListener('click', () => qrGrande(S.diditUrl));
   const b1 = st.querySelector('#btnEnviarId');
@@ -1478,7 +1504,7 @@ function verActa(){
           <span class="sig">Firma de integridad: ${esc(firmaCorta())} · Evaluó: ${esc(S.eval||'—')} · Revisión de calidad: pendiente de cuatro ojos · Rúbrica anclada 1-5</span>
         </div>
         ${S.id ? `<div class="abqr" title="${esc(urlVerificacionAbs(S.id))}">
-          ${qrSvg(urlVerificacionAbs(S.id), 4, 'Verificar la autenticidad de este informe')}
+          ${huecoQr(urlVerificacionAbs(S.id), 6, 'Verificar la autenticidad de este informe')}
           <span>Escanee para verificar</span>
         </div>` : ''}
       </div>
@@ -1490,6 +1516,7 @@ function verActa(){
       <button class="pri" id="btnPrint" type="button">Imprimir o guardar en PDF</button>
       <button id="btnJson2" type="button">Copiar JSON del archivo</button>
     </div>`;
+  pintarQrs($('#actaStage'));
   $('#actaStage').querySelector('[data-back]').addEventListener('click', () => {
     if(S.soloLectura){ loadTablero(); return; }
     go('vLive'); render();
