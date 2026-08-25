@@ -107,6 +107,7 @@ node verificacion/test/rules.test.js       # 38 pruebas de las reglas, sin depen
 node verificacion/test/assets.test.js      # que el versionado de estáticos siga enganchado
 node verificacion/test/json_llm.test.js    # leer el JSON del modelo venga como venga
 node verificacion/test/llm.test.js         # pedirJson contra un cliente falso, sin gastar tokens
+node verificacion/test/prompts.test.js     # que el prompt lleve de verdad el texto que dice analizar
 python3 verificacion/test/e2e.py           # flujo completo en navegador, contra test/stub.js
 python3 verificacion/test/e2e_identidad.py # sondeo, cierre verificado, negativa y rostro que no corresponde
 python3 verificacion/test/e2e_historial.py # abrir una verificación anterior y retomar una a medias
@@ -288,6 +289,16 @@ Sin `DIDIT_API_KEY` la app funciona igual: los sondeos no la necesitan, y en un 
 **Sobre datos personales:** el pantallazo es un dato biométrico. Se guarda solo el tiempo que tarda el cotejo y se borra automáticamente. PeakU nunca almacena la imagen del documento — eso queda del lado de Didit. Vale la pena que el aviso de privacidad y la autorización de tratamiento de datos que ya usas mencionen la verificación de identidad de forma explícita; la Ley 1581 trata los datos biométricos como sensibles y exige autorización previa. Esto no es asesoría legal: confírmalo con quien lleve el tema en PeakU.
 
 ---
+
+## El prompt tiene que llevar el texto
+
+`buildIntakePrompt(sourceText, ctx)` recibía el texto y **nunca lo insertaba en el prompt**. Se le pedía a Claude que leyera un job description que jamás le llegaba. Lo mismo en `buildCvPrompt` con el CV.
+
+Y no fallaba de forma ruidosa, que habría sido lo mejor: con el nombre de la empresa y el cargo en el contexto, el modelo a veces **completaba una ficha entera inventada**, y esa ficha se guardaba como si fuera el levantamiento del cliente. Cualquier vacante creada antes de este arreglo hay que revisarla contra su fuente: sus requisitos pueden no venir de ningún lado.
+
+Por qué ninguna prueba lo veía: `test/stub.js` no llama a Claude, devuelve una respuesta fija. El flujo entero pasaba en verde con el prompt vacío por dentro. Un extremo a extremo que no toca el modelo no puede ver un prompt roto — hace falta mirar el prompt en sí, y eso es `test/prompts.test.js`.
+
+El texto va delimitado entre marcas (`INICIO_DEL_TEXTO` / `FIN_DEL_TEXTO`) y cerca del principio. Los delimitadores no son decorativos: un JD lo escribe el cliente, así que hay que dejar explícito dónde empieza y dónde termina el material de fuera, y que es contenido para analizar, no instrucciones para obedecer.
 
 ## Prompt
 
