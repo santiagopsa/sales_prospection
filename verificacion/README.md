@@ -105,6 +105,7 @@ Aparte a propósito: son la parte que no puede fallar y la única con pruebas pr
 ```bash
 node verificacion/test/rules.test.js       # 38 pruebas de las reglas, sin dependencias
 node verificacion/test/assets.test.js      # que el versionado de estáticos siga enganchado
+node verificacion/test/json_llm.test.js    # leer el JSON del modelo venga como venga
 python3 verificacion/test/e2e.py           # flujo completo en navegador, contra test/stub.js
 python3 verificacion/test/e2e_identidad.py # sondeo, cierre verificado, negativa y rostro que no corresponde
 python3 verificacion/test/e2e_historial.py # abrir una verificación anterior y retomar una a medias
@@ -114,6 +115,7 @@ python3 verificacion/test/e2e_qr.py        # los dos QR, escaneados desde el DOM
 python3 verificacion/test/e2e_qr_pixeles.py # el QR rasterizado, a 100%, 125%, 150% y 200%
 python3 verificacion/test/e2e_viejas.py    # que un informe ya emitido no cambie de contenido
 python3 verificacion/test/e2e_editar.py    # editar una vacante sin tocar las actas ya emitidas
+python3 verificacion/test/e2e_intake_error.py # que un análisis fallido diga qué pasó y qué hacer
 ```
 
 `test/stub.js` replica la API con `http` nativo y devuelve un levantamiento fijo en vez de llamar a Claude: prueba la interfaz sin API key, sin Postgres y sin `npm install`. Importa las reglas reales de `rules.js` y se monta en `/verificacion`, igual que en producción — así que lo que se prueba del semáforo, del acta y del punto de montaje es el código de verdad.
@@ -296,6 +298,18 @@ Todo el prompt del levantamiento está en `prompts.js`, separado de la lógica. 
 Costo: entre 0,05 y 0,20 USD por levantamiento según el largo. Las sesiones no consumen IA.
 
 ---
+
+## Leer el JSON que devuelve Claude
+
+`json_llm.js`, con sus pruebas. Existe porque *"Claude devolvió JSON inválido"* tapaba tres fallas distintas que se arreglan distinto: la respuesta **se cortó** por el límite de tokens, el modelo **escribió una frase antes** del JSON, o el texto vino en un **bloque de contenido que no era el primero** (y el código leía solo `content[0]`).
+
+Las defensas, de la más barata a la más cara:
+
+1. **Prefill.** Se le pone el `{` en la boca al modelo mandando un turno de asistente que ya empieza el objeto. Con la respuesta arrancada, no queda lugar para un "Claro, aquí tienes:".
+2. **Rescate.** Si igual llega envuelto, se extrae el objeto balanceando llaves e ignorando las que van dentro de una cadena. Se prueba desde cada `{` de apertura, no solo el primero: con prefill el modelo a veces repite el `{` del ejemplo, y `{{"a":1}}` está balanceado pero no es JSON. Segunda pasada para comas colgando.
+3. **Reintento.** Si `stop_reason` fue `max_tokens` —o el objeto abre y nunca cierra— se repite una vez con el doble de espacio. Si vuelve a cortarse, el error dice **eso**, que es accionable, en vez de "JSON inválido", que no lo es.
+
+El error llega a la pantalla con su `motivo` (`truncado` o `ilegible`) y se muestra **en el formulario, no en un toast**: el mensaje dice qué hacer y un toast se va solo. Y no le habla al usuario de JSON, que no le sirve de nada.
 
 ## Editar una vacante
 

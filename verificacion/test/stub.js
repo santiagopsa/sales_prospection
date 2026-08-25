@@ -76,6 +76,13 @@ const server = http.createServer(async (req, res) => {
   if(p === '/api/intake/analyze' && m==='POST'){
     const b = await body(req);
     if(!b.sourceText || b.sourceText.trim().length < 200) return json(res,400,{error:'texto muy corto'});
+    // Para probar el camino de error sin llamar a Claude: mismos cuerpos que el servidor real.
+    if(b.sourceText.includes('__TRUNCADO__')) return json(res,502,{
+      error:'La respuesta de Claude se cortó por longitud. Prueba con un texto más corto, o quitando las partes que no describen el cargo.',
+      motivo:'truncado'});
+    if(b.sourceText.includes('__ILEGIBLE__')) return json(res,502,{
+      error:'Claude no devolvió un JSON que se pueda leer. Vuelve a intentarlo; si se repite, revisa que el texto sea el levantamiento o el job description y no otra cosa.',
+      motivo:'ilegible'});
     return json(res,200,JSON.parse(JSON.stringify(FAKE)));
   }
 

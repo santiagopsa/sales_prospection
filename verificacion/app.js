@@ -14,6 +14,7 @@ const { buildIntakePrompt, buildCvPrompt } = require('./prompts');
 const { LVLTXT, clean, esCierre, semaforo, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode } = require('./rules');
 const didit = require('./didit');
 const { T, initSchema } = require('./schema');
+const { textoDe, leerJson, pareceTruncado } = require('./json_llm');
 
 // Versión del formato del acta. Queda grabada en cada documento emitido: si mañana el acta
 // cambia, el informe viejo sigue diciendo con qué formato se dibujó.
@@ -238,6 +239,48 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
   });
 
   // -------------------------------------------------------------------------
+  // PEDIRLE JSON A CLAUDE SIN QUE SE ROMPA
+  //
+  // "Claude devolvió JSON inválido" tapaba tres fallas distintas que se arreglan distinto:
+  // la respuesta se cortó por límite de tokens, el modelo escribió una frase antes del JSON,
+  // o el texto vino en un bloque de contenido que no era el primero. Aquí se separan, y el
+  // error que sube dice cuál fue.
+  //
+  // Tres defensas, de la más barata a la más cara:
+  //   1. Se le pone el "{" en la boca al modelo (prefill). Con la respuesta ya empezada, no
+  //      hay lugar para un "Claro, aquí tienes:" adelante.
+  //   2. Si igual llega envuelto, se rescata el objeto balanceando llaves fuera de comillas.
+  //   3. Si se cortó por longitud, se reintenta una vez con más espacio — y si vuelve a
+  //      cortarse se dice eso, que es accionable, en vez de "JSON inválido", que no lo es.
+  // -------------------------------------------------------------------------
+  async function pedirJson(prompt, { etiqueta = 'llm', maxTokens = 8000 } = {}) {
+    let ultimoBruto = '', cortado = false;
+    for (const tope of [maxTokens, maxTokens * 2]) {
+      const msg = await anthropic.messages.create({
+        model, max_tokens: tope,
+        messages: [
+          { role: 'user', content: prompt },
+          { role: 'assistant', content: '{' },     // prefill: la respuesta ya arranca en JSON
+        ],
+      });
+      ultimoBruto = '{' + textoDe(msg);
+      cortado = msg.stop_reason === 'max_tokens' || pareceTruncado(ultimoBruto);
+      const datos = leerJson(ultimoBruto);
+      if (datos) return { datos, usage: msg.usage };
+      console.error(`[verificacion/${etiqueta}] no se pudo leer el JSON`,
+        `· stop_reason=${msg.stop_reason} · tope=${tope}\n`, ultimoBruto.slice(0, 600));
+      if (!cortado) break;                          // no fue longitud: reintentar no ayuda
+    }
+    return {
+      error: cortado
+        ? 'La respuesta de Claude se cortó por longitud. Prueba con un texto más corto, o quitando las partes que no describen el cargo.'
+        : 'Claude no devolvió un JSON que se pueda leer. Vuelve a intentarlo; si se repite, revisa que el texto sea el levantamiento o el job description y no otra cosa.',
+      motivo: cortado ? 'truncado' : 'ilegible',
+      raw: ultimoBruto.slice(0, 2000),
+    };
+  }
+
+  // -------------------------------------------------------------------------
   // LEVANTAMIENTO: Claude lee la transcripción o el JD y arma la ficha
   // -------------------------------------------------------------------------
   r.post('/api/intake/analyze', async (req, res) => {
@@ -247,22 +290,11 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       if (!sourceText || sourceText.trim().length < 200) {
         return res.status(400).json({ error: 'El texto está vacío o es muy corto (mínimo 200 caracteres).' });
       }
-      const msg = await anthropic.messages.create({
-        model,
-        max_tokens: 8000,
-        messages: [{ role: 'user', content: buildIntakePrompt(sourceText, { sourceType, companyHint, roleHint, recruiter }) }],
-      });
-      const text = (msg.content && msg.content[0] && msg.content[0].text) || '';
-      let jsonText = text.trim();
-      const fenced = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (fenced) jsonText = fenced[1].trim();
-      let parsed;
-      try { parsed = JSON.parse(jsonText); }
-      catch (e) {
-        console.error('[verificacion/llm] JSON inválido:', e.message, '\n', text.slice(0, 500));
-        return res.status(502).json({ error: 'Claude devolvió JSON inválido', raw: text.slice(0, 2000) });
-      }
-      parsed._usage = msg.usage;
+      const out = await pedirJson(buildIntakePrompt(sourceText, { sourceType, companyHint, roleHint, recruiter }),
+                                  { etiqueta: 'levantamiento', maxTokens: 8000 });
+      if (out.error) return res.status(502).json(out);
+      const parsed = out.datos;
+      parsed._usage = out.usage;
       parsed._model = model;
       res.json(parsed);
     } catch (e) {
@@ -585,21 +617,10 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         excluyentes = mem.requirements.filter(q => q.vacancy_id === (v && v.id)).sort((x, y) => x.ord - y.ord);
       }
 
-      const msg = await anthropic.messages.create({
-        model,
-        max_tokens: 6000,
-        messages: [{ role: 'user', content: buildCvPrompt(cvText, { cargo, empresa, excluyentes, candidato }) }],
-      });
-      const text = (msg.content && msg.content[0] && msg.content[0].text) || '';
-      let jsonText = text.trim();
-      const fenced = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (fenced) jsonText = fenced[1].trim();
-      let cv;
-      try { cv = JSON.parse(jsonText); }
-      catch (e) {
-        console.error('[verificacion/cv] JSON inválido:', e.message);
-        return res.status(502).json({ error: 'Claude devolvió JSON inválido' });
-      }
+      const out = await pedirJson(buildCvPrompt(cvText, { cargo, empresa, excluyentes, candidato }),
+                                  { etiqueta: 'cv', maxTokens: 6000 });
+      if (out.error) return res.status(502).json(out);
+      const cv = out.datos;
 
       // La trayectoria arranca sin confirmar; se marca durante la sesión.
       const tray = (cv.trayectoria || []).map(t => ({ ...t, estado: 'sin_confirmar' }));

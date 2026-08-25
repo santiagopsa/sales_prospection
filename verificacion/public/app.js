@@ -362,6 +362,8 @@ async function analizar(){
   const sourceText = $('#srcText').value.trim();
   const sourceType = document.querySelector('#srcType .seg.sel').dataset.src;
   overlay(true, 'Leyendo el levantamiento…', 'Claude está identificando los requisitos excluyentes. Esto toma entre 20 y 40 segundos.');
+  const caja = $('#intakeErr');
+  caja.style.display = 'none';
   try{
     const out = await api('/api/intake/analyze', {method:'POST', body:{
       sourceText, sourceType,
@@ -377,7 +379,13 @@ async function analizar(){
     X.excluyentes = X.excluyentes.slice(0,5);
     renderRevision();
   }catch(e){
-    toast('No se pudo analizar: ' + e.message);
+    // Un toast se va solo y este mensaje dice qué hacer, así que se queda en pantalla.
+    // El motivo importa: que la respuesta se haya cortado por longitud y que haya llegado
+    // ilegible se arreglan distinto, y antes las dos decían lo mismo.
+    const motivo = e.payload && e.payload.motivo;
+    caja.innerHTML = `<b>${motivo === 'truncado' ? 'El texto es demasiado largo para una sola pasada.' : 'No se pudo extraer los requisitos.'}</b>${esc(e.message)}`;
+    caja.style.display = 'block';
+    caja.scrollIntoView({behavior:'smooth', block:'center'});
   }finally{ overlay(false); }
 }
 

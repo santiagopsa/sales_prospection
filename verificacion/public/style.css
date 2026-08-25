@@ -521,3 +521,7 @@ input,textarea,select{font:inherit;color:inherit}
 .ib.del:hover{border-color:var(--crit);color:var(--crit)}
 .rqbd{padding:4px 11px 13px;border-top:1px solid var(--line)}
 .rqbd .fttl{margin-top:12px;margin-bottom:8px}
+
+/* Un fallo del análisis no puede irse solo como un toast: el mensaje dice qué hacer. */
+.aviso.malo{background:var(--crit-soft);border-color:var(--crit)}
+.aviso.malo b{color:var(--crit)}
