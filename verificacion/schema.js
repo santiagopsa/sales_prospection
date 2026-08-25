@@ -132,6 +132,15 @@ async function initSchema(pool) {
     // Un documento emitido no puede cambiar porque el software evolucionó. Al emitir se congela
     // todo lo que el acta necesita para volver a dibujarse igual, y de ahí se lee después.
     // La firma de integridad promete justamente eso: que el documento no fue alterado.
+    // La entrevista y la calificación dejaron de ser el mismo momento. El reclutador
+    // entrevista sin escribir, la llamada termina, y minutos después llega la transcripción
+    // de Google. Entre esos dos momentos la sesión vive aquí, y tiene que poder cerrarse
+    // y retomarse: la transcripción no está lista cuando uno cuelga.
+    // El texto de la transcripción NO se guarda — es dato personal y ya cumplió su función
+    // al analizarse. Lo que queda son las citas de evidencia, que son las que van al acta.
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS transcript_analisis JSONB`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS transcript_at TIMESTAMPTZ`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS entrevista_at TIMESTAMPTZ`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS snapshot JSONB`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS formato TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_v_sess_didit ON ${T.sessions}(didit_session_id)`,

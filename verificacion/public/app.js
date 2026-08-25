@@ -207,8 +207,15 @@ async function loadTablero(){
 
     $('#sesCount').textContent = ss.length ? (ss.length>1 ? `${ss.length} sesiones` : '1 sesión') : '';
     $('#sesList').innerHTML = ss.length ? ss.map(s => {
-      const semTag = s.semaforo==='verde'?'v':(s.semaforo==='amarillo'?'a':(s.semaforo==='rojo'?'r':'n'));
-      const semTx = s.semaforo ? s.semaforo.toUpperCase() : 'EN CURSO';
+      // Una sesión esperando transcripción no está "en curso": está esperando algo de afuera,
+      // y si no se distingue en el tablero se pierde entre las demás y nadie la retoma.
+      const esperando = s.status === 'esperando' && !s.transcript_at;
+      const porConfirmar = s.status !== 'issued' && !!s.transcript_at;
+      const semTag = esperando ? 'a'
+        : s.semaforo==='verde'?'v':(s.semaforo==='amarillo'?'a':(s.semaforo==='rojo'?'r':'n'));
+      const semTx = esperando ? 'ESPERA TRANSCRIPCIÓN'
+        : porConfirmar ? 'POR CONFIRMAR'
+        : s.semaforo ? s.semaforo.toUpperCase() : 'EN CURSO';
       return `<button class="row" data-ses="${s.id}" type="button">
         <div class="rowmain">
           <b>${esc(s.candidate)}</b>
@@ -264,6 +271,11 @@ async function verSesion(id){
       fecha: (snap && snap.emitido) ? new Date(snap.emitido).getTime()
              : s.issued_at ? new Date(s.issued_at).getTime() : Date.now(),
       t0: null, tFase: null, fase: 0,
+      // El momento en que quedó: si ya hay transcripción analizada, toca calificar;
+      // si la entrevista terminó y no hay transcripción, está esperándola.
+      tran: s.transcript_analisis || null,
+      modo: s.transcript_analisis ? 'calificacion' : 'entrevista',
+      esperando: s.status === 'esperando',
       fin: s.status === 'issued', soloLectura: true,
     };
     if(s.status === 'issued'){ verActa(); }
@@ -278,21 +290,33 @@ function verBorrador(s){
   const cal = S.reqs.filter(r => r.lvl > 0).length;
   const nSig = Object.values(S.sig).filter(Boolean).length;
   const i = S.ident || {};
+  // Tres momentos distintos, y el botón tiene que decir cuál es: la entrevista sin hacer,
+  // la entrevista hecha esperando la transcripción, o la transcripción ya leída sin confirmar.
+  const esperando = S.esperando && !S.tran;
+  const calificando = !!S.tran;
+  const etiqueta = esperando ? 'ESPERANDO TRANSCRIPCIÓN' : (calificando ? 'SIN CONFIRMAR' : 'SIN EMITIR');
+  const accion = esperando ? 'Pegar la transcripción'
+               : calificando ? 'Confirmar la calificación' : 'Retomar la sesión';
+
   $('#actaStage').innerHTML = `
     <button class="back" data-home type="button">← Todas las verificaciones</button>
     <div class="card">
       <div class="cardhd">
         <h2>${esc(S.cand)}</h2>
-        <span class="tag n">SIN EMITIR</span>
+        <span class="tag ${esperando?'a':'n'}">${etiqueta}</span>
       </div>
       <div class="cs" style="margin-bottom:14px">${[esc(S.rol), S.cli && esc(S.cli), S.kind==='cierre'?'cierre verificado':'sondeo'].filter(Boolean).join(' · ')} · <span class="mono">${esc(S.id)}</span></div>
       <div class="res"><div class="rn">Requisitos calificados</div><span class="rl">${cal} de ${S.reqs.length}</span></div>
       <div class="res"><div class="rn">Señales observadas</div><span class="rl">${nSig}</span></div>
       ${S.kind==='cierre' ? `<div class="res"><div class="rn">Verificación de identidad</div><span class="rl">${esc(i.texto || 'sin enviar')}</span></div>` : ''}
-      <p class="hint">Esta sesión quedó a medias. Puedes retomarla donde estaba: lo que ya registraste está guardado en el servidor, no en el navegador.</p>
+      <p class="hint">${esperando
+        ? 'La entrevista ya se hizo. Falta pegar la transcripción de la llamada: de ahí sale la evidencia que va al acta.'
+        : calificando
+          ? 'La transcripción ya se leyó y hay un nivel propuesto para cada requisito. Falta que los confirmes.'
+          : 'Esta sesión quedó a medias. Puedes retomarla donde estaba: lo que ya registraste está guardado en el servidor, no en el navegador.'}</p>
       <div class="tools" style="margin-top:12px">
         <button data-home type="button">Volver</button>
-        <button class="pri" id="btnRetomar" type="button">Retomar la sesión</button>
+        <button class="pri" id="btnRetomar" type="button">${accion}</button>
       </div>
     </div>`;
   $('#actaStage').querySelectorAll('[data-home]').forEach(b => b.addEventListener('click', loadTablero));
@@ -301,7 +325,10 @@ function verBorrador(s){
     S.t0 = S.t0 || Date.now();
     S.tFase = Date.now();
     S.fase = 0;
-    saveLocal(); drawSig(); render(); go('vLive');
+    saveLocal(); drawSig();
+    if(esperando){ pantallaTranscripcion(); return; }
+    S.modo = calificando ? 'calificacion' : 'entrevista';
+    render(); go('vLive');
     toast('Sesión retomada');
   });
   go('vActa');
@@ -949,11 +976,26 @@ function setupSesion(v){
 }
 
 /* ===================== sesión en vivo ===================== */
+// La entrevista y la calificación dejaron de ser el mismo momento, así que tampoco son la
+// misma lista de fases. Durante la llamada el reclutador escucha: la pantalla es guía y nada
+// más. La evidencia llega después, con la transcripción — que en Google tarda unos minutos,
+// razón por la cual entremedio la sesión tiene que poder cerrarse y retomarse.
+function enEntrevista(){ return S.modo !== 'calificacion'; }
+
 function fases(){
-  const f = [{k:'id', t:'Apertura', min:4}];
-  S.reqs.forEach((r,i) => f.push({k:'req', i, t:r.n || ('Requisito '+(i+1)), min:6}));
-  if((S.tray || []).length) f.push({k:'tray', t:'Trayectoria', min:4});
-  f.push({k:'ctx', t:'Contexto', min:4});
+  if(enEntrevista()){
+    const f = [{k:'id', t:'Apertura', min:4}];
+    S.reqs.forEach((r,i) => f.push({k:'guia', i, t:r.n || ('Requisito '+(i+1)), min:6}));
+    // La trayectoria aparece en los dos momentos, y no es lo mismo: durante la llamada son
+    // las preguntas que hay que hacer sobre cada tramo; después, marcar si los sostuvo.
+    if((S.tray || []).length) f.push({k:'tray', t:'Trayectoria', min:4});
+    f.push({k:'fin', t:'Fin de la entrevista', min:2});
+    return f;
+  }
+  const f = [];
+  S.reqs.forEach((r,i) => f.push({k:'req', i, t:r.n || ('Requisito '+(i+1)), min:2}));
+  if((S.tray || []).length) f.push({k:'tray', t:'Trayectoria', min:3});
+  f.push({k:'ctx', t:'Contexto', min:3});
   f.push({k:'cierre', t:'Cierre', min:3});
   return f;
 }
@@ -961,6 +1003,7 @@ function drawNav(){
   const F = fases();
   $('#phaseNav').innerHTML = F.map((f,i) => {
     const done = f.k==='id' ? idChecksDe(S.kind).every(c=>S.idc[c.id])
+      : f.k==='guia' ? i < S.fase
       : f.k==='req' ? S.reqs[f.i].lvl>0
       : f.k==='tray' ? (S.tray||[]).every(t => t.estado && t.estado !== 'sin_confirmar')
       : f.k==='ctx' ? !!(S.rec && S.rec.veredicto)
@@ -1052,7 +1095,8 @@ function render(){
     if(cierre) montarCaptura();
   }
 
-  else if(f.k === 'req'){
+  // --- GUÍA: lo que se ve DURANTE la llamada. Solo munición, cero campos que llenar. ---
+  else if(f.k === 'guia'){
     const r = S.reqs[f.i];
     const meta = r.r || {};
     const dets = Array.isArray(meta.detalles) ? meta.detalles : [];
@@ -1081,7 +1125,54 @@ function render(){
         ${sen.length ? `<div class="detbox"><div class="dt">Señales de impostor en este tema</div>
           <div class="sflags">${sen.map(s => `<span class="sflag">${esc(s)}</span>`).join('')}</div></div>` : ''}
 
-        <div class="lvlttl">Calificación anclada — marca el nivel que corresponde a lo que viste</div>
+        <p class="hint">No tomes notas de evidencia. Escucha y repregunta — las citas salen de la
+        transcripción cuando termine la llamada. Lo único que sí conviene marcar en el momento son
+        las señales de abajo, porque son cosas que no quedan en el texto.</p>
+
+        <div class="nav">
+          <button data-prev type="button">Atrás</button>
+          <button class="pri" data-next type="button">${f.i===S.reqs.length-1?'Terminar la entrevista':'Siguiente requisito'}</button>
+        </div>
+      </div>`;
+  }
+
+  // --- CALIFICACIÓN: después, con la transcripción ya analizada. ---
+  else if(f.k === 'req'){
+    const r = S.reqs[f.i];
+    const meta = r.r || {};
+    const dets = Array.isArray(meta.detalles) ? meta.detalles : [];
+    const prop = propuestaDe(f.i);
+
+    st.innerHTML = `
+      <div class="card">
+        <h2>${esc(r.n)}</h2>
+        <div class="cs" style="margin-bottom:16px">Requisito ${f.i+1} de ${S.reqs.length} · confirma o corrige lo que salió de la transcripción</div>
+
+        ${prop && prop.cubierto === false ? `<div class="aviso malo">
+          <b>Este requisito no se tocó en la conversación.</b>
+          La transcripción no tiene nada sobre esto, así que no hay nada que calificar todavía.
+          Si crees que sí se habló, revisa que la transcripción esté completa. Si de verdad no se
+          preguntó, queda sin medir — y eso es un dato, no un hueco que rellenar.
+        </div>` : ''}
+
+        ${prop && prop.evidencia ? `<div class="cita">
+          <div class="dt">Lo que dijo el candidato — cita de la transcripción</div>
+          <blockquote>${esc(prop.evidencia)}</blockquote>
+          ${prop.por_que_ese_nivel ? `<p class="pq">Por qué el nivel propuesto: ${esc(prop.por_que_ese_nivel)}</p>` : ''}
+          ${prop.nota ? `<p class="pq av">${esc(prop.nota)}</p>` : ''}
+        </div>` : ''}
+
+        ${prop && (prop.detalles||[]).length ? `<div class="detbox"><div class="dt">Detalles verificables — lo que contestó</div>
+          <div class="dets">${prop.detalles.map(d => `<div class="det ${d.correcto?'ok':'no'}">
+            <span class="dq">${esc(d.detalle||'')}</span>
+            <span class="da">${esc(d.respondio||'no respondió')} ${d.correcto?'✓':'✗'}</span></div>`).join('')}</div></div>`
+          : (dets.length ? `<div class="detbox"><div class="dt">Detalles verificables que se iban a preguntar</div>
+          <div class="dets">${dets.map(d => `<div class="det"><span class="dq">${esc(d.detalle||'')}</span><span class="da">${esc(d.respuesta_esperada||'')}</span></div>`).join('')}</div></div>` : '')}
+
+        ${prop && (prop.senales||[]).length ? `<div class="detbox"><div class="dt">Señales observadas en este tema</div>
+          <div class="sflags">${prop.senales.map(x => `<span class="sflag">${esc(x)}</span>`).join('')}</div></div>` : ''}
+
+        <div class="lvlttl">Calificación anclada — ${prop && prop.nivel ? 'la transcripción propone ' + prop.nivel + '; confirma o corrige' : 'marca el nivel que corresponde'}</div>
         <div class="lvls">
           ${[1,2,3,4,5].map(v => `<button class="lv ${r.lvl===v?'sel':''}" data-lv="${v}" data-v="${v}" type="button"><div class="n">${v}</div><div class="t">${LVLTXT[v]}</div></button>`).join('')}
         </div>
@@ -1118,8 +1209,12 @@ function render(){
     st.innerHTML = `
       <div class="card">
         <h2>Trayectoria</h2>
-        <div class="cs" style="margin-bottom:16px">Lo que el CV declara. Marca cada tramo según lo que el candidato sostuvo en la sesión.</div>
-        <div class="say"><div class="lb">CÓMO SE MARCA</div><p style="font-style:normal"><b>Confirmado</b> es que narró ese trabajo con escena y detalle propios, no que lo mencionó. <b>Sin sostener</b> es que no logró aterrizarlo. <b>Contradice</b> es que lo que contó no cuadra con lo que dice el CV.</p></div>
+        <div class="cs" style="margin-bottom:16px">${enEntrevista()
+          ? 'Lo que el CV declara. Pregúntale por los tramos que importan — marcarlos viene después, con la transcripción.'
+          : 'Lo que el CV declara. Marca cada tramo según lo que el candidato sostuvo en la sesión.'}</div>
+        ${enEntrevista()
+          ? `<div class="say"><div class="lb">QUÉ PEDIR EN CADA TRAMO</div><p style="font-style:normal">Que aterrice el trabajo con escena propia: qué hacía un día normal, con quién, qué salió mal. Mencionar la empresa no es sostenerla.</p></div>`
+          : `<div class="say"><div class="lb">CÓMO SE MARCA</div><p style="font-style:normal"><b>Confirmado</b> es que narró ese trabajo con escena y detalle propios, no que lo mencionó. <b>Sin sostener</b> es que no logró aterrizarlo. <b>Contradice</b> es que lo que contó no cuadra con lo que dice el CV.</p></div>`}
         ${T.map((t,i) => `
           <div class="tray">
             <div class="trayhd">
@@ -1127,10 +1222,10 @@ function render(){
                 <b>${esc(t.cargo||'—')}</b>
                 <span>${esc(t.empresa||'')}${t.periodo?' · '+esc(t.periodo):''}</span>
               </div>
-              <div class="trayb">
+              ${enEntrevista() ? '' : `<div class="trayb">
                 ${[['confirmado','Confirmado','ok'],['sin_sostener','Sin sostener','par'],['contradice','Contradice','no']].map(([k,tx,c]) =>
                   `<button class="tb ${t.estado===k?'sel '+c:''}" data-tray="${i}" data-est="${k}" type="button">${tx}</button>`).join('')}
-              </div>
+              </div>`}
             </div>
             ${t.resumen ? `<div class="aev">${esc(t.resumen)}</div>` : ''}
           </div>`).join('')}
@@ -1217,6 +1312,54 @@ function render(){
       S.rec.riesgos.push({r:'', m:''}); touch(); drawRiesgos();
     });
     drawRiesgos();
+  }
+
+  // --- FIN DE LA ENTREVISTA: se cuelga, y la transcripción llega después. ---
+  else if(f.k === 'fin'){
+    const nSig = Object.values(S.sig).filter(Boolean).length;
+    const cierre = S.kind === 'cierre';
+    st.innerHTML = `
+      <div class="card">
+        <h2>Terminaste la entrevista</h2>
+        <p class="lede" style="margin-bottom:16px">Ahora despídete y cuelga. La evidencia sale de la
+        transcripción, no de lo que alcanzaste a escribir.</p>
+
+        <div class="pasos">
+          <div class="paso"><div class="pn">1</div><div>
+            <b>Cierra la llamada con normalidad.</b>
+            <span>Agradécele el tiempo y dile cuándo tendrá noticias. Nada de esto cambia por lo que hayas visto.</span></div></div>
+          ${cierre ? `<div class="paso"><div class="pn">2</div><div>
+            <b>Mándale el link de verificación de identidad.</b>
+            <span>Está en el cierre de la sesión. Mejor ahora, mientras la conversación está fresca.</span></div></div>` : ''}
+          <div class="paso"><div class="pn">${cierre?3:2}</div><div>
+            <b>Espera la transcripción de Google.</b>
+            <span>Tarda unos minutos en aparecer en el Drive de la reunión. No tienes que quedarte
+            aquí: esta sesión queda guardada y la retomas cuando esté lista, hoy o mañana.</span></div></div>
+        </div>
+
+        <div class="resum">
+          <div class="ri"><span>Requisitos recorridos</span><b>${S.reqs.length}</b></div>
+          <div class="ri"><span>Señales marcadas</span><b>${nSig}</b></div>
+          <div class="ri"><span>Duración</span><b>${mmss(Date.now()-(S.t0||Date.now()))}</b></div>
+        </div>
+
+        <div class="nav">
+          <button data-prev type="button">Atrás</button>
+          <button class="pri" id="btnATranscripcion" type="button">Ya tengo la transcripción</button>
+        </div>
+        <button class="back" id="btnEsperarTrans" type="button" style="color:var(--acc);margin-top:10px">
+          Todavía no está lista — guardar y salir</button>
+      </div>`;
+
+    st.querySelector('#btnATranscripcion').addEventListener('click', async () => {
+      await marcarFinEntrevista();
+      pantallaTranscripcion();
+    });
+    st.querySelector('#btnEsperarTrans').addEventListener('click', async () => {
+      await marcarFinEntrevista();
+      toast('Guardada. La retomas desde el tablero cuando llegue la transcripción.');
+      loadTablero();
+    });
   }
 
   else {
@@ -1554,6 +1697,153 @@ function drawSig(){
   }));
   const n = S ? Object.values(S.sig).filter(Boolean).length : 0;
   const c = $('#sigCount'); c.textContent = n; c.className = 'cnt' + (n>=3?' c':(n>=1?' w':''));
+}
+
+
+/* ===================== la transcripción de la entrevista =====================
+   El reclutador entrevista sin escribir: mientras toma notas deja de escuchar, y lo que se
+   pierde es la repregunta que desarma a un impostor. La evidencia sale de la transcripción.
+   Google tarda unos minutos en generarla, así que este paso vive fuera de la llamada y la
+   sesión se puede cerrar y retomar sin perder nada. */
+
+function propuestaDe(i){
+  const t = S.tran;
+  if(!t || !Array.isArray(t.por_requisito)) return null;
+  return t.por_requisito.find(x => Number(x.indice) === i + 1)
+      || t.por_requisito[i] || null;
+}
+
+async function marcarFinEntrevista(){
+  if(!S.sid) return;
+  try{ await api(`/api/sessions/${S.sid}/entrevista-fin`, {method:'POST', body:{}}); }
+  catch(e){ console.warn('[fin-entrevista]', e.message); }
+  await flush();
+}
+
+function pantallaTranscripcion(err){
+  go('vTrans');
+  $('#transStage').innerHTML = `
+    <button class="back" data-salir type="button">← Guardar y salir</button>
+    <div class="setup" style="max-width:760px">
+      <h1>La transcripción de la entrevista</h1>
+      <p class="lede">De aquí sale la evidencia que va al acta: las citas de lo que dijo
+      ${esc(S.cand || 'el candidato')}, en sus palabras. Tú confirmas cada nivel después.</p>
+
+      <div class="fset">
+        <div class="fttl">Dónde encontrarla</div>
+        <p class="hint" style="margin-top:0">Google la deja en el Drive de la reunión, en la carpeta
+        <b>Meet Recordings</b>, unos minutos después de colgar. Si todavía no aparece, no pasa nada:
+        guarda y vuelve más tarde — esta verificación queda esperándote en el tablero.</p>
+      </div>
+
+      <div class="fset">
+        <div class="fttl">Pégala aquí</div>
+        <div class="drop" id="transDrop">
+          <div class="dropin">
+            <div class="dropic">↑</div>
+            <div class="droptx"><b id="transDropT">Arrastra el archivo o haz clic para elegirlo</b>
+              <span id="transDropS">Transcripción de Meet (.txt, .vtt), Word (.docx), PDF o texto plano</span></div>
+          </div>
+        </div>
+        <input type="file" id="transFile" accept=".txt,.vtt,.srt,.docx,.pdf,text/plain" style="display:none">
+        <div class="osep">O PEGA EL TEXTO</div>
+        <div class="f"><textarea id="transText" class="big" placeholder="Pega aquí la transcripción completa de la llamada."></textarea></div>
+        <div class="cnt"><span id="transCnt">0 caracteres</span></div>
+      </div>
+
+      ${err ? `<div class="aviso malo"><b>${esc(err.titulo)}</b>${esc(err.msg)}
+        ${err.raw ? `<details class="crudo"><summary>Ver lo que devolvió Claude</summary><pre>${esc(err.raw)}</pre></details>` : ''}</div>` : ''}
+
+      <button class="cta" id="btnAnalizarTrans" disabled>Sacar la evidencia</button>
+      <p class="hint">Se analiza contra los ${S.reqs.length} requisitos de esta vacante. Tarda entre 20 y 40 segundos.
+      <b>La transcripción no se guarda</b>: se leen las citas que sostienen cada requisito y el texto se descarta.</p>
+    </div>`;
+
+  const ta = $('#transText'), btn = $('#btnAnalizarTrans'), cnt = $('#transCnt');
+  const revisar = () => {
+    const n = ta.value.trim().length;
+    cnt.textContent = n.toLocaleString('es-CO') + ' caracteres';
+    btn.disabled = n < 400;
+  };
+  ta.addEventListener('input', revisar);
+  revisar();
+
+  $('#transStage').querySelector('[data-salir]').addEventListener('click', async () => {
+    await marcarFinEntrevista(); loadTablero();
+  });
+
+  const file = $('#transFile'), drop = $('#transDrop');
+  drop.addEventListener('click', () => file.click());
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault(); drop.classList.remove('over');
+    if(e.dataTransfer.files && e.dataTransfer.files[0]) leerArchivoTrans(e.dataTransfer.files[0]);
+  });
+  file.addEventListener('change', e => { if(e.target.files[0]) leerArchivoTrans(e.target.files[0]); });
+
+  btn.addEventListener('click', analizarTranscripcion);
+}
+
+async function leerArchivoTrans(f){
+  overlay(true, 'Leyendo el archivo…', f.name);
+  try{
+    const b64 = await new Promise((ok, no) => {
+      const r = new FileReader();
+      r.onload = () => ok(String(r.result).split(',')[1]);
+      r.onerror = () => no(new Error('no se pudo leer el archivo'));
+      r.readAsDataURL(f);
+    });
+    const out = await api('/api/extract-text', {method:'POST', body:{name:f.name, dataBase64:b64}});
+    $('#transText').value = out.text || '';
+    $('#transText').dispatchEvent(new Event('input'));
+    $('#transDropT').textContent = f.name;
+    $('#transDropS').textContent = (out.chars||0).toLocaleString('es-CO') + ' caracteres leídos';
+    $('#transDrop').classList.add('has');
+  }catch(e){
+    toast('No se pudo leer: ' + e.message);
+  }finally{ overlay(false); }
+}
+
+async function analizarTranscripcion(){
+  const texto = $('#transText').value.trim();
+  overlay(true, 'Leyendo la entrevista…', 'Claude está buscando la evidencia de cada requisito. Esto toma entre 20 y 40 segundos.');
+  try{
+    const out = await api(`/api/sessions/${S.sid}/transcript`, {method:'POST', body:{transcript: texto}});
+    aplicarTranscripcion(out.analisis);
+    toast('Evidencia lista — revisa y confirma cada nivel');
+  }catch(e){
+    pantallaTranscripcion({
+      titulo: (e.payload && e.payload.motivo) === 'truncado'
+        ? 'La transcripción es demasiado larga para una sola pasada.'
+        : 'No se pudo sacar la evidencia.',
+      msg: e.message,
+      raw: e.payload && e.payload.raw,
+    });
+  }finally{ overlay(false); }
+}
+
+// Lo que vuelve son PROPUESTAS. Se precargan para que el evaluador confirme o corrija —
+// nunca se dan por calificadas solas: el acta promete escalas ancladas, y quien responde
+// por ese número tiene que haberlo mirado.
+function aplicarTranscripcion(an){
+  S.tran = an || {};
+  S.modo = 'calificacion';
+  (S.tran.por_requisito || []).forEach((prop, k) => {
+    const i = Number(prop.indice) ? Number(prop.indice) - 1 : k;
+    const r = S.reqs[i];
+    if(!r) return;
+    if(prop.cubierto !== false && prop.nivel) r.lvl = Number(prop.nivel) || null;
+    if(prop.evidencia) r.ev = String(prop.evidencia);
+  });
+  const d = S.tran.declara || {};
+  S.dec = S.dec || {};
+  ['pretension','disponibilidad','motivacion','nogo'].forEach(k => {
+    if(!String(S.dec[k]||'').trim() && String(d[k]||'').trim()) S.dec[k] = d[k];
+  });
+  S.fase = 0; S.tFase = Date.now();
+  saveLocal(); touch();
+  go('vLive'); render();
 }
 
 /* ===================== acta ===================== */

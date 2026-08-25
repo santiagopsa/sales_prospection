@@ -10,7 +10,7 @@
 // No toca deals ni wishlist: sus tablas viven en el schema "verificacion".
 const express = require('express');
 const path = require('path');
-const { buildIntakePrompt, buildCvPrompt } = require('./prompts');
+const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt } = require('./prompts');
 const { LVLTXT, clean, esCierre, semaforo, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode } = require('./rules');
 const didit = require('./didit');
 const { T, initSchema } = require('./schema');
@@ -565,6 +565,98 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
   // citan lo que el candidato escribió — no las genéricas del cargo. El texto del CV no se
   // guarda: se extrae lo que la sesión necesita y se descarta el resto.
   // -------------------------------------------------------------------------
+
+  // -------------------------------------------------------------------------
+  // LA TRANSCRIPCIÓN DE LA ENTREVISTA
+  //
+  // El reclutador entrevista sin escribir: mientras toma notas deja de escuchar, y lo que
+  // se pierde es justo la repregunta que desarma a un impostor. La evidencia la saca la
+  // transcripción, después de colgar.
+  //
+  // Dos cosas que manda el mundo real: la transcripción de Google tarda unos minutos, así
+  // que la sesión tiene que poder cerrarse y retomarse; y el texto de la transcripción NO
+  // se guarda — es dato personal de una conversación entera, y lo único que el acta necesita
+  // son las citas de evidencia. Se analiza y se descarta.
+  //
+  // Lo que vuelve son PROPUESTAS. El nivel lo confirma una persona: el acta dice "escalas
+  // ancladas" y quien responde por ese número tiene que haberlo mirado.
+  // -------------------------------------------------------------------------
+  r.post('/api/sessions/:id/entrevista-fin', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (pool) {
+        const q = await pool.query(
+          `UPDATE ${T.sessions} SET status='esperando', entrevista_at=COALESCE(entrevista_at, NOW()),
+                                    updated_at=NOW()
+           WHERE id=$1 AND status <> 'issued' RETURNING id, status, entrevista_at`, [id]);
+        if (!q.rows.length) return res.status(404).json({ error: 'not found' });
+        return res.json({ ok: true, ...q.rows[0] });
+      }
+      const s = mem.sessions.find(x => x.id === id);
+      if (!s) return res.status(404).json({ error: 'not found' });
+      if (s.status !== 'issued') { s.status = 'esperando'; s.entrevista_at = s.entrevista_at || new Date().toISOString(); }
+      res.json({ ok: true, id, status: s.status, entrevista_at: s.entrevista_at });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  r.post('/api/sessions/:id/transcript', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { transcript } = req.body || {};
+      if (!transcript || transcript.trim().length < 400) {
+        return res.status(400).json({ error: 'La transcripción está vacía o es demasiado corta. Una entrevista de 25 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.' });
+      }
+
+      let cargo = '', candidato = '', modo = 'B', excluyentes = [];
+      if (pool) {
+        const q = await pool.query(`
+          SELECT s.candidate, s.mode, v.id AS vid, v.title
+          FROM ${T.sessions} s LEFT JOIN ${T.vacancies} v ON v.id = s.vacancy_id
+          WHERE s.id = $1`, [id]);
+        if (!q.rows.length) return res.status(404).json({ error: 'not found' });
+        cargo = q.rows[0].title || ''; candidato = q.rows[0].candidate || ''; modo = q.rows[0].mode || 'B';
+        if (q.rows[0].vid) {
+          const rq = await pool.query(
+            `SELECT id, text, criterio, detalles, senales FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`,
+            [q.rows[0].vid]);
+          excluyentes = rq.rows;
+        }
+      } else {
+        const s = mem.sessions.find(x => x.id === id);
+        if (!s) return res.status(404).json({ error: 'not found' });
+        const v = mem.vacancies.find(x => x.id === s.vacancy_id);
+        cargo = (v && v.title) || ''; candidato = s.candidate || ''; modo = s.mode || 'B';
+        excluyentes = mem.requirements.filter(q => q.vacancy_id === (v && v.id)).sort((a, b) => a.ord - b.ord);
+      }
+
+      const out = await pedirJson(
+        buildTranscriptPrompt(transcript, { requisitos: excluyentes, candidato, cargo, modo }),
+        { etiqueta: 'transcripcion', maxTokens: 10000 });
+      if (out.error) return res.status(502).json(out);
+
+      // Se guarda el análisis, nunca la transcripción.
+      const an = out.datos;
+      an._at = new Date().toISOString();
+      an._chars = transcript.trim().length;
+
+      if (pool) {
+        await pool.query(
+          `UPDATE ${T.sessions} SET transcript_analisis=$2::jsonb, transcript_at=NOW(),
+                                    status = CASE WHEN status='issued' THEN status ELSE 'draft' END,
+                                    updated_at=NOW() WHERE id=$1`,
+          [id, JSON.stringify(an)]);
+      } else {
+        const s = mem.sessions.find(x => x.id === id);
+        s.transcript_analisis = an; s.transcript_at = an._at;
+        if (s.status !== 'issued') s.status = 'draft';
+      }
+      res.json({ ok: true, analisis: an });
+    } catch (e) {
+      console.error('[verificacion/transcript]', e.message);
+      res.status(500).json({ error: 'No se pudo analizar la transcripción. El detalle quedó en el registro del servidor.', motivo: 'interno' });
+    }
+  });
+
   r.post('/api/sessions/:id/cv', async (req, res) => {
     try {
       if (!anthropic) return res.status(500).json({ error: 'ANTHROPIC_API_KEY no configurada' });
@@ -1087,7 +1179,8 @@ ${!code ? `
         const q = await pool.query(`
           SELECT s.id, s.report_code, s.candidate, s.evaluator, s.mode, s.kind, s.status, s.semaforo,
                  s.didit_status, s.face_verdict, s.face_score, s.id_note,
-                 s.started_at, s.issued_at, v.title AS vacancy_title, c.name AS company_name
+                 s.started_at, s.issued_at, s.transcript_at, s.entrevista_at,
+                 v.title AS vacancy_title, c.name AS company_name
           FROM ${T.sessions} s
           LEFT JOIN ${T.vacancies} v ON v.id=s.vacancy_id
           LEFT JOIN ${T.companies} c ON c.id=v.company_id

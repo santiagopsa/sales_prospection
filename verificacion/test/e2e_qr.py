@@ -6,6 +6,9 @@ independiente. Después se comprueba que la dirección que salió del QR del act
 responde "auténtico" — porque un código que lleva a una página muerta es peor que no ponerlo.
 """
 from playwright.sync_api import sync_playwright
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import flujo
 import sys, time, subprocess, os, random, urllib.request, json, base64, re
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -85,16 +88,7 @@ def preparar(pg, kind):
 
 def calificar(pg):
     pg.click("[data-next]"); pg.wait_for_timeout(300)
-    pg.click('[data-lv="5"]'); pg.fill("[data-notes]", "Rollout en Alpina 2023, nueve meses, lideró listas de materiales.")
-    pg.wait_for_timeout(150); pg.click("[data-next]"); pg.wait_for_timeout(300)
-    pg.click('[data-lv="4"]'); pg.fill("[data-notes]", "Explicó la integración con un caso propio y precisó los quiebres.")
-    pg.wait_for_timeout(200); pg.click("[data-next]"); pg.wait_for_timeout(400)
-    pg.fill('[data-d="pretension"]', "3.500.000 COP / mes")
-    pg.fill('[data-d="disponibilidad"]', "2 semanas")
-    pg.click('[data-rec="reserva"]'); pg.wait_for_timeout(150)
-    pg.fill('[data-r="texto"]', "El nucleo del cargo esta medido y sostenido con evidencia.")
-    pg.wait_for_timeout(200)
-    pg.click("[data-next]"); pg.wait_for_timeout(600)
+    flujo.entrevistar_y_calificar(pg, (5, 4))
 
 
 print("QR de punta a punta\n")

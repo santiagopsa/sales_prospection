@@ -1,5 +1,8 @@
 """Abrir una verificación anterior desde el tablero: emitida y a medias."""
 from playwright.sync_api import sync_playwright
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import flujo
 import sys, time, subprocess, os, random, urllib.request, json
 
 PORT = random.randint(3200, 3900)
@@ -33,10 +36,15 @@ with sync_playwright() as pw:
     pg.click("#btnIniciar"); pg.wait_for_selector("#vLive.on", timeout=9000); pg.wait_for_timeout(250)
     for k in ["grab","cam"]: pg.click(f'[data-idc="{k}"]'); pg.wait_for_timeout(90)
     pg.click("[data-next]"); pg.wait_for_timeout(300)
-    pg.click('[data-lv="5"]'); pg.fill("[data-notes]", "Rollout en Alpina 2023, nueve meses, lideró listas de materiales.")
-    pg.wait_for_timeout(150); pg.click("[data-next]"); pg.wait_for_timeout(300)
-    pg.click('[data-lv="3"]'); pg.fill("[data-notes]", "Escena genérica; no precisó los quiebres con QM.")
-    pg.wait_for_timeout(150); pg.click("[data-next]"); pg.wait_for_timeout(400)
+    flujo.recorrer_guia(pg)
+    flujo.pegar_transcripcion(pg)
+    flujo.confirmar_niveles(pg, (5, 3), [
+        "Rollout en Alpina 2023, nueve meses, lideró listas de materiales.",
+        "Escena genérica; no precisó los quiebres con QM.",
+    ])
+    for _ in range(4):
+        if pg.query_selector('[data-d="pretension"]'): break
+        pg.click("[data-next]"); pg.wait_for_timeout(350)
     pg.fill('[data-d="pretension"]', "3.500.000 COP / mes")
     pg.fill('[data-d="motivacion"]', "Busca autonomía en la decisión técnica.")
     pg.click('[data-rec="reserva"]'); pg.wait_for_timeout(120)
@@ -53,7 +61,7 @@ with sync_playwright() as pw:
     pg.click("#btnIniciar"); pg.wait_for_selector("#vLive.on", timeout=9000); pg.wait_for_timeout(250)
     pg.click('[data-idc="grab"]'); pg.wait_for_timeout(200)
     pg.click("[data-next]"); pg.wait_for_timeout(300)
-    pg.click('[data-lv="4"]'); pg.fill("[data-notes]", "Narró un rollout con fechas y alcance concreto.")
+    # Esta se deja a medias DENTRO de la entrevista, antes de la transcripción.
     pg.wait_for_timeout(1300)   # el autoguardado tiene 900 ms de retardo
 
     # --- volver al tablero y abrir las dos ---
@@ -77,7 +85,9 @@ with sync_playwright() as pw:
     bor = pg.inner_text("#actaStage")
     for must in ["Ana Betancur", "SIN EMITIR", "Requisitos calificados", "Retomar la sesión"]:
         if must.lower() not in bor.lower(): errs.append(f"el borrador no muestra: {must}")
-    if "1 de 2" not in bor: errs.append("no dice cuántos requisitos quedaron calificados")
+    # Quedó a medias DENTRO de la entrevista: todavía no hay nada calificado, porque los
+    # niveles salen de la transcripción y esa entrevista ni siquiera terminó.
+    if "0 de 2" not in bor: errs.append(f"no dice cuántos requisitos quedaron calificados: {bor[:150]!r}")
     pg.screenshot(path="/tmp/pk/hist_borrador.png", full_page=True)
 
     # retomar debe llevar a la sesión con lo ya registrado
@@ -85,12 +95,15 @@ with sync_playwright() as pw:
     if not pg.is_visible("#vLive"): errs.append("retomar no abrió la sesión")
     nav = pg.inner_text("#phaseNav")
     if "Apertura" not in nav: errs.append("la sesión retomada no tiene sus fases")
+    # Lo que sí tiene que sobrevivir a media entrevista: los puntos de integridad marcados.
+    pg.click('.ph:has-text("Apertura")'); pg.wait_for_timeout(500)
+    if len(pg.query_selector_all(".chk.on")) != 1:
+        errs.append("la sesión retomada perdió el punto de integridad que ya estaba marcado")
     pg.click('.ph:has-text("Implementación")'); pg.wait_for_timeout(500)
-    # el valor de un textarea vive en .value, no en el texto del nodo
-    if "Narró un rollout" not in (pg.input_value("[data-notes]") or ""):
-        errs.append("la sesión retomada perdió la evidencia que ya estaba escrita")
-    if not pg.query_selector('.lv[data-v="4"].sel'):
-        errs.append("la sesión retomada perdió la calificación")
+    if pg.query_selector("[data-notes]"):
+        errs.append("al retomar una entrevista sin terminar aparecen campos de calificar")
+    if "no tomes notas" not in pg.inner_text("#stage").lower():
+        errs.append("al retomar la entrevista no vuelve a la guía")
 
     br.close()
 

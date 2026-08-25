@@ -1,5 +1,8 @@
 """Prueba end-to-end del flujo completo contra el stub."""
 from playwright.sync_api import sync_playwright
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import flujo
 import sys, time, subprocess, os, random, urllib.request
 
 PORT = random.randint(3200, 3900)
@@ -95,21 +98,28 @@ with sync_playwright() as pw:
                  "Detalles verificables","CS01","Señales de impostor"]:
         if must.lower() not in r1: errs.append(f"falta en requisito 1: {must}")
     shot(pg, "app_07_requisito")
-    pg.click('[data-lv="5"]'); pg.wait_for_timeout(150)
-    pg.fill("[data-notes]", "Rollout en Alpina 2023, 9 meses, lideró la configuración de listas de materiales. Narró el problema de MRP en go-live. 3/3 detalles correctos.")
-    pg.wait_for_timeout(200)
-    pg.click("[data-next]"); pg.wait_for_timeout(400)
 
-    # --- requisito 2 ---
-    pg.click('[data-lv="3"]'); pg.wait_for_timeout(150)
-    pg.fill("[data-notes]", "Conoce la integración pero la escena fue genérica; no precisó los puntos de quiebre con QM.")
-    pg.wait_for_timeout(200)
+    # Durante la llamada la pantalla es guía: no hay nada que calificar todavía.
+    if pg.query_selector('[data-lv="5"]'):
+        errs.append("durante la entrevista aparecen los botones de calificar")
 
-    # --- una señal ---
+    # --- una señal, que sí se marca en el momento: no queda en la transcripción ---
     pg.click('[data-sg="lat"]'); pg.wait_for_timeout(200)
     if pg.inner_text("#sigCount") != "1": errs.append("el contador de señales no marcó 1")
 
-    pg.click("[data-next]"); pg.wait_for_timeout(500)
+    # --- fin de la entrevista, transcripción y confirmación de niveles ---
+    flujo.recorrer_guia(pg)
+    flujo.pegar_transcripcion(pg)
+    if not pg.query_selector('[data-lv="5"]'):
+        errs.append("después de la transcripción no aparecen los niveles")
+    flujo.confirmar_niveles(pg, (5, 3), [
+        "Rollout en Alpina 2023, 9 meses, lideró la configuración de listas de materiales. Narró el problema de MRP en go-live.",
+        "Conoce la integración pero la escena fue genérica; no precisó los puntos de quiebre con QM.",
+    ])
+    for _ in range(4):
+        if pg.query_selector('[data-d="pretension"]'):
+            break
+        pg.click("[data-next]"); pg.wait_for_timeout(350)
 
     # --- contexto ---
     pg.fill('[data-d="pretension"]', "3.500.000 COP / mes")

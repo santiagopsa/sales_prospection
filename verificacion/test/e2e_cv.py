@@ -1,5 +1,8 @@
 """Con CV cargado: preguntas del candidato, fase de trayectoria y bloque en el acta."""
 from playwright.sync_api import sync_playwright
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import flujo
 import sys, time, subprocess, os, random, urllib.request
 
 PORT = random.randint(3200, 3900)
@@ -53,16 +56,28 @@ with sync_playwright() as pw:
     for must in ["Del CV de Jorge", "Alpina", "llévame a ese proyecto"]:
         if must.lower() not in r1.lower(): errs.append(f"el requisito 1 no trae del CV: {must}")
     pg.screenshot(path="/tmp/pk/cv_02_requisito.png", full_page=True)
-    pg.click('[data-lv="5"]'); pg.fill("[data-notes]", "Narró el rollout de Alpina con fechas, alcance y el problema de MRP.")
-    pg.wait_for_timeout(150); pg.click("[data-next]"); pg.wait_for_timeout(400)
+    pg.click("[data-next]"); pg.wait_for_timeout(400)
 
-    # requisito 2: el CV no lo cubre y debe avisarlo
+    # requisito 2: el CV no lo cubre y debe avisarlo — durante la entrevista, en la guía
     r2 = pg.inner_text("#stage")
     if "no menciona" not in r2.lower(): errs.append("no avisa que el CV no cubre el segundo requisito")
-    pg.click('[data-lv="3"]'); pg.fill("[data-notes]", "Sondeado desde cero; la escena quedó genérica.")
-    pg.wait_for_timeout(150); pg.click("[data-next]"); pg.wait_for_timeout(500)
 
-    # trayectoria
+    # la trayectoria durante la entrevista es guía: se pregunta, no se marca
+    pg.click("[data-next]"); pg.wait_for_timeout(400)
+    tg = pg.inner_text("#stage")
+    if "Trayectoria" not in tg: errs.append("la trayectoria no aparece durante la entrevista")
+    if pg.query_selector('[data-tray="0"][data-est="confirmado"]'):
+        errs.append("durante la entrevista deja marcar la trayectoria — eso viene con la transcripción")
+
+    # entrevista → transcripción → niveles confirmados
+    flujo.recorrer_guia(pg)
+    flujo.pegar_transcripcion(pg)
+    flujo.confirmar_niveles(pg, (5, 3), [
+        "Narró el rollout de Alpina con fechas, alcance y el problema de MRP.",
+        "Sondeado desde cero; la escena quedó genérica.",
+    ])
+
+    # trayectoria: ahora sí se marca
     tr = pg.inner_text("#stage")
     for must in ["Trayectoria", "Alpina", "Quala", "Hueco de casi un año"]:
         if must.lower() not in tr.lower(): errs.append(f"la fase de trayectoria no muestra: {must}")

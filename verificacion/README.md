@@ -118,6 +118,7 @@ python3 verificacion/test/e2e_qr_pixeles.py # el QR rasterizado, a 100%, 125%, 1
 python3 verificacion/test/e2e_viejas.py    # que un informe ya emitido no cambie de contenido
 python3 verificacion/test/e2e_editar.py    # editar una vacante sin tocar las actas ya emitidas
 python3 verificacion/test/e2e_intake_error.py # que un análisis fallido diga qué pasó y qué hacer
+python3 verificacion/test/e2e_transcripcion.py # entrevistar sin escribir, calificar con la transcripción
 ```
 
 `test/stub.js` replica la API con `http` nativo y devuelve un levantamiento fijo en vez de llamar a Claude: prueba la interfaz sin API key, sin Postgres y sin `npm install`. Importa las reglas reales de `rules.js` y se monta en `/verificacion`, igual que en producción — así que lo que se prueba del semáforo, del acta y del punto de montaje es el código de verdad.
@@ -357,6 +358,23 @@ Existe porque **recrear la vacante no era alternativa**:
 **Editar los requisitos no altera las actas ya emitidas.** Cada acta se congeló en su `snapshot` con el texto de sus propios requisitos, así que lo que se cambie aquí rige de aquí en adelante. Si la vacante ya tiene informes emitidos, la pantalla lo dice antes de dejar tocar nada. Al borrar un requisito, las calificaciones viejas conservan su `req_text` — solo se pone en NULL la referencia.
 
 Sobre la empresa: si se cambia el nombre no se renombra la empresa existente, porque arrastraría a las otras vacantes del mismo cliente. Se busca una que se llame así y, si no hay, se crea, y se reengancha la vacante.
+
+## La entrevista y la calificación son dos momentos
+
+Antes eran uno solo: el reclutador entrevistaba y calificaba en la misma pantalla. Eso obliga a escribir mientras el candidato habla — y mientras uno escribe, deja de escuchar. Lo que se pierde es justo la repregunta que desarma a un impostor, que es todo el producto.
+
+Ahora:
+
+**Durante la llamada** la pantalla es **guía y nada más**: qué buscas oír, la pregunta de escena, la de fricción, la de cruce, los detalles verificables con su respuesta esperada, las señales a vigilar y —si hay CV— las preguntas que citan lo que el candidato escribió. No hay campos de calificar ni de evidencia. Lo único que sí se marca en el momento son las **señales**, porque son cosas que no quedan en el texto: latencia de soplo, mirada de lectura, audio delator.
+
+**Después** se pega la transcripción y de ahí sale la evidencia: para cada requisito, una **cita textual de lo que dijo el candidato** y un nivel propuesto contra la misma rúbrica anclada que va impresa en el acta. El reclutador confirma o corrige. Lo que vuelve son propuestas, no calificaciones: el acta promete escalas ancladas, y quien responde por ese número tiene que haberlo mirado.
+
+Dos cosas que manda el mundo real y que el diseño respeta:
+
+- **La transcripción de Google tarda unos minutos.** La sesión no puede quedarse esperando en pantalla: al colgar pasa a `status='esperando'`, aparece en el tablero marcada **ESPERA TRANSCRIPCIÓN**, y se retoma cuando esté lista — hoy, mañana, desde otro computador. Reabrirla lleva directo al paso de pegarla.
+- **La transcripción no se guarda.** Es la conversación entera de una persona; lo único que el acta necesita son las citas que sostienen cada requisito. Se analiza, se guardan las citas, y el texto se descarta. Mismo criterio que con el CV.
+
+Un requisito que **no se tocó** en la conversación queda sin nivel y la pantalla lo dice de frente. No se rellena con lo que diga el CV ni con lo que parezca razonable: un requisito sin conversación es un requisito sin medir, y eso es un dato.
 
 ## Historial
 

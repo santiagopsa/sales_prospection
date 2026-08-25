@@ -243,6 +243,49 @@ const server = http.createServer(async (req, res) => {
       id:s.id, report_code:s.report_code, issued_at:s.issued_at, integrity_hash:hash});
   }
 
+  mm = p.match(/^\/api\/sessions\/(\d+)\/entrevista-fin$/);
+  if(mm && m==='POST'){
+    const s = db.sessions.find(x=>x.id===+mm[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    if(s.status !== 'issued'){ s.status='esperando'; s.entrevista_at = s.entrevista_at || new Date().toISOString(); }
+    return json(res,200,{ok:true, id:s.id, status:s.status, entrevista_at:s.entrevista_at});
+  }
+
+  // Análisis de la transcripción simulado: mismas reglas y misma forma que el servidor real.
+  mm = p.match(/^\/api\/sessions\/(\d+)\/transcript$/);
+  if(mm && m==='POST'){
+    const b = await body(req);
+    const s = db.sessions.find(x=>x.id===+mm[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    const t = clean(b.transcript);
+    if(t.length < 400) return json(res,400,{error:'La transcripción está vacía o es demasiado corta. Una entrevista de 25 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.'});
+    if(t.includes('__ILEGIBLE__')) return json(res,502,{
+      error:'Claude no devolvió un JSON que se pueda leer. Vuelve a intentarlo; si se repite, revisa que el texto sea el levantamiento o el job description y no otra cosa.',
+      motivo:'ilegible', raw:'No encuentro una entrevista en este texto.'});
+    const reqs = db.requirements.filter(q=>q.vacancy_id===s.vacancy_id).sort((a,b2)=>a.ord-b2.ord);
+    // El segundo requisito queda sin cubrir a propósito: es el caso que más importa probar.
+    const an = {
+      por_requisito: reqs.map((r,i)=>({
+        indice:i+1, requisito:r.text,
+        cubierto: i !== 1,
+        nivel: i === 1 ? null : (i === 0 ? 5 : 4),
+        evidencia: i === 1 ? '' : 'En Alpina, entre marzo y noviembre de 2023, yo llevé el rollout de PP… lo que se nos cayó fue el maestro de materiales la primera semana.',
+        por_que_ese_nivel: i === 1 ? '' : 'Escena con empresa y fechas, rol individual claro y fricción narrada.',
+        detalles: i === 1 ? [] : [{detalle:'¿Qué transacción usa para listas de materiales?', respondio:'CS01, y CS02 para modificar', correcto:true}],
+        senales: [],
+        nota: ''
+      })),
+      declara:{pretension:'Habló de 12 millones', disponibilidad:'Dos semanas', motivacion:'Busca autonomía en la decisión técnica', nogo:'Baja autonomía'},
+      senales_generales:[],
+      advertencias: t.includes('__CORTADA__') ? ['La transcripción parece cortada: termina a mitad de una frase.'] : [],
+      resumen:'Sostuvo el núcleo del cargo con un caso propio. Quedó sin medir la integración.',
+      _at:new Date().toISOString(), _chars:t.length
+    };
+    s.transcript_analisis = an; s.transcript_at = an._at;
+    if(s.status !== 'issued') s.status = 'draft';
+    return json(res,200,{ok:true, analisis:an});
+  }
+
   // --- identidad simulada (no llama a Didit de verdad) ---
   mm = p.match(/^\/api\/sessions\/(\d+)\/cv$/);
   if(mm && m==='POST'){

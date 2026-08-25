@@ -1,6 +1,8 @@
 """Flujo de un cierre verificado: captura del rostro → link de identidad → cotejo → acta."""
 from playwright.sync_api import sync_playwright
 import sys, time, subprocess, os, random, urllib.request, json, base64
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import flujo
 
 PORT = random.randint(3200, 3900)
 B = f"http://127.0.0.1:{PORT}/verificacion/"
@@ -40,12 +42,15 @@ def preparar(pg, kind):
     pg.click("#btnIniciar"); pg.wait_for_selector("#vLive.on", timeout=9000); pg.wait_for_timeout(300)
 
 def calificar(pg):
-    pg.click("[data-next]"); pg.wait_for_timeout(300)
-    pg.click('[data-lv="5"]'); pg.fill("[data-notes]", "Rollout en Alpina 2023, nueve meses, lideró listas de materiales.")
-    pg.wait_for_timeout(150); pg.click("[data-next]"); pg.wait_for_timeout(300)
-    pg.click('[data-lv="4"]'); pg.fill("[data-notes]", "Explicó la integración con un caso propio y precisó los quiebres.")
-    pg.wait_for_timeout(200); pg.click("[data-next]"); pg.wait_for_timeout(400)
-    # fase de contexto
+    # La entrevista ya no se califica mientras ocurre: se recorre la guía, se pega la
+    # transcripción, y de ahí salen los niveles propuestos que el evaluador confirma.
+    flujo.recorrer_guia(pg)
+    flujo.pegar_transcripcion(pg)
+    flujo.confirmar_niveles(pg, (5, 4))
+    for _ in range(4):
+        if pg.query_selector('[data-d="pretension"]'):
+            break
+        pg.click("[data-next]"); pg.wait_for_timeout(350)
     pg.fill('[data-d="pretension"]', "3.500.000 COP / mes")
     pg.fill('[data-d="disponibilidad"]', "2 semanas")
     pg.fill('[data-d="motivacion"]', "Busca autonomia en la decision tecnica; su salida responde a un techo.")
