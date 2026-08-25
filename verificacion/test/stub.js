@@ -64,7 +64,7 @@ const server = http.createServer(async (req, res) => {
   if(!p.startsWith(MOUNT + '/')) { res.writeHead(404); return res.end('fuera del mount point'); }
   p = p.slice(MOUNT.length) || '/';
 
-  if(p === '/api/health') return json(res,200,{ok:true, db:true, dbReady:true, llm:true, model:'stub'});
+  if(p === '/api/health') return json(res,200,{ok:true, db:true, dbReady:true, llm:true, model:'stub', build:'stub', prefill:false});
 
   if(p === '/api/extract-text' && m==='POST'){
     const b = await body(req);

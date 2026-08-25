@@ -14,7 +14,7 @@ const { buildIntakePrompt, buildCvPrompt } = require('./prompts');
 const { LVLTXT, clean, esCierre, semaforo, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode } = require('./rules');
 const didit = require('./didit');
 const { T, initSchema } = require('./schema');
-const { textoDe, leerJson, pareceTruncado } = require('./json_llm');
+const { crearPedirJson } = require('./llm');
 
 // Versión del formato del acta. Queda grabada en cada documento emitido: si mañana el acta
 // cambia, el informe viejo sigue diciendo con qué formato se dibujó.
@@ -166,6 +166,20 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
     } catch (e) { return String(Date.now()); }
   })();
 
+  // Huella del módulo COMPLETO, servidor incluido. VER solo cubre los estáticos, así que un
+  // cambio en el servidor no lo movía y desde fuera era imposible saber qué código estaba
+  // vivo. Eso costó tres rondas de "¿ya desplegaste?": ahora /api/health lo dice.
+  const BUILD = (() => {
+    try {
+      const h = require('crypto').createHash('sha1');
+      for (const f of ['app.js', 'llm.js', 'json_llm.js', 'rules.js', 'prompts.js', 'schema.js', 'didit.js']) {
+        try { h.update(require('fs').readFileSync(path.join(__dirname, f))); } catch (e) {}
+      }
+      h.update(VER);
+      return h.digest('hex').slice(0, 8);
+    } catch (e) { return 'desconocido'; }
+  })();
+
   // El index se sirve siempre fresco y con las URLs de los assets versionadas.
   const INDEX = (() => {
     try {
@@ -238,47 +252,11 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
     }
   });
 
-  // -------------------------------------------------------------------------
-  // PEDIRLE JSON A CLAUDE SIN QUE SE ROMPA
-  //
-  // "Claude devolvió JSON inválido" tapaba tres fallas distintas que se arreglan distinto:
-  // la respuesta se cortó por límite de tokens, el modelo escribió una frase antes del JSON,
-  // o el texto vino en un bloque de contenido que no era el primero. Aquí se separan, y el
-  // error que sube dice cuál fue.
-  //
-  // Tres defensas, de la más barata a la más cara:
-  //   1. Se le pone el "{" en la boca al modelo (prefill). Con la respuesta ya empezada, no
-  //      hay lugar para un "Claro, aquí tienes:" adelante.
-  //   2. Si igual llega envuelto, se rescata el objeto balanceando llaves fuera de comillas.
-  //   3. Si se cortó por longitud, se reintenta una vez con más espacio — y si vuelve a
-  //      cortarse se dice eso, que es accionable, en vez de "JSON inválido", que no lo es.
-  // -------------------------------------------------------------------------
-  async function pedirJson(prompt, { etiqueta = 'llm', maxTokens = 8000 } = {}) {
-    let ultimoBruto = '', cortado = false;
-    for (const tope of [maxTokens, maxTokens * 2]) {
-      const msg = await anthropic.messages.create({
-        model, max_tokens: tope,
-        messages: [
-          { role: 'user', content: prompt },
-          { role: 'assistant', content: '{' },     // prefill: la respuesta ya arranca en JSON
-        ],
-      });
-      ultimoBruto = '{' + textoDe(msg);
-      cortado = msg.stop_reason === 'max_tokens' || pareceTruncado(ultimoBruto);
-      const datos = leerJson(ultimoBruto);
-      if (datos) return { datos, usage: msg.usage };
-      console.error(`[verificacion/${etiqueta}] no se pudo leer el JSON`,
-        `· stop_reason=${msg.stop_reason} · tope=${tope}\n`, ultimoBruto.slice(0, 600));
-      if (!cortado) break;                          // no fue longitud: reintentar no ayuda
-    }
-    return {
-      error: cortado
-        ? 'La respuesta de Claude se cortó por longitud. Prueba con un texto más corto, o quitando las partes que no describen el cargo.'
-        : 'Claude no devolvió un JSON que se pueda leer. Vuelve a intentarlo; si se repite, revisa que el texto sea el levantamiento o el job description y no otra cosa.',
-      motivo: cortado ? 'truncado' : 'ilegible',
-      raw: ultimoBruto.slice(0, 2000),
-    };
-  }
+  // Pedirle JSON a Claude sin que se rompa. La implementación vive en llm.js, con sus
+  // pruebas: maneja el prefill (y los modelos que no lo aceptan), rescata el objeto si
+  // llega envuelto en texto, reintenta con más espacio si se cortó, y traduce los errores
+  // de la API a algo que el usuario pueda accionar.
+  const pedirJson = crearPedirJson({ anthropic, model });
 
   // -------------------------------------------------------------------------
   // LEVANTAMIENTO: Claude lee la transcripción o el JD y arma la ficha
@@ -298,8 +276,10 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       parsed._model = model;
       res.json(parsed);
     } catch (e) {
-      console.error('[verificacion/llm]', e.message);
-      res.status(500).json({ error: e.message });
+      // e.message puede ser el cuerpo crudo de un error de la API. Al registro sí, a la
+      // pantalla del reclutador no: no le dice qué hacer y arrastra detalles de la petición.
+      console.error('[verificacion/llm]', e && e.message);
+      res.status(500).json({ error: 'No se pudo completar el análisis. El detalle quedó en el registro del servidor.', motivo: 'interno' });
     }
   });
 
@@ -1162,7 +1142,10 @@ ${!code ? `
 
   // Salud propia — no interfiere con /api/health del Sandler.
   r.get('/api/health', async (_req, res) => {
-    const out = { ok: true, app: 'verificacion', poolShared: !!pool, llm: !!anthropic, model, identidad: didit.estado() };
+    const out = { ok: true, app: 'verificacion', build: BUILD, assets: VER,
+                  poolShared: !!pool, llm: !!anthropic, model,
+                  prefill: process.env.VERIF_PREFILL === '1',
+                  identidad: didit.estado() };
     if (!pool) return res.json({ ...out, db: false, mode: 'memoria' });
     try {
       const q = pool.query(`SELECT 1 AS ping FROM ${T.companies} LIMIT 1`);

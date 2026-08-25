@@ -106,6 +106,7 @@ Aparte a propósito: son la parte que no puede fallar y la única con pruebas pr
 node verificacion/test/rules.test.js       # 38 pruebas de las reglas, sin dependencias
 node verificacion/test/assets.test.js      # que el versionado de estáticos siga enganchado
 node verificacion/test/json_llm.test.js    # leer el JSON del modelo venga como venga
+node verificacion/test/llm.test.js         # pedirJson contra un cliente falso, sin gastar tokens
 python3 verificacion/test/e2e.py           # flujo completo en navegador, contra test/stub.js
 python3 verificacion/test/e2e_identidad.py # sondeo, cierre verificado, negativa y rostro que no corresponde
 python3 verificacion/test/e2e_historial.py # abrir una verificación anterior y retomar una a medias
@@ -125,7 +126,7 @@ Lo que esas pruebas **no** cubren es la capa de Express real (el Router montado,
 ```bash
 node server.js
 curl -s localhost:3000/api/health               # el Sandler sigue vivo
-curl -s localhost:3000/verificacion/api/health  # {"ok":true,"app":"verificacion","db":true,...}
+curl -s localhost:3000/verificacion/api/health  # {"ok":true,"app":"verificacion","build":"…","db":true,...}
 curl -sI localhost:3000/verificacion | head -1  # 301 hacia /verificacion/
 ```
 
@@ -299,17 +300,34 @@ Costo: entre 0,05 y 0,20 USD por levantamiento según el largo. Las sesiones no 
 
 ---
 
+## Saber qué versión está desplegada
+
+`/verificacion/api/health` devuelve **`build`** —huella de los archivos del servidor más la de los estáticos— y **`assets`**, la de `public/` sola. Antes solo existía la de los estáticos, así que un cambio en el servidor no movía nada visible desde fuera y era imposible saber qué código estaba vivo. Eso costó tres rondas de "¿ya desplegaste?" mirando síntomas en vez de datos.
+
+Después de cada `git push`, comparar el `build` que reporta el servidor con el que sale de:
+
+```bash
+node -e "const fs=require('fs'),cr=require('crypto'),path=require('path');const h=cr.createHash('sha1');
+for(const f of ['app.js','llm.js','json_llm.js','rules.js','prompts.js','schema.js','didit.js'])h.update(fs.readFileSync('verificacion/'+f));
+const hp=cr.createHash('sha1');for(const f of ['app.js','style.css','index.html','qr.js'])hp.update(fs.readFileSync('verificacion/public/'+f));
+h.update(hp.digest('hex').slice(0,8));console.log(h.digest('hex').slice(0,8))"
+```
+
+Si coinciden, lo desplegado es lo que tienes en el repo. Si no, el deploy no ha terminado — y no tiene sentido diagnosticar nada más hasta que coincidan.
+
 ## Leer el JSON que devuelve Claude
 
 `json_llm.js`, con sus pruebas. Existe porque *"Claude devolvió JSON inválido"* tapaba tres fallas distintas que se arreglan distinto: la respuesta **se cortó** por el límite de tokens, el modelo **escribió una frase antes** del JSON, o el texto vino en un **bloque de contenido que no era el primero** (y el código leía solo `content[0]`).
 
 Las defensas, de la más barata a la más cara:
 
-1. **Prefill.** Se le pone el `{` en la boca al modelo mandando un turno de asistente que ya empieza el objeto. Con la respuesta arrancada, no queda lugar para un "Claro, aquí tienes:".
+1. **Prefill — apagado por defecto.** Ponerle el `{` en la boca al modelo evita el "Claro, aquí tienes:", pero **no todos los modelos lo aceptan**: `claude-opus-4-8` responde `400 … does not support assistant message prefill`. El rechazo se reconoce y se reintenta sin él, pero apoyar el camino normal en reconocer el texto de un error ajeno es frágil —basta que cambien la redacción—, así que el prefill queda como optimización opcional: `VERIF_PREFILL=1`. El rescate por balanceo de llaves ya resuelve el preámbulo sin necesidad de él.
 2. **Rescate.** Si igual llega envuelto, se extrae el objeto balanceando llaves e ignorando las que van dentro de una cadena. Se prueba desde cada `{` de apertura, no solo el primero: con prefill el modelo a veces repite el `{` del ejemplo, y `{{"a":1}}` está balanceado pero no es JSON. Segunda pasada para comas colgando.
 3. **Reintento.** Si `stop_reason` fue `max_tokens` —o el objeto abre y nunca cierra— se repite una vez con el doble de espacio. Si vuelve a cortarse, el error dice **eso**, que es accionable, en vez de "JSON inválido", que no lo es.
 
-El error llega a la pantalla con su `motivo` (`truncado` o `ilegible`) y se muestra **en el formulario, no en un toast**: el mensaje dice qué hacer y un toast se va solo. Y no le habla al usuario de JSON, que no le sirve de nada.
+Y un cuarto punto que no es de parseo: **los errores de la API no llegan crudos a la pantalla.** Un `400 {"type":"error",...,"request_id":"req_011…"}` no le dice nada al reclutador y arrastra detalles de la petición; se registra completo en el servidor y al usuario le llega la traducción (clave inválida, modelo inexistente, saturación, indisponibilidad).
+
+El error llega a la pantalla con su `motivo` (`truncado`, `ilegible`, `api` o `interno`) y se muestra **en el formulario, no en un toast**: el mensaje dice qué hacer y un toast se va solo. Y no le habla al usuario de JSON, que no le sirve de nada.
 
 ## Editar una vacante
 
