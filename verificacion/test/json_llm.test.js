@@ -1,7 +1,7 @@
 // Leer el JSON del modelo: cada caso de aquí es una forma en que llegó roto de verdad,
 // o una que llegaría si se le quita alguna de las defensas.
 const assert = require('assert');
-const { textoDe, leerJson, pareceTruncado } = require('../json_llm');
+const { textoDe, leerJson, pareceTruncado, escaparControles } = require('../json_llm');
 
 let n = 0;
 const t = (nombre, fn) => { fn(); n++; console.log('  ✓', nombre); };
@@ -46,6 +46,41 @@ t('no se confunde con llaves dentro de una cadena', () => {
 t('no se confunde con una llave escapada al final de una cadena', () => {
   const r = leerJson('{"a":"termina en barra \\\\","b":1}');
   assert.strictEqual(r.b, 1);
+});
+
+t('lee un JSON con saltos de línea crudos dentro de una cadena', () => {
+  // Lo que pasa con un job description lleno de viñetas: el modelo copia la lista dentro
+  // de un valor con saltos de línea de verdad. Se ve impecable y es JSON inválido.
+  const bruto = '{"contexto":"El cargo exige:\n- Rollout de PP\n- Integración con MM\n","n":2}';
+  const r = leerJson(bruto);
+  assert.ok(r, 'debería recuperarse de los saltos crudos');
+  assert.strictEqual(r.n, 2);
+  assert.ok(r.contexto.includes('Rollout de PP'));
+  assert.ok(r.contexto.includes('\n'), 'el salto se conserva como salto, no se pierde');
+});
+
+t('lee un JSON con tabulaciones crudas dentro de una cadena', () => {
+  const r = leerJson('{"a":"uno\tdos","b":1}');
+  assert.strictEqual(r.a, 'uno\tdos');
+  assert.strictEqual(r.b, 1);
+});
+
+t('la reparación no toca los saltos que están FUERA de las cadenas', () => {
+  const r = leerJson('{\n  "a": 1,\n  "b": 2\n}');
+  assert.deepStrictEqual(r, { a: 1, b: 2 });
+});
+
+t('no daña un texto que ya venía bien escapado', () => {
+  const original = '{"a":"linea1\\nlinea2","b":"comilla \\" adentro"}';
+  const r = leerJson(original);
+  assert.strictEqual(r.a, 'linea1\nlinea2');
+  assert.strictEqual(r.b, 'comilla " adentro');
+  assert.strictEqual(escaparControles(original), original, 'no debe reescribir lo que ya estaba bien');
+});
+
+t('combina reparaciones: saltos crudos y coma colgando a la vez', () => {
+  const r = leerJson('{"a":"uno\ndos","b":2,}');
+  assert.deepStrictEqual(r, { a: 'uno\ndos', b: 2 });
 });
 
 t('devuelve null si no hay ningún objeto', () => {

@@ -322,10 +322,14 @@ Si coinciden, lo desplegado es lo que tienes en el repo. Si no, el deploy no ha 
 Las defensas, de la más barata a la más cara:
 
 1. **Prefill — apagado por defecto.** Ponerle el `{` en la boca al modelo evita el "Claro, aquí tienes:", pero **no todos los modelos lo aceptan**: `claude-opus-4-8` responde `400 … does not support assistant message prefill`. El rechazo se reconoce y se reintenta sin él, pero apoyar el camino normal en reconocer el texto de un error ajeno es frágil —basta que cambien la redacción—, así que el prefill queda como optimización opcional: `VERIF_PREFILL=1`. El rescate por balanceo de llaves ya resuelve el preámbulo sin necesidad de él.
-2. **Rescate.** Si igual llega envuelto, se extrae el objeto balanceando llaves e ignorando las que van dentro de una cadena. Se prueba desde cada `{` de apertura, no solo el primero: con prefill el modelo a veces repite el `{` del ejemplo, y `{{"a":1}}` está balanceado pero no es JSON. Segunda pasada para comas colgando.
+2. **Rescate y reparación.** Si llega envuelto, se extrae el objeto balanceando llaves e ignorando las que van dentro de una cadena, probando desde cada `{` de apertura. Después se intentan reparaciones que **no cambian el contenido, solo su codificación**:
+   - comas colgando antes de un cierre;
+   - **caracteres de control crudos dentro de una cadena** — el desliz que más aparece cuando la entrada trae viñetas: el modelo copia una lista del job description dentro de un valor y le mete saltos de línea de verdad. Un salto sin escapar dentro de una cadena es JSON inválido aunque las llaves cierren bien y el texto se vea impecable, y `JSON.parse` bota el objeto entero.
 3. **Reintento.** Si `stop_reason` fue `max_tokens` —o el objeto abre y nunca cierra— se repite una vez con el doble de espacio. Si vuelve a cortarse, el error dice **eso**, que es accionable, en vez de "JSON inválido", que no lo es.
 
 Y un cuarto punto que no es de parseo: **los errores de la API no llegan crudos a la pantalla.** Un `400 {"type":"error",...,"request_id":"req_011…"}` no le dice nada al reclutador y arrastra detalles de la petición; se registra completo en el servidor y al usuario le llega la traducción (clave inválida, modelo inexistente, saturación, indisponibilidad).
+
+Y cuando aun así falla, **la pantalla muestra lo que devolvió el modelo** detrás de un desplegable. Sin eso, diagnosticar obliga a entrar al registro de Render — y quien está atascado frente a la pantalla no siempre tiene ese acceso a la mano.
 
 El error llega a la pantalla con su `motivo` (`truncado`, `ilegible`, `api` o `interno`) y se muestra **en el formulario, no en un toast**: el mensaje dice qué hacer y un toast se va solo. Y no le habla al usuario de JSON, que no le sirve de nada.
 

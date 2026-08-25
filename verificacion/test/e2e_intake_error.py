@@ -65,6 +65,18 @@ with sync_playwright() as pw:
         errs.append("no sugiere reintentar en el caso ilegible")
     if "demasiado largo" in t:
         errs.append("confunde el caso ilegible con el de longitud")
+
+    # Lo que devolvió el modelo tiene que poder verse sin entrar al registro del servidor.
+    det = pg.query_selector("#intakeErr details.crudo")
+    if not det:
+        errs.append("no se puede ver lo que devolvió Claude")
+    else:
+        if pg.is_visible("#intakeErr .crudo pre"):
+            errs.append("el volcado crudo sale abierto y tapa el mensaje que importa")
+        pg.click("#intakeErr .crudo summary"); pg.wait_for_timeout(300)
+        crudo = pg.inner_text("#intakeErr .crudo pre")
+        if "parece un contrato" not in crudo:
+            errs.append(f"el volcado no trae la respuesta del modelo: {crudo[:80]!r}")
     pg.screenshot(path="/tmp/pk/intake_err_ilegible.png")
 
     # ---------- C. Un análisis bueno limpia el aviso y sigue de largo ----------

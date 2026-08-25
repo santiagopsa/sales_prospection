@@ -32,6 +32,40 @@ function objetoDesde(t, desde) {
   return null;
 }
 
+// Escapa los caracteres de control que quedaron crudos DENTRO de una cadena.
+//
+// Este es el desliz que más rompe cuando la entrada trae viñetas: el modelo copia una lista
+// del job description dentro de un valor y le mete saltos de línea de verdad. Un salto de
+// línea sin escapar dentro de una cadena es JSON inválido —aunque las llaves cierren bien y
+// el texto se vea perfecto—, así que JSON.parse lo rechaza y el objeto se pierde entero.
+// Reescribirlos no cambia el contenido: es exactamente el mismo texto, bien codificado.
+function escaparControles(t) {
+  let out = '', enTexto = false, escapa = false;
+  for (const c of t) {
+    if (escapa) { out += c; escapa = false; continue; }
+    if (c === '\\') { out += c; escapa = true; continue; }
+    if (c === '"') { enTexto = !enTexto; out += c; continue; }
+    if (enTexto) {
+      if (c === '\n') { out += '\\n'; continue; }
+      if (c === '\r') { out += '\\r'; continue; }
+      if (c === '\t') { out += '\\t'; continue; }
+      const cod = c.charCodeAt(0);
+      if (cod < 0x20) { out += '\\u' + cod.toString(16).padStart(4, '0'); continue; }
+    }
+    out += c;
+  }
+  return out;
+}
+
+// Las reparaciones que se intentan, en orden. Ninguna cambia el contenido: solo corrigen
+// la codificación de algo que el modelo escribió mal.
+const REPARACIONES = [
+  s => s,
+  s => s.replace(/,\s*([}\]])/g, '$1'),        // comas colgando antes de un cierre
+  s => escaparControles(s),                     // saltos de línea crudos dentro de cadenas
+  s => escaparControles(s).replace(/,\s*([}\]])/g, '$1'),
+];
+
 // Intenta leer un objeto del texto crudo. Devuelve el objeto o null.
 function leerJson(bruto) {
   let t = String(bruto == null ? '' : bruto).trim();
@@ -44,9 +78,9 @@ function leerJson(bruto) {
   for (let intento = 0; intento < 4; intento++) {
     const cand = objetoDesde(t, desde);
     if (!cand) return null;
-    try { return JSON.parse(cand.texto); } catch (e) {}
-    // Segunda pasada: comas colgando antes de un cierre, el desliz más común del modelo.
-    try { return JSON.parse(cand.texto.replace(/,\s*([}\]])/g, '$1')); } catch (e) {}
+    for (const reparar of REPARACIONES) {
+      try { return JSON.parse(reparar(cand.texto)); } catch (e) {}
+    }
     desde = cand.ini + 1;
   }
   return null;
@@ -59,4 +93,4 @@ function pareceTruncado(bruto) {
   return t.indexOf('{') !== -1 && objetoDesde(t, 0) === null;
 }
 
-module.exports = { textoDe, leerJson, objetoDesde, pareceTruncado };
+module.exports = { textoDe, leerJson, objetoDesde, pareceTruncado, escaparControles };

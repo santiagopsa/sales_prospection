@@ -82,7 +82,7 @@ const server = http.createServer(async (req, res) => {
       motivo:'truncado'});
     if(b.sourceText.includes('__ILEGIBLE__')) return json(res,502,{
       error:'Claude no devolvió un JSON que se pueda leer. Vuelve a intentarlo; si se repite, revisa que el texto sea el levantamiento o el job description y no otra cosa.',
-      motivo:'ilegible'});
+      motivo:'ilegible', raw:'Lo siento, no puedo procesar este texto porque parece un contrato y no un job description.'});
     return json(res,200,JSON.parse(JSON.stringify(FAKE)));
   }
 

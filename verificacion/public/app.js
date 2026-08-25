@@ -383,7 +383,12 @@ async function analizar(){
     // El motivo importa: que la respuesta se haya cortado por longitud y que haya llegado
     // ilegible se arreglan distinto, y antes las dos decían lo mismo.
     const motivo = e.payload && e.payload.motivo;
-    caja.innerHTML = `<b>${motivo === 'truncado' ? 'El texto es demasiado largo para una sola pasada.' : 'No se pudo extraer los requisitos.'}</b>${esc(e.message)}`;
+    const bruto = e.payload && e.payload.raw;
+    // Lo que devolvió el modelo va detrás de un desplegable. Sin esto, diagnosticar por qué
+    // falló un análisis obliga a entrar al registro del servidor — y quien está atascado
+    // frente a la pantalla no siempre tiene ese acceso a la mano.
+    caja.innerHTML = `<b>${motivo === 'truncado' ? 'El texto es demasiado largo para una sola pasada.' : 'No se pudo extraer los requisitos.'}</b>${esc(e.message)}` +
+      (bruto ? `<details class="crudo"><summary>Ver lo que devolvió Claude</summary><pre>${esc(bruto)}</pre></details>` : '');
     caja.style.display = 'block';
     caja.scrollIntoView({behavior:'smooth', block:'center'});
   }finally{ overlay(false); }
