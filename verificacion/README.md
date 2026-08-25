@@ -119,6 +119,7 @@ python3 verificacion/test/e2e_viejas.py    # que un informe ya emitido no cambie
 python3 verificacion/test/e2e_editar.py    # editar una vacante sin tocar las actas ya emitidas
 python3 verificacion/test/e2e_intake_error.py # que un análisis fallido diga qué pasó y qué hacer
 python3 verificacion/test/e2e_transcripcion.py # entrevistar sin escribir, calificar con la transcripción
+python3 verificacion/test/e2e_ingles.py    # el inglés se mide escuchando, no preguntando
 ```
 
 `test/stub.js` replica la API con `http` nativo y devuelve un levantamiento fijo en vez de llamar a Claude: prueba la interfaz sin API key, sin Postgres y sin `npm install`. Importa las reglas reales de `rules.js` y se monta en `/verificacion`, igual que en producción — así que lo que se prueba del semáforo, del acta y del punto de montaje es el código de verdad.
@@ -375,6 +376,33 @@ Dos cosas que manda el mundo real y que el diseño respeta:
 - **La transcripción no se guarda.** Es la conversación entera de una persona; lo único que el acta necesita son las citas que sostienen cada requisito. Se analiza, se guardan las citas, y el texto se descarta. Mismo criterio que con el CV.
 
 Un requisito que **no se tocó** en la conversación queda sin nivel y la pantalla lo dice de frente. No se rellena con lo que diga el CV ni con lo que parezca razonable: un requisito sin conversación es un requisito sin medir, y eso es un dato.
+
+## El acta impresa
+
+El acta se imprime y se manda al cliente, así que el papel no es un caso secundario: es el formato final.
+
+**El papel no tiene modo oscuro.** Quien tuviera el sistema en oscuro imprimía un documento de fondo negro con texto claro — impecable en pantalla, ilegible en papel. En impresión se fuerza la paleta clara completa, siempre, redefiniendo los tokens dentro de `@media print`.
+
+Lo demás que se corrigió, todo verificado generando el PDF de verdad y mirándolo:
+
+- Los encabezados de zona ya no quedan huérfanos al pie de una página (`break-after:avoid`), y los bloques no se parten por la mitad.
+- El alcance y la metodología **sí se imprimen**: eran un `.hint`, y la regla de impresión escondía todos los `.hint` por ser ayudas de interfaz. Pero eso no es una nota al margen, es parte de lo que el documento afirma.
+- La firma de integridad ya no parte palabras a la mitad.
+
+Lo que **no** tiene: membrete repetido en cada página. En Chrome un elemento fijo se repite al imprimir pero no reserva espacio, así que se monta sobre el texto de la página 2 en adelante; hacerlo bien exige rearmar el acta como tabla con `thead`, y no vale la pena a medias. El código del informe va en el encabezado de la primera página y otra vez en el bloque de respaldo.
+
+## El inglés se mide escuchando
+
+"¿Hablas inglés?" no mide nada: todo el mundo dice B2. Y un certificado tampoco dice si aguanta un daily con el cliente, que es lo que el cargo necesita. Así que **se pasa un tramo de la entrevista a inglés** y el nivel sale de lo que sostuvo ahí, con su cita.
+
+- **Lo define la vacante, no el candidato.** El levantamiento extrae si el cargo lo exige, qué nivel pide el cliente y —lo más importante— **para qué lo necesita en el día a día**: no es lo mismo leer documentación que discutir una decisión con el cliente. Eso es lo que fija el listón.
+- **Durante la llamada** hay un guion de cuatro pasos para cambiar de idioma sin que se sienta un examen sorpresa: anunciarlo, arrancar repitiendo algo que ya contó, subirlo al trabajo real, y discrepar para ver si piensa en inglés o tiene frases guardadas.
+- **Después**, la transcripción trae ese tramo en inglés y propone un nivel contra una rúbrica de **conducta observable**, no de certificados: si buscó palabras, si se autocorrigió, si sostuvo el tema técnico o se replegó a frases hechas.
+- Si **no hubo tramo en inglés**, el acta dice *no evaluado* — ni a favor ni en contra. Y si el cargo no lo exige, la fase no existe y el acta no lo menciona.
+
+Una señal que el prompt vigila: alguien que responde en inglés sin titubeos, sin muletillas y con vocabulario más pulido que su español no es un C1, es alguien leyendo. Eso se reporta como nota, no como nivel.
+
+El acta lo dice explícito: medido por conducta en un tramo de la entrevista, **no reemplaza una prueba estandarizada** si el cliente la exige.
 
 ## Historial
 

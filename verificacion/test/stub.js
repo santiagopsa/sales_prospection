@@ -40,7 +40,9 @@ const FAKE = {
      pregunta_cruce:'¿Qué pasa con el lote si QM rechaza la inspección?',
      senales_impostor:['Habla de integración en abstracto sin nombrar documentos']}
   ],
-  deseables:[{item:'Inglés conversacional', evidencia_cita:'ojalá se defienda en inglés'}],
+  ingles:{requerido:true, nivel:'conversacional para reuniones con el cliente',
+    uso:'daily con el equipo del cliente en EE.UU.', evidencia_cita:'tiene que poder estar en el daily en inglés'},
+  deseables:[{item:'Certificación SAP', evidencia_cita:'ojalá tenga la certificación'}],
   verificable_por_documento:[{item:'Certificación SAP', como_se_valida:'certificado oficial de SAP'}],
   descartes_previos:'Rechazaron dos candidatos que sabían la teoría pero nunca habían estado en un go-live.',
   vacios_del_levantamiento:[{pregunta:'¿Cuántos usuarios tiene el sistema hoy?', por_que:'cambia el tamaño de rollout que cuenta como experiencia válida'}],
@@ -98,6 +100,8 @@ const server = http.createServer(async (req, res) => {
     const v={id:nid(), company_id:c.id, company_name:c.name, title:clean(vac.titulo), seniority:clean(vac.seniority),
       modality:clean(vac.modalidad), city:clean(vac.ciudad), salary_text:clean(vac.salario_texto),
       context:clean(vac.contexto), suggested_mode:clean(b.modalidad_sugerida), status:'activa',
+      ingles_requerido: !!(b.ingles && b.ingles.requerido), ingles_nivel: clean(b.ingles && b.ingles.nivel),
+      ingles_uso: clean(b.ingles && b.ingles.uso), ingles_cita: clean(b.ingles && b.ingles.evidencia_cita),
       created_at:new Date().toISOString()};
     db.vacancies.push(v);
     reqs.forEach((r,i)=>db.requirements.push({id:nid(), vacancy_id:v.id, ord:i, text:clean(r.requisito),
@@ -172,6 +176,7 @@ const server = http.createServer(async (req, res) => {
     const {shot, ...sinImagen} = s;
     const v = db.vacancies.find(x=>x.id===s.vacancy_id);
     return json(res,200,{...sinImagen, vacancy_title:v&&v.title, company_name:v&&v.company_name,
+      ingles_requerido:v&&v.ingles_requerido, ingles_nivel:v&&v.ingles_nivel, ingles_uso:v&&v.ingles_uso,
       tiene_captura:!!shot, identidad:estadoIdentidad(ctx),
       documento:tipoDocumento(ctx), ratings:db.ratings.filter(r=>r.session_id===s.id)});
   }
@@ -275,6 +280,9 @@ const server = http.createServer(async (req, res) => {
         senales: [],
         nota: ''
       })),
+      ingles:{evaluado:true, nivel_observado:'B2', alcanza_lo_exigido:true,
+        evidencia:'So in Alpina I was the one leading the rollout, and honestly the first week was rough — the material master data was a mess.',
+        por_que:'Sostuvo el tema técnico en inglés con pausas naturales y se autocorrigió una vez.', nota:''},
       declara:{pretension:'Habló de 12 millones', disponibilidad:'Dos semanas', motivacion:'Busca autonomía en la decisión técnica', nogo:'Baja autonomía'},
       senales_generales:[],
       advertencias: t.includes('__CORTADA__') ? ['La transcripción parece cortada: termina a mitad de una frase.'] : [],

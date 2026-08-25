@@ -173,6 +173,12 @@
   </div>
 </div>
 
+<!-- Membrete y pie que se repiten en cada página impresa. Un informe de dos hojas que va
+     al cliente tiene que poder identificarse hoja por hoja: sin esto, la página 2 es un
+     papel anónimo. Solo existen al imprimir. -->
+<div class="printhd" id="printHd"><div class="pi"><span id="phLeft"></span><span id="phRight"></span></div></div>
+<div class="printft" id="printFt"><div class="pi"><span id="pfLeft"></span><span id="pfRight"></span></div></div>
+
 <div class="toast" id="toast"></div>
 
 <script src="qr.js"></script>

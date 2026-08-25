@@ -481,13 +481,56 @@ input,textarea,select{font:inherit;color:inherit}
   .det{flex-direction:column;gap:3px} .det .da{border-left:none;padding-left:0}
   .heroacts .cta{width:100%}
 }
+/* ============ el acta impresa ============
+   Este documento se imprime y se manda al cliente, así que el papel no es un caso
+   secundario: es el formato final. */
 @media print{
-  .top,.phasebar,.sigbar,.tools,.hint,.toast,.overlay,.back{display:none!important}
-  body{background:#fff}
+  /* EL PAPEL NO TIENE MODO OSCURO. Sin esto, quien tenga el sistema en oscuro imprime
+     un documento negro con texto claro: en pantalla se ve bien y en papel es ilegible
+     —o se lleva un cartucho por delante—. Se fuerza la paleta clara, siempre. */
+  :root, :root[data-theme="dark"], :root:not([data-theme="light"]){
+    --bg:#FFFFFF; --panel:#FFFFFF; --sunk:#F4F7F9;
+    --ink:#1B1F22; --ink2:#4A4F53; --ink3:#6E7478;
+    --line:#D5DEE3; --line2:#B9C5CC;
+    --acc:#006D8F; --acc-soft:#EAF7FD; --acc-ink:#004E66;
+    --good:#146B4D; --good-soft:#EDF6F2;
+    --warn:#7A4900; --warn-soft:#FCF4E6;
+    --crit:#8C1F15; --crit-soft:#FBEEEC;
+    --on-acc:#FFFFFF; --iso-a:#0090BE; --iso-b:#2E7E99;
+    --shadow:none;
+  }
+  html, body{background:#FFFFFF!important;color:var(--ink)}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+
+  .top,.phasebar,.sigbar,.tools,.toast,.overlay,.back,.crudo{display:none!important}
+  /* Las ayudas de pantalla se van, pero NO el alcance ni la metodología: eso es parte de
+     lo que el documento afirma, no una nota al margen de la interfaz. */
+  .hint{display:none!important}
+  .acta .hint{display:block!important;font-size:10.5px;color:var(--ink2)}
   .acta{border:none;box-shadow:none;padding:0}
-  .actaiso{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .card{box-shadow:none}
   .stage{padding:0}
+
+  /* Nada de encabezados huérfanos al pie de una página. */
+  .zona{break-after:avoid;page-break-after:avoid}
+  .zbox,.req,.tray,.aback,.sellos,.acthd{break-inside:avoid;page-break-inside:avoid}
+  .acthd{break-after:avoid}
+
+  /* La firma es una cadena larga: que parta por caracteres, no que se salga de la caja,
+     pero tampoco que corte palabras normales a la mitad. */
+  .aback .sig{word-break:normal;overflow-wrap:anywhere}
+
+  /* Sin membrete repetido por página: en Chrome un elemento fijo se repite pero NO reserva
+     espacio, así que se monta sobre el texto en todas las páginas menos la primera. Hacerlo
+     bien exige rearmar el acta como tabla con thead, y eso es un cambio de estructura que no
+     vale la pena a medias. El código del informe va en el encabezado de la primera página y
+     otra vez en el bloque de respaldo, que es la última. */
+  .printhd,.printft{display:none!important}
+  #actaStage{margin:0}
 }
+.printhd,.printft{display:none}
+
+@page{ margin:20mm 14mm 20mm }
 
 /* Señal de que un botón de navegación sí hizo algo, aunque la página no tenga scroll. */
 .destacar{animation:destello 1.4s ease-out}
@@ -561,3 +604,19 @@ input,textarea,select{font:inherit;color:inherit}
 .osep{text-align:center;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink3);
   font-weight:700;margin:14px 0 10px}
 .cnt{text-align:right;font-size:12px;color:var(--ink3);margin-top:6px}
+
+/* El inglés se mide por conducta observable, así que su escala es de nivel, no de 1 a 5. */
+.lvls.ing{grid-template-columns:repeat(5,1fr)}
+.lvls.ing .lv .n{font-size:17px}
+
+/* El nivel de inglés en el acta: el número grande y qué significa, para que no sea una sigla suelta. */
+.ingfila{display:flex;gap:14px;align-items:flex-start}
+.ingniv{flex:none;min-width:56px;height:56px;border:2px solid var(--acc);border-radius:11px;
+  display:grid;place-items:center;font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;
+  font-size:21px;font-weight:800;color:var(--acc-ink);background:var(--acc-soft)}
+.ingtx b{font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:14px;font-weight:600;
+  line-height:1.5;display:block}
+
+/* Casilla para decisiones binarias en formulario. */
+.chk2{display:flex;gap:9px;align-items:center;cursor:pointer;font-size:14px;font-weight:600;color:var(--ink2)}
+.chk2 input{width:17px;height:17px;accent-color:var(--acc);cursor:pointer}

@@ -62,8 +62,9 @@ with sync_playwright() as pw:
     r2 = pg.inner_text("#stage")
     if "no menciona" not in r2.lower(): errs.append("no avisa que el CV no cubre el segundo requisito")
 
-    # la trayectoria durante la entrevista es guía: se pregunta, no se marca
-    pg.click("[data-next]"); pg.wait_for_timeout(400)
+    # la trayectoria durante la entrevista es guía: se pregunta, no se marca.
+    # Se busca por selector porque entremedio puede haber una fase de inglés.
+    flujo.avanzar_hasta(pg, "#stage .tray")
     tg = pg.inner_text("#stage")
     if "Trayectoria" not in tg: errs.append("la trayectoria no aparece durante la entrevista")
     if pg.query_selector('[data-tray="0"][data-est="confirmado"]'):
@@ -77,7 +78,9 @@ with sync_playwright() as pw:
         "Sondeado desde cero; la escena quedó genérica.",
     ])
 
-    # trayectoria: ahora sí se marca
+    # trayectoria: ahora sí se marca. Se avanza por selector y no contando clics, porque
+    # entremedio puede haber una fase de inglés según lo que pida la vacante.
+    flujo.avanzar_hasta(pg, '[data-tray="0"][data-est="confirmado"]')
     tr = pg.inner_text("#stage")
     for must in ["Trayectoria", "Alpina", "Quala", "Hueco de casi un año"]:
         if must.lower() not in tr.lower(): errs.append(f"la fase de trayectoria no muestra: {must}")

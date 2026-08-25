@@ -166,6 +166,31 @@ with sync_playwright() as pw:
     pg.screenshot(path="/tmp/pk/id_08_rostro_no_coincide.png", full_page=True)
     pg.close()
 
+    # ---------- E. La identidad se manda al colgar, no después de la transcripción ----------
+    pg2 = br.new_page(viewport={"width":1120,"height":900})
+    pg2.on("pageerror", lambda e: errs.append(f"JS: {e}"))
+    simular(status="Approved", score=96.4, verdict="coincide")
+    preparar(pg2, "cierre")
+    for k in ["grab","cam"]:
+        pg2.click(f'[data-idc="{k}"]'); pg2.wait_for_timeout(100)
+    pg2.set_input_files("#shotFile", {"name":"c.png","mimeType":"image/png","buffer":PNG}); pg2.wait_for_timeout(800)
+    pg2.click("[data-next]"); pg2.wait_for_timeout(300)
+    flujo.recorrer_guia(pg2)
+    fin2 = pg2.inner_text("#stage")
+    if "Terminaste la entrevista" not in fin2:
+        errs.append("no llegó al fin de la entrevista")
+    if not pg2.query_selector("#btnEnviarId"):
+        errs.append("al colgar no se puede mandar la verificación de identidad — ese es el momento")
+    if "verificación de identidad" not in fin2.lower():
+        errs.append("el fin de la entrevista no menciona la verificación de identidad")
+    pg2.click("#btnEnviarId"); pg2.wait_for_timeout(900)
+    if "verify.didit.me" not in pg2.inner_text("#stage"):
+        errs.append("no apareció el link de Didit al colgar")
+    if not pg2.query_selector(".qrid .qrbox svg"):
+        errs.append("no apareció el QR de identidad al colgar")
+    pg2.screenshot(path="/tmp/pk/id_09_identidad_al_colgar.png", full_page=True)
+    pg2.close()
+
     br.close()
 
 STUB.terminate()

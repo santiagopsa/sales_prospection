@@ -79,3 +79,13 @@ def entrevistar_y_calificar(pg, niveles=(5, 4), contexto=True):
             pg.wait_for_timeout(200)
             pg.click("[data-next]")
             pg.wait_for_timeout(500)
+
+def avanzar_hasta(pg, selector, maximo=6):
+    """Avanza fases hasta que aparezca un elemento. Las fases opcionales —inglés, trayectoria—
+    dependen de la vacante, así que contar clics a mano rompe la prueba al agregar una."""
+    for _ in range(maximo):
+        if pg.query_selector(selector):
+            return True
+        pg.click("[data-next]")
+        pg.wait_for_timeout(340)
+    return bool(pg.query_selector(selector))

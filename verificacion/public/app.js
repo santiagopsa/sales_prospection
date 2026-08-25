@@ -13,6 +13,24 @@ const SIGNALS = [
   {id:'mod', t:'Modificación imposible', d:'No logra ni intentar los cambios en vivo'}
 ];
 
+// El inglés no se pregunta, se escucha. Se pasa un tramo de la entrevista a inglés y se mide
+// por conducta observable: un certificado no dice si aguanta un daily con el cliente.
+const NIVELES_ING = ['C1','B2','B1','A2','A1'];
+const ANCLA_ING = {
+  C1:'Sostiene una discusión técnica con matices: discrepa, matiza y se autocorrige sin perder el hilo. No busca palabras.',
+  B2:'Sostiene la conversación de trabajo sin fricción notable. Pausas ocasionales y errores que no estorban.',
+  B1:'Se hace entender en temas conocidos, con frases cortas. Pierde fluidez apenas sale de lo que traía preparado.',
+  A2:'Responde lo básico y vuelve al español. No sostiene una conversación de trabajo.',
+  A1:'No logra sostener el intercambio.',
+};
+// El guion para pasar a inglés sin que se sienta un examen sorpresa.
+const GUION_ING = [
+  {t:'Anúncialo', d:'“Para esta parte vamos a cambiar a inglés unos minutos, porque el cargo lo necesita en el día a día. ¿Te parece?” Avisar no es hacer trampa: reduce el nervio, que no es lo que estamos midiendo.'},
+  {t:'Arranca fácil', d:'<em>“Tell me about the project you just described — same story, in English.”</em> Que repita en inglés algo que ya contó: se compara contenido conocido y se ve la fluidez, no la memoria.'},
+  {t:'Súbelo al trabajo real', d:'Llévalo a lo que hará en el cargo. Si son reuniones con el cliente, plantéale una: <em>“The client says the deadline moves up two weeks. Walk me through how you would push back.”</em>'},
+  {t:'Escucha la fricción', d:'Discrepa con algo que diga y deja que responda. Ahí se ve la diferencia entre quien tiene frases guardadas y quien piensa en inglés.'},
+];
+
 const ANCHORS = {
   5:'<b>Nivel 5.</b> Escena específica (empresa, fecha, alcance) + rol individual claro + fricción real narrada con detalle + los 3 detalles verificables correctos + cruce respondido con criterio propio.',
   4:'<b>Nivel 4.</b> Escena y rol claros + fricción real + al menos 2 detalles verificables correctos; el cruce correcto aunque superficial.',
@@ -262,6 +280,11 @@ async function verSesion(id){
       idc: fuente.identity || {}, sig: fuente.signals || {},
       dec: fuente.declara || {}, rec: fuente.recomendacion || {riesgos:[]},
       cv: s.cv_analisis || null, tray: fuente.trayectoria || [],
+      ing: s.ingles_requerido ? {requerido:true, nivel:s.ingles_nivel, uso:s.ingles_uso, cita:s.ingles_cita} : null,
+      ingObs: s.ingles || null,
+      ingNivel: (s.ingles && s.ingles.confirmado) || null,
+      snapIngles: (snap && snap.ingles_nivel) ? {...(snap.ingles_obs || {}),
+                    confirmado: snap.ingles_nivel, nivel_exigido: snap.ingles_exigido || null} : null,
       ident: snap ? {...(snap.identidad || {}), face_score: snap.face_score}
                   : {...(s.identidad || {}), didit_status: s.didit_status,
                      face_verdict: s.face_verdict, face_score: s.face_score},
@@ -499,6 +522,21 @@ function renderRevision(){
       ${X.modalidad_por_que ? `<p class="hint">${esc(X.modalidad_por_que)}</p>` : ''}
     </div>
 
+    <div class="fset">
+      <div class="fttl">Inglés</div>
+      <p class="hint" style="margin:0 0 12px">No se verifica preguntando si lo habla: se pasa un tramo
+      de la entrevista a inglés y se mide lo que sostiene. Marca esto solo si el cargo lo necesita de verdad.</p>
+      <label class="chk2"><input type="checkbox" id="rIngOn" ${(X.ingles||{}).requerido?'checked':''}>
+        <span>Este cargo exige inglés</span></label>
+      <div class="frow" id="rIngCampos" style="margin-top:12px">
+        <div class="f"><label>Nivel que pide el cliente</label>
+          <input id="rIngNiv" value="${esc((X.ingles||{}).nivel||'')}" placeholder="Conversacional para reuniones con el cliente"></div>
+        <div class="f"><label>Para qué lo necesita</label>
+          <input id="rIngUso" value="${esc((X.ingles||{}).uso||'')}" placeholder="Daily con el equipo en EE.UU."></div>
+      </div>
+      ${(X.ingles||{}).evidencia_cita ? `<p class="hint">Lo dijo así: <i>“${esc(X.ingles.evidencia_cita)}”</i></p>` : ''}
+    </div>
+
     <button class="cta" id="btnGuardarVac">Guardar la vacante</button>
     <p class="hint">Queda en la base de datos con sus requisitos. Después seleccionas esta vacante para verificar a cada finalista.</p>
   `;
@@ -570,6 +608,12 @@ async function guardarVacante(){
       salario_min:(X.vacante||{}).salario_min??null, salario_max:(X.vacante||{}).salario_max??null,
     },
     excluyentes: X.excluyentes.filter(r => (r.requisito||'').trim()),
+    ingles: {
+      requerido: !!$('#rIngOn').checked,
+      nivel: $('#rIngNiv').value,
+      uso: $('#rIngUso').value,
+      evidencia_cita: (X.ingles || {}).evidencia_cita || '',
+    },
     modalidad_sugerida: X.modalidad_sugerida || 'B',
     recruiter: X._recruiter || '',
     sourceType: X._sourceType || '',
@@ -951,6 +995,9 @@ function setupSesion(v){
         cli: v.company_name || '', eval: $('#sEval').value.trim(), mode, kind,
         mail: $('#sMail').value.trim(), ident: null,
         reqs: (v.requirements||[]).map(r => ({rid:r.id, n:r.text, lvl:0, ev:'', r})),
+        // Lo que el cargo exige de inglés viene de la vacante: lo define el cliente.
+        ing: v.ingles_requerido ? {requerido:true, nivel:v.ingles_nivel, uso:v.ingles_uso, cita:v.ingles_cita} : null,
+        ingNivel: null, ingObs: null,
         idc:{}, sig:{}, fase:0, t0:Date.now(), tFase:Date.now(), fin:false, fecha:null, hash:null,
       };
       saveLocal();
@@ -986,6 +1033,7 @@ function fases(){
   if(enEntrevista()){
     const f = [{k:'id', t:'Apertura', min:4}];
     S.reqs.forEach((r,i) => f.push({k:'guia', i, t:r.n || ('Requisito '+(i+1)), min:6}));
+    if(S.ing && S.ing.requerido) f.push({k:'ing', t:'Inglés', min:4});
     // La trayectoria aparece en los dos momentos, y no es lo mismo: durante la llamada son
     // las preguntas que hay que hacer sobre cada tramo; después, marcar si los sostuvo.
     if((S.tray || []).length) f.push({k:'tray', t:'Trayectoria', min:4});
@@ -994,6 +1042,7 @@ function fases(){
   }
   const f = [];
   S.reqs.forEach((r,i) => f.push({k:'req', i, t:r.n || ('Requisito '+(i+1)), min:2}));
+  if(S.ing && S.ing.requerido) f.push({k:'ing', t:'Inglés', min:2});
   if((S.tray || []).length) f.push({k:'tray', t:'Trayectoria', min:3});
   f.push({k:'ctx', t:'Contexto', min:3});
   f.push({k:'cierre', t:'Cierre', min:3});
@@ -1314,6 +1363,67 @@ function render(){
     drawRiesgos();
   }
 
+
+  // --- INGLÉS: guía durante la llamada, confirmación después. ---
+  else if(f.k === 'ing'){
+    const ing = S.ing || {};
+    const obs = S.ingObs || {};
+    st.innerHTML = `
+      <div class="card">
+        <h2>Inglés</h2>
+        <div class="cs" style="margin-bottom:16px">${enEntrevista()
+          ? 'Unos 4 minutos en inglés. No es un examen aparte: es el mismo tema del cargo, en el otro idioma.'
+          : 'Lo que sostuvo en el tramo en inglés. Confirma o corrige el nivel.'}</div>
+
+        <div class="say"><div class="lb">QUÉ PIDE EL CARGO</div><p style="font-style:normal">
+          ${esc(ing.nivel || 'Nivel no especificado por el cliente')}${ing.uso ? ` · <b>${esc(ing.uso)}</b>` : ''}</p></div>
+
+        ${enEntrevista() ? `
+          <div class="steps">
+            ${GUION_ING.map((g,gi) => `<div class="step"><div class="sn">${gi+1}</div><div class="sb">
+              <div class="st">${g.t}</div><div class="sd">${g.d}</div></div></div>`).join('')}
+          </div>
+          <p class="hint">No lo califiques ahora ni te preocupes si tu inglés no es perfecto: lo que
+          importa es que él hable. El nivel sale de la transcripción, que va a traer ese tramo en inglés.</p>
+        ` : `
+          ${obs.evaluado === false ? `<div class="aviso malo">
+            <b>No hubo un tramo en inglés en la transcripción.</b>
+            Sin conversación en inglés no hay nivel que reportar. Si sí se hizo, revisa que la
+            transcripción esté completa; si no se hizo, el acta lo dirá como no evaluado.
+          </div>` : ''}
+          ${obs.evidencia ? `<div class="cita">
+            <div class="dt">Lo que dijo en inglés — cita de la transcripción</div>
+            <blockquote>${esc(obs.evidencia)}</blockquote>
+            ${obs.por_que ? `<p class="pq">${esc(obs.por_que)}</p>` : ''}
+            ${obs.nota ? `<p class="pq av">${esc(obs.nota)}</p>` : ''}
+          </div>` : ''}
+
+          <div class="lvlttl">Nivel observado${obs.nivel_observado ? ` — la transcripción propone ${esc(obs.nivel_observado)}` : ''}</div>
+          <div class="lvls ing">
+            ${NIVELES_ING.map(v => `<button class="lv ${S.ingNivel===v?'sel':''}" data-ing="${v}" type="button">
+              <div class="n">${v}</div></button>`).join('')}
+          </div>
+          <div class="anchor" id="ingBox">${S.ingNivel ? esc(ANCLA_ING[S.ingNivel]) : 'Marca el nivel que corresponde a lo que se oyó.'}</div>
+          <p class="hint">Se mide por conducta, no por certificados. Un candidato que responde en
+          inglés con frases que suenan escritas —sin titubeos, con vocabulario más pulido que su
+          español— es una señal, no un C1.</p>
+        `}
+
+        <div class="nav">
+          <button data-prev type="button">Atrás</button>
+          <button class="pri" data-next type="button">Continuar</button>
+        </div>
+      </div>`;
+
+    st.querySelectorAll('[data-ing]').forEach(b => {
+      b.addEventListener('click', e => { S.ingNivel = e.currentTarget.dataset.ing; touch(); render(); });
+      b.addEventListener('mouseenter', e => { $('#ingBox').textContent = ANCLA_ING[e.currentTarget.dataset.ing]; });
+      b.addEventListener('mouseleave', () => {
+        $('#ingBox').textContent = S.ingNivel ? ANCLA_ING[S.ingNivel] : 'Marca el nivel que corresponde a lo que se oyó.';
+      });
+    });
+  }
+
   // --- FIN DE LA ENTREVISTA: se cuelga, y la transcripción llega después. ---
   else if(f.k === 'fin'){
     const nSig = Object.values(S.sig).filter(Boolean).length;
@@ -1324,13 +1434,21 @@ function render(){
         <p class="lede" style="margin-bottom:16px">Ahora despídete y cuelga. La evidencia sale de la
         transcripción, no de lo que alcanzaste a escribir.</p>
 
+        ${cierre && !S.idc.shot ? `<div class="aviso malo">
+          <b>Falta la captura del rostro, y solo se puede tomar con la llamada abierta.</b>
+          Es la imagen contra la que se coteja la verificación de identidad: sin ella, Didit
+          certifica a quien haya hecho el trámite, no a quien entrevistaste. Vuelve a Apertura
+          y tómala <b>antes de colgar</b> — después ya no hay manera.
+        </div>` : ''}
+
         <div class="pasos">
           <div class="paso"><div class="pn">1</div><div>
             <b>Cierra la llamada con normalidad.</b>
             <span>Agradécele el tiempo y dile cuándo tendrá noticias. Nada de esto cambia por lo que hayas visto.</span></div></div>
           ${cierre ? `<div class="paso"><div class="pn">2</div><div>
             <b>Mándale el link de verificación de identidad.</b>
-            <span>Está en el cierre de la sesión. Mejor ahora, mientras la conversación está fresca.</span></div></div>` : ''}
+            <span>Aquí abajo. Ahora, antes de colgar o apenas cuelgues: si se enfría la conversación,
+            la gente no lo hace.</span></div></div>` : ''}
           <div class="paso"><div class="pn">${cierre?3:2}</div><div>
             <b>Espera la transcripción de Google.</b>
             <span>Tarda unos minutos en aparecer en el Drive de la reunión. No tienes que quedarte
@@ -1349,7 +1467,19 @@ function render(){
         </div>
         <button class="back" id="btnEsperarTrans" type="button" style="color:var(--acc);margin-top:10px">
           Todavía no está lista — guardar y salir</button>
-      </div>`;
+      </div>
+      ${cierre ? bloqueIdentidad() : ''}`;
+
+    // La verificación de identidad vive también aquí, y no por comodidad: el momento de
+    // mandarla es al colgar. Tenerla solo en el cierre —que ahora llega después de la
+    // transcripción, o sea horas más tarde— es tenerla cuando ya no sirve.
+    if(cierre){
+      montarIdentidad(st);
+      const bc = st.querySelector('#btnCopiarLink');
+      if(bc) bc.addEventListener('click', () => {
+        navigator.clipboard?.writeText(S.diditUrl).then(() => toast('Link copiado')).catch(() => toast('No se pudo copiar'));
+      });
+    }
 
     st.querySelector('#btnATranscripcion').addEventListener('click', async () => {
       await marcarFinEntrevista();
@@ -1836,6 +1966,11 @@ function aplicarTranscripcion(an){
     if(prop.cubierto !== false && prop.nivel) r.lvl = Number(prop.nivel) || null;
     if(prop.evidencia) r.ev = String(prop.evidencia);
   });
+  const ing = S.tran.ingles || null;
+  if(ing){
+    S.ingObs = ing;
+    if(!S.ingNivel && ing.evaluado !== false && ing.nivel_observado) S.ingNivel = ing.nivel_observado;
+  }
   const d = S.tran.declara || {};
   S.dec = S.dec || {};
   ['pretension','disponibilidad','motivacion','nogo'].forEach(k => {
@@ -1846,6 +1981,20 @@ function aplicarTranscripcion(an){
   go('vLive'); render();
 }
 
+
+// Llena el membrete y el pie que se repiten en cada página impresa. Se hace al momento de
+// imprimir y no al dibujar el acta, porque también aplica cuando el usuario imprime con
+// Ctrl+P sin tocar el botón.
+function prepararImpresion(){
+  const doc = S && S.doc ? S.doc : null;
+  $('#phLeft').innerHTML = `<b>${esc((doc && doc.titulo) || 'Informe de verificación')}</b> · PeakU Verificado`;
+  $('#phRight').textContent = S ? (S.id || '') : '';
+  $('#pfLeft').textContent = S ? [S.cand, S.rol, S.cli].filter(Boolean).join(' · ') : '';
+  $('#pfRight').textContent = S && S.id ? `${S.id} · ${urlVerificacion(S.id)}` : '';
+}
+// Ctrl+P y el menú del navegador no pasan por el botón: se engancha el evento del sistema.
+window.addEventListener('beforeprint', () => { try{ prepararImpresion(); }catch(e){} });
+
 /* ===================== acta ===================== */
 async function emitirActa(){
   overlay(true, 'Emitiendo el acta…', 'El servidor vuelve a revisar la regla antes de firmar.');
@@ -1853,6 +2002,7 @@ async function emitirActa(){
     const out = await api('/api/sessions/'+S.sid+'/issue', {method:'POST', body:{
       candidate: S.cand, identity: S.idc, signals: S.sig, data:{mode:S.mode},
       declara: S.dec || {}, recomendacion: S.rec || {}, trayectoria: S.tray || null,
+      ingles: S.ing ? {...(S.ingObs||{}), requerido:true, nivel_exigido:S.ing.nivel, confirmado:S.ingNivel||null} : null,
       ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||''})),
     }});
     S.fin = true; S.fecha = Date.now(); S.hash = out.integrity_hash;
@@ -1882,6 +2032,14 @@ function verActa(){
   const cierre = S.kind === 'cierre';
   const idOk = cierre && idn.estado === 'verificada';
   const nogo = (dec.nogo||'').split('\n').map(x=>x.trim()).filter(Boolean);
+  // El inglés solo aparece en el acta si el cargo lo exigía: si no, es ruido.
+  const ingA = (() => {
+    if(S.sinSnapshot) return null;
+    const snap = S.snapIngles;                 // congelado al emitir
+    if(snap) return snap;
+    if(!S.ing) return null;
+    return {...(S.ingObs || {}), confirmado: S.ingNivel || null, nivel_exigido: S.ing.nivel || null};
+  })();
   const tray = (S.tray || []).filter(t => t.empresa || t.cargo);
   const riesgos = (rec.riesgos||[]).filter(x => (x.r||'').trim());
   const VER = {si:['ok','Recomendado'], reserva:['par','Recomendado con una reserva'], no:['no','No recomendado']}[rec.veredicto] || null;
@@ -1969,6 +2127,28 @@ function verActa(){
       </div>` : ''}
 
       ${(dec.motivacion || nogo.length || dec.procesos) ? `
+      ${ingA ? `
+      <div class="zona"><span class="zn">Inglés</span><h3>Lo que se oyó en inglés</h3>
+        <span class="zs">${ingA.nivel_exigido ? 'El cargo pide: ' + esc(ingA.nivel_exigido) : 'Medido en la sesión'}</span></div>
+      <div class="zbox">
+        ${ingA.evaluado === false || !ingA.confirmado ? `
+          <p class="dtx"><b>No evaluado en esta sesión.</b> No hubo un tramo en inglés en la
+          conversación, así que este informe no dice nada sobre su inglés — ni a favor ni en contra.</p>
+        ` : `
+          <div class="ingfila">
+            <div class="ingniv">${esc(ingA.confirmado)}</div>
+            <div class="ingtx">
+              <b>${esc(ANCLA_ING[ingA.confirmado] || '')}</b>
+              ${ingA.por_que ? `<p class="dtx" style="margin-top:6px">${esc(ingA.por_que)}</p>` : ''}
+            </div>
+          </div>
+          ${ingA.evidencia ? `<div class="aev" style="margin-top:10px"><i>“${esc(ingA.evidencia)}”</i></div>` : ''}
+          ${ingA.nota ? `<p class="hint">${esc(ingA.nota)}</p>` : ''}
+          <p class="hint">Medido por conducta en un tramo de la entrevista, no por certificado.
+          No reemplaza una prueba estandarizada si el cliente la exige.</p>
+        `}
+      </div>` : ''}
+
       <div class="zona"><span class="zn">Zona 2</span><h3>Lo que ${esc(S.cand.split(' ')[0])} declara</h3>
         <span class="zs">Sus palabras, no nuestra medición</span></div>
       <div class="zbox dos">
@@ -2023,7 +2203,7 @@ function verActa(){
     if(S.soloLectura){ loadTablero(); return; }
     go('vLive'); render();
   });
-  $('#actaStage').querySelector('#btnPrint').addEventListener('click', () => window.print());
+  $('#actaStage').querySelector('#btnPrint').addEventListener('click', () => { prepararImpresion(); window.print(); });
   $('#actaStage').querySelector('#btnJson2').addEventListener('click', copiarJSON);
   go('vActa');
 }

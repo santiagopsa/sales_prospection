@@ -291,6 +291,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       const b = req.body || {};
       const emp = b.empresa || {}, vac = b.vacante || {};
       const reqs = Array.isArray(b.excluyentes) ? b.excluyentes.filter(x => clean(x.requisito)) : [];
+      const ing = b.ingles || {};
       if (!clean(emp.nombre)) return res.status(400).json({ error: 'Falta el nombre de la empresa' });
       if (!clean(vac.titulo)) return res.status(400).json({ error: 'Falta el título del cargo' });
       if (!reqs.length) return res.status(400).json({ error: 'Se necesita al menos un requisito excluyente' });
@@ -313,14 +314,16 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
 
           const v = await c.query(
             `INSERT INTO ${T.vacancies} (company_id,title,seniority,modality,city,salary_text,salary_min,salary_max,currency,
-                                         context,urgency,recruiter,source_type,source_text,ai_raw,suggested_mode)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+                                         context,urgency,recruiter,source_type,source_text,ai_raw,suggested_mode,
+                                         ingles_requerido,ingles_nivel,ingles_uso,ingles_cita)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING id`,
             [companyId, clean(vac.titulo), clean(vac.seniority) || null, clean(vac.modalidad) || null,
              clean(vac.ciudad) || null, clean(vac.salario_texto) || null,
              vac.salario_min ?? null, vac.salario_max ?? null, clean(vac.moneda) || null,
              clean(vac.contexto) || null, clean(vac.urgencia) || null, clean(b.recruiter) || null,
              clean(b.sourceType) || null, clean(b.sourceText) || null,
-             b.aiRaw ? JSON.stringify(b.aiRaw) : null, clean(b.modalidad_sugerida) || null]
+             b.aiRaw ? JSON.stringify(b.aiRaw) : null, clean(b.modalidad_sugerida) || null,
+             !!ing.requerido, clean(ing.nivel) || null, clean(ing.uso) || null, clean(ing.evidencia_cita) || null]
           );
           const vacancyId = v.rows[0].id;
 
@@ -420,7 +423,8 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
     try {
       const id = Number(req.params.id);
       const b = req.body || {};
-      const campos = ['title', 'seniority', 'modality', 'city', 'salary_text', 'context', 'recruiter', 'status'];
+      const campos = ['title', 'seniority', 'modality', 'city', 'salary_text', 'context', 'recruiter', 'status',
+                      'ingles_nivel', 'ingles_uso', 'ingles_cita'];
       if (b.title !== undefined && !clean(b.title)) {
         return res.status(400).json({ error: 'El título del cargo no puede quedar vacío.' });
       }
@@ -450,6 +454,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
           for (const k of campos) {
             if (b[k] !== undefined) { val.push(clean(b[k]) || null); set.push(`${k}=$${val.length}`); }
           }
+          if (b.ingles_requerido !== undefined) { val.push(!!b.ingles_requerido); set.push(`ingles_requerido=$${val.length}`); }
           set.push('updated_at=NOW()');
           const up = await c.query(`UPDATE ${T.vacancies} SET ${set.join(', ')} WHERE id=$1 RETURNING id`, val);
           if (!up.rows.length) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'not found' }); }
@@ -492,6 +497,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       const v = mem.vacancies.find(x => x.id === id);
       if (!v) return res.status(404).json({ error: 'not found' });
       for (const k of campos) if (b[k] !== undefined) v[k] = clean(b[k]) || null;
+      if (b.ingles_requerido !== undefined) v.ingles_requerido = !!b.ingles_requerido;
       if (clean(b.company_name)) v.company_name = clean(b.company_name);
       v.updated_at = new Date().toISOString();
       if (reqs) {
@@ -607,14 +613,16 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         return res.status(400).json({ error: 'La transcripción está vacía o es demasiado corta. Una entrevista de 25 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.' });
       }
 
-      let cargo = '', candidato = '', modo = 'B', excluyentes = [];
+      let cargo = '', candidato = '', modo = 'B', excluyentes = [], ingles = null;
       if (pool) {
         const q = await pool.query(`
-          SELECT s.candidate, s.mode, v.id AS vid, v.title
+          SELECT s.candidate, s.mode, v.id AS vid, v.title,
+                 v.ingles_requerido, v.ingles_nivel, v.ingles_uso
           FROM ${T.sessions} s LEFT JOIN ${T.vacancies} v ON v.id = s.vacancy_id
           WHERE s.id = $1`, [id]);
         if (!q.rows.length) return res.status(404).json({ error: 'not found' });
         cargo = q.rows[0].title || ''; candidato = q.rows[0].candidate || ''; modo = q.rows[0].mode || 'B';
+        ingles = { requerido: !!q.rows[0].ingles_requerido, nivel: q.rows[0].ingles_nivel, uso: q.rows[0].ingles_uso };
         if (q.rows[0].vid) {
           const rq = await pool.query(
             `SELECT id, text, criterio, detalles, senales FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`,
@@ -626,11 +634,12 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         if (!s) return res.status(404).json({ error: 'not found' });
         const v = mem.vacancies.find(x => x.id === s.vacancy_id);
         cargo = (v && v.title) || ''; candidato = s.candidate || ''; modo = s.mode || 'B';
+        ingles = v ? { requerido: !!v.ingles_requerido, nivel: v.ingles_nivel, uso: v.ingles_uso } : null;
         excluyentes = mem.requirements.filter(q => q.vacancy_id === (v && v.id)).sort((a, b) => a.ord - b.ord);
       }
 
       const out = await pedirJson(
-        buildTranscriptPrompt(transcript, { requisitos: excluyentes, candidato, cargo, modo }),
+        buildTranscriptPrompt(transcript, { requisitos: excluyentes, candidato, cargo, modo, ingles }),
         { etiqueta: 'transcripcion', maxTokens: 10000 });
       if (out.error) return res.status(502).json(out);
 
@@ -642,12 +651,14 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       if (pool) {
         await pool.query(
           `UPDATE ${T.sessions} SET transcript_analisis=$2::jsonb, transcript_at=NOW(),
+                                    ingles=COALESCE($3::jsonb, ingles),
                                     status = CASE WHEN status='issued' THEN status ELSE 'draft' END,
                                     updated_at=NOW() WHERE id=$1`,
-          [id, JSON.stringify(an)]);
+          [id, JSON.stringify(an), an.ingles ? JSON.stringify(an.ingles) : null]);
       } else {
         const s = mem.sessions.find(x => x.id === id);
         s.transcript_analisis = an; s.transcript_at = an._at;
+        if (an.ingles) s.ingles = an.ingles;
         if (s.status !== 'issued') s.status = 'draft';
       }
       res.json({ ok: true, analisis: an });
@@ -1138,6 +1149,9 @@ ${!code ? `
         declara: b.declara || {},
         recomendacion: b.recomendacion || {},
         trayectoria: b.trayectoria || s0.trayectoria || [],
+        ingles_obs: (b.ingles && b.ingles.evaluado !== undefined) ? b.ingles : (b.ingles || null),
+        ingles_nivel: (b.ingles && b.ingles.confirmado) || null,
+        ingles_exigido: (b.ingles && b.ingles.nivel_exigido) || null,
         semaforo: sem.color,
         integrity_hash: hash,
       };
@@ -1148,6 +1162,7 @@ ${!code ? `
                                     integrity_hash=$6, declara=COALESCE($7::jsonb, declara),
                                     recomendacion=COALESCE($8::jsonb, recomendacion),
                                     trayectoria=COALESCE($9::jsonb, trayectoria),
+                                    ingles=COALESCE($12::jsonb, ingles),
                                     snapshot=$10::jsonb, formato=$11,
                                     issued_at=NOW(), updated_at=NOW()
            WHERE id=$1 RETURNING id, report_code, issued_at, integrity_hash`,
@@ -1155,7 +1170,8 @@ ${!code ? `
            b.declara ? JSON.stringify(b.declara) : null,
            b.recomendacion ? JSON.stringify(b.recomendacion) : null,
            b.trayectoria ? JSON.stringify(b.trayectoria) : null,
-           JSON.stringify(snapshot), FORMATO_ACTA]
+           JSON.stringify(snapshot), FORMATO_ACTA,
+           b.ingles ? JSON.stringify(b.ingles) : null]
         );
         if (!q.rows.length) return res.status(404).json({ error: 'not found' });
         return res.json({ ok: true, semaforo: sem, identidad, documento: doc, ...q.rows[0] });
@@ -1199,7 +1215,8 @@ ${!code ? `
       const id = Number(req.params.id);
       if (pool) {
         const s = await pool.query(`
-          SELECT s.*, v.title AS vacancy_title, c.name AS company_name
+          SELECT s.*, v.title AS vacancy_title, c.name AS company_name,
+                 v.ingles_requerido, v.ingles_nivel, v.ingles_uso, v.ingles_cita
           FROM ${T.sessions} s LEFT JOIN ${T.vacancies} v ON v.id=s.vacancy_id
           LEFT JOIN ${T.companies} c ON c.id=v.company_id WHERE s.id=$1`, [id]);
         if (!s.rows.length) return res.status(404).json({ error: 'not found' });

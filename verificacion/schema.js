@@ -144,6 +144,15 @@ async function initSchema(pool) {
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS snapshot JSONB`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS formato TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_v_sess_didit ON ${T.sessions}(didit_session_id)`,
+    // El inglés no es un requisito más: no se mide preguntando "¿hablas inglés?" sino
+    // pasando un tramo de la entrevista a inglés y viendo si lo sostiene. Vive en la
+    // vacante porque el nivel que exige el cargo lo define el cliente, no el candidato.
+    `ALTER TABLE ${T.vacancies} ADD COLUMN IF NOT EXISTS ingles_requerido BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE ${T.vacancies} ADD COLUMN IF NOT EXISTS ingles_nivel TEXT`,
+    `ALTER TABLE ${T.vacancies} ADD COLUMN IF NOT EXISTS ingles_uso TEXT`,
+    `ALTER TABLE ${T.vacancies} ADD COLUMN IF NOT EXISTS ingles_cita TEXT`,
+    // Lo observado en la sesión, que es lo que va al acta.
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS ingles JSONB`,
     `ALTER TABLE ${T.vacancies} ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
