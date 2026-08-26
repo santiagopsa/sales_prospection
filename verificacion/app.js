@@ -608,7 +608,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         return res.status(400).json({ error: 'La transcripción está vacía o es demasiado corta. Una entrevista de 25 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.' });
       }
 
-      let cargo = '', candidato = '', modo = 'B', excluyentes = [], ingles = null;
+      let cargo = '', candidato = '', modo = 'B', excluyentes = [];
       if (pool) {
         const q = await pool.query(`
           SELECT s.candidate, s.mode, v.id AS vid, v.title,
@@ -617,7 +617,6 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
           WHERE s.id = $1`, [id]);
         if (!q.rows.length) return res.status(404).json({ error: 'not found' });
         cargo = q.rows[0].title || ''; candidato = q.rows[0].candidate || ''; modo = q.rows[0].mode || 'B';
-        ingles = { requerido: !!q.rows[0].ingles_requerido, nivel: q.rows[0].ingles_nivel, uso: q.rows[0].ingles_uso };
         if (q.rows[0].vid) {
           const rq = await pool.query(
             `SELECT id, text, criterio, detalles, senales FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`,
@@ -629,12 +628,11 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         if (!s) return res.status(404).json({ error: 'not found' });
         const v = mem.vacancies.find(x => x.id === s.vacancy_id);
         cargo = (v && v.title) || ''; candidato = s.candidate || ''; modo = s.mode || 'B';
-        ingles = v ? { requerido: !!v.ingles_requerido, nivel: v.ingles_nivel, uso: v.ingles_uso } : null;
         excluyentes = mem.requirements.filter(q => q.vacancy_id === (v && v.id)).sort((a, b) => a.ord - b.ord);
       }
 
       const out = await pedirJson(
-        buildTranscriptPrompt(transcript, { requisitos: excluyentes, candidato, cargo, modo, ingles }),
+        buildTranscriptPrompt(transcript, { requisitos: excluyentes, candidato, cargo, modo }),
         { etiqueta: 'transcripcion', maxTokens: 10000 });
       if (out.error) return res.status(502).json(out);
 
@@ -644,16 +642,16 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       an._chars = transcript.trim().length;
 
       if (pool) {
+        // `ingles` NO se toca aquí. Lo marcó el evaluador durante la llamada y la
+        // transcripción no tiene con qué contradecirlo: viene en un solo idioma.
         await pool.query(
           `UPDATE ${T.sessions} SET transcript_analisis=$2::jsonb, transcript_at=NOW(),
-                                    ingles=COALESCE($3::jsonb, ingles),
                                     status = CASE WHEN status='issued' THEN status ELSE 'draft' END,
                                     updated_at=NOW() WHERE id=$1`,
-          [id, JSON.stringify(an), an.ingles ? JSON.stringify(an.ingles) : null]);
+          [id, JSON.stringify(an)]);
       } else {
         const s = mem.sessions.find(x => x.id === id);
         s.transcript_analisis = an; s.transcript_at = an._at;
-        if (an.ingles) s.ingles = an.ingles;
         if (s.status !== 'issued') s.status = 'draft';
       }
       res.json({ ok: true, analisis: an });
@@ -1144,9 +1142,13 @@ ${!code ? `
         declara: b.declara || {},
         recomendacion: b.recomendacion || {},
         trayectoria: b.trayectoria || s0.trayectoria || [],
-        ingles_obs: (b.ingles && b.ingles.evaluado !== undefined) ? b.ingles : (b.ingles || null),
         ingles_nivel: (b.ingles && b.ingles.confirmado) || null,
         ingles_exigido: (b.ingles && b.ingles.nivel_exigido) || null,
+        ingles_nota: (b.ingles && b.ingles.nota) || '',
+        ingles_minuto: (b.ingles && b.ingles.minuto) || '',
+        // Queda escrito en el documento congelado: el inglés es juicio del evaluador,
+        // no cita de la transcripción como el resto del acta.
+        ingles_fuente: (b.ingles && b.ingles.fuente) || 'evaluador_en_vivo',
         semaforo: sem.color,
         integrity_hash: hash,
       };

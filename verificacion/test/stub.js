@@ -205,6 +205,7 @@ const server = http.createServer(async (req, res) => {
     const v = db.vacancies.find(x=>x.id===s.vacancy_id);
     return json(res,200,{...sinImagen, vacancy_title:v&&v.title, company_name:v&&v.company_name,
       ingles_requerido:v&&v.ingles_requerido, ingles_nivel:v&&v.ingles_nivel, ingles_uso:v&&v.ingles_uso,
+      ingles:s.ingles||null,
       tiene_captura:!!shot, identidad:estadoIdentidad(ctx),
       documento:tipoDocumento(ctx), ratings:db.ratings.filter(r=>r.session_id===s.id)});
   }
@@ -239,7 +240,8 @@ const server = http.createServer(async (req, res) => {
     const sem = semaforo({identity:b.identity||{}, signals:b.signals||{}, ...ctx});
     Object.assign(s, {identity:b.identity||{}, signals:b.signals||{}, semaforo:sem.color,
                       declara:b.declara||{}, recomendacion:b.recomendacion||{},
-                      ...(b.trayectoria ? {trayectoria:b.trayectoria} : {})});
+                      ...(b.trayectoria ? {trayectoria:b.trayectoria} : {}),
+                      ...(b.ingles ? {ingles:b.ingles} : {})});
     db.ratings = db.ratings.filter(r=>r.session_id!==s.id);
     (b.ratings||[]).forEach((r,i)=>db.ratings.push({id:nid(), session_id:s.id, req_text:r.req_text,
       requirement_id:r.requirement_id, ord:i, level:r.level, verdict:r.level?LVLTXT[r.level]:null, evidence:r.evidence}));
@@ -265,12 +267,18 @@ const server = http.createServer(async (req, res) => {
       ratings:ratings.map(r=>({req_text:r.req_text, level:r.level, evidence:r.evidence||''})),
       identity:b.identity||{}, signals:b.signals||{}, identidad,
       face_score:s.face_score??null, declara:b.declara||{}, recomendacion:b.recomendacion||{},
-      trayectoria:b.trayectoria||s.trayectoria||[], semaforo:sem.color, integrity_hash:hash};
+      trayectoria:b.trayectoria||s.trayectoria||[], semaforo:sem.color, integrity_hash:hash,
+      ingles_nivel:(b.ingles&&b.ingles.confirmado)||null,
+      ingles_exigido:(b.ingles&&b.ingles.nivel_exigido)||null,
+      ingles_nota:(b.ingles&&b.ingles.nota)||'',
+      ingles_minuto:(b.ingles&&b.ingles.minuto)||'',
+      ingles_fuente:(b.ingles&&b.ingles.fuente)||'evaluador_en_vivo'};
     Object.assign(s, {status:'issued', semaforo:sem.color, integrity_hash:hash,
       snapshot, formato:FORMATO_ACTA,
       identity:b.identity||{}, signals:b.signals||{},
       declara:b.declara||{}, recomendacion:b.recomendacion||{},
       ...(b.trayectoria ? {trayectoria:b.trayectoria} : {}),
+      ...(b.ingles ? {ingles:b.ingles} : {}),
       issued_at:new Date().toISOString()});
     return json(res,200,{ok:true, semaforo:sem, identidad, documento:doc,
       id:s.id, report_code:s.report_code, issued_at:s.issued_at, integrity_hash:hash});
@@ -308,9 +316,8 @@ const server = http.createServer(async (req, res) => {
         senales: [],
         nota: ''
       })),
-      ingles:{evaluado:true, nivel_observado:'B2', alcanza_lo_exigido:true,
-        evidencia:'So in Alpina I was the one leading the rollout, and honestly the first week was rough — the material master data was a mess.',
-        por_que:'Sostuvo el tema técnico en inglés con pausas naturales y se autocorrigió una vez.', nota:''},
+      // Sin `ingles`: el análisis de la transcripción ya no lo produce. El nivel de inglés
+      // lo marca el evaluador en vivo, porque Meet transcribe en un solo idioma.
       declara:{pretension:'Habló de 12 millones', disponibilidad:'Dos semanas', motivacion:'Busca autonomía en la decisión técnica', nogo:'Baja autonomía'},
       senales_generales:[],
       advertencias: t.includes('__CORTADA__') ? ['La transcripción parece cortada: termina a mitad de una frase.'] : [],

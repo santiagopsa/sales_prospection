@@ -280,11 +280,20 @@ async function verSesion(id){
       idc: fuente.identity || {}, sig: fuente.signals || {},
       dec: fuente.declara || {}, rec: fuente.recomendacion || {riesgos:[]},
       cv: s.cv_analisis || null, tray: fuente.trayectoria || [],
-      ing: s.ingles_requerido ? {requerido:true, nivel:s.ingles_nivel, uso:s.ingles_uso, cita:s.ingles_cita} : null,
-      ingObs: s.ingles || null,
+      // Lo que decidió la SESIÓN manda sobre lo que diga la vacante hoy: el evaluador pudo
+      // apagar el inglés para este candidato, y la vacante pudo editarse después.
+      ing: (s.ingles && typeof s.ingles.requerido === 'boolean')
+        ? (s.ingles.requerido
+            ? {requerido:true, nivel:s.ingles.nivel_exigido || s.ingles_nivel, uso:s.ingles.uso || s.ingles_uso, cita:s.ingles_cita}
+            : null)
+        : (s.ingles_requerido ? {requerido:true, nivel:s.ingles_nivel, uso:s.ingles_uso, cita:s.ingles_cita} : null),
       ingNivel: (s.ingles && s.ingles.confirmado) || null,
-      snapIngles: (snap && snap.ingles_nivel) ? {...(snap.ingles_obs || {}),
-                    confirmado: snap.ingles_nivel, nivel_exigido: snap.ingles_exigido || null} : null,
+      ingNota: (s.ingles && s.ingles.nota) || '',
+      ingMin: (s.ingles && s.ingles.minuto) || '',
+      snapIngles: (snap && snap.ingles_nivel) ? {
+                    confirmado: snap.ingles_nivel, nivel_exigido: snap.ingles_exigido || null,
+                    nota: snap.ingles_nota || '', minuto: snap.ingles_minuto || '',
+                    fuente: snap.ingles_fuente || 'evaluador_en_vivo'} : null,
       ident: snap ? {...(snap.identidad || {}), face_score: snap.face_score}
                   : {...(s.identidad || {}), didit_status: s.didit_status,
                      face_verdict: s.face_verdict, face_score: s.face_score},
@@ -878,6 +887,10 @@ async function guardarEdicion(){
 /* ===================== setup de sesión ===================== */
 function setupSesion(v){
   const modo = v.suggested_mode === 'A' ? 'A' : 'B';
+  // El inglés viene marcado según lo que diga la vacante, pero se puede cambiar aquí:
+  // el cliente puede exigirlo y este candidato traerlo validado por otra vía, o al revés.
+  const vIng = { nivel: v.ingles_nivel, uso: v.ingles_uso };
+  const ingPide = !!v.ingles_requerido;
   $('#setupStage').innerHTML = `
     <div class="setup">
       <button class="back" data-back type="button">← Volver a la vacante</button>
@@ -939,11 +952,32 @@ function setupSesion(v){
         </div>
       </div>
 
+      <div class="fset">
+        <div class="fttl">Inglés</div>
+        <div class="modes" id="setIng">
+          <button class="mode ${ingPide?'sel':''}" data-i="1" type="button">
+            <b>Sí · se valida en la llamada</b>
+            <span>Se agrega un tramo de 4 minutos en inglés y tú marcas el nivel ahí mismo, con la rúbrica de conducta.</span>
+          </button>
+          <button class="mode ${ingPide?'':'sel'}" data-i="0" type="button">
+            <b>No se evalúa</b>
+            <span>El acta no menciona el inglés. Ni a favor ni en contra.</span>
+          </button>
+        </div>
+        <p class="hint">${ingPide
+          ? `La vacante dice que el cargo lo exige${vIng.nivel ? ` (${esc(vIng.nivel)})` : ''}. Quítalo solo si a este candidato ya se lo validaron por otra vía.`
+          : 'La vacante no lo exige. Actívalo si este cargo o este cliente sí lo necesita.'}</p>
+      </div>
+
       <button class="cta" id="btnIniciar" disabled>Iniciar la sesión</button>
       <p class="hint">Antes de darle clic: ten la grabación de Meet activa y el reporte de identidad a la mano.</p>
     </div>`;
 
-  let mode = modo, kind = 'sondeo';
+  let mode = modo, kind = 'sondeo', ingOn = ingPide;
+  $('#setupStage').querySelectorAll('#setIng .mode').forEach(b => b.addEventListener('click', () => {
+    ingOn = b.dataset.i === '1';
+    $('#setupStage').querySelectorAll('#setIng .mode').forEach(m => m.classList.toggle('sel', m===b));
+  }));
   $('#setupStage').querySelector('[data-back]').addEventListener('click', () => verVacante(v.id));
   $('#setupStage').querySelectorAll('#setKind .mode').forEach(b => b.addEventListener('click', () => {
     kind = b.dataset.k;
@@ -996,8 +1030,8 @@ function setupSesion(v){
         mail: $('#sMail').value.trim(), ident: null,
         reqs: (v.requirements||[]).map(r => ({rid:r.id, n:r.text, lvl:0, ev:'', r})),
         // Lo que el cargo exige de inglés viene de la vacante: lo define el cliente.
-        ing: v.ingles_requerido ? {requerido:true, nivel:v.ingles_nivel, uso:v.ingles_uso, cita:v.ingles_cita} : null,
-        ingNivel: null, ingObs: null,
+        ing: ingOn ? {requerido:true, nivel:v.ingles_nivel, uso:v.ingles_uso, cita:v.ingles_cita} : null,
+        ingNivel: null, ingNota: '', ingMin: '',
         idc:{}, sig:{}, fase:0, t0:Date.now(), tFase:Date.now(), fin:false, fecha:null, hash:null,
       };
       saveLocal();
@@ -1070,6 +1104,14 @@ function cuerpoSesion(){
     identity: S.idc, signals: S.sig, data: {mode:S.mode, fase:S.fase},
     declara: S.dec || {}, recomendacion: S.rec || {}, trayectoria: S.tray || null,
     ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||''})),
+    // El inglés se guarda entero en la sesión —si se evalúa, qué se marcó y de dónde salió—
+    // y no se recalcula desde la vacante: la vacante puede cambiar después, y el evaluador
+    // pudo apagarlo para este candidato. La sesión manda sobre la vacante.
+    ingles: S.ing ? {
+      requerido: true, nivel_exigido: S.ing.nivel || null, uso: S.ing.uso || null,
+      confirmado: S.ingNivel || null, nota: S.ingNota || '', minuto: S.ingMin || '',
+      fuente: 'evaluador_en_vivo',
+    } : { requerido: false },
   };
 }
 
@@ -1354,49 +1396,65 @@ function render(){
 
 
   // --- INGLÉS: guía durante la llamada, confirmación después. ---
+  /* --- INGLÉS: el único juicio que NO sale de la transcripción ---
+     Meet transcribe en un solo idioma por archivo y no cambia solo a mitad de llamada
+     (la detección automática de idioma corre una vez por reunión y solo sugiere). Un
+     tramo en inglés dentro de una transcripción en español sale escrito con fonética
+     española: texto inservible del que un modelo igual propondría un nivel. Eso sería
+     un nivel inventado dentro de un documento que promete cita literal.
+     Así que aquí el evaluador marca EN VIVO, con su criterio, y el acta dice de dónde
+     salió. Es evidencia más débil que el resto del acta, y se declara como tal. */
   else if(f.k === 'ing'){
     const ing = S.ing || {};
-    const obs = S.ingObs || {};
+    const enVivo = enEntrevista();
     st.innerHTML = `
       <div class="card">
         <h2>Inglés</h2>
-        <div class="cs" style="margin-bottom:16px">${enEntrevista()
+        <div class="cs" style="margin-bottom:16px">${enVivo
           ? 'Unos 4 minutos en inglés. No es un examen aparte: es el mismo tema del cargo, en el otro idioma.'
-          : 'Lo que sostuvo en el tramo en inglés. Confirma o corrige el nivel.'}</div>
+          : 'Lo que marcaste durante la llamada. Puedes corregirlo aquí.'}</div>
 
         <div class="say"><div class="lb">QUÉ PIDE EL CARGO</div><p style="font-style:normal">
           ${esc(ing.nivel || 'Nivel no especificado por el cliente')}${ing.uso ? ` · <b>${esc(ing.uso)}</b>` : ''}</p></div>
 
-        ${enEntrevista() ? `
+        ${enVivo ? `
           <div class="steps">
             ${GUION_ING.map((g,gi) => `<div class="step"><div class="sn">${gi+1}</div><div class="sb">
               <div class="st">${g.t}</div><div class="sd">${g.d}</div></div></div>`).join('')}
           </div>
-          <p class="hint">No lo califiques ahora ni te preocupes si tu inglés no es perfecto: lo que
-          importa es que él hable. El nivel sale de la transcripción, que va a traer ese tramo en inglés.</p>
-        ` : `
-          ${obs.evaluado === false ? `<div class="aviso malo">
-            <b>No hubo un tramo en inglés en la transcripción.</b>
-            Sin conversación en inglés no hay nivel que reportar. Si sí se hizo, revisa que la
-            transcripción esté completa; si no se hizo, el acta lo dirá como no evaluado.
-          </div>` : ''}
-          ${obs.evidencia ? `<div class="cita">
-            <div class="dt">Lo que dijo en inglés — cita de la transcripción</div>
-            <blockquote>${esc(obs.evidencia)}</blockquote>
-            ${obs.por_que ? `<p class="pq">${esc(obs.por_que)}</p>` : ''}
-            ${obs.nota ? `<p class="pq av">${esc(obs.nota)}</p>` : ''}
-          </div>` : ''}
-
-          <div class="lvlttl">Nivel observado${obs.nivel_observado ? ` — la transcripción propone ${esc(obs.nivel_observado)}` : ''}</div>
-          <div class="lvls ing">
-            ${NIVELES_ING.map(v => `<button class="lv ${S.ingNivel===v?'sel':''}" data-ing="${v}" type="button">
-              <div class="n">${v}</div></button>`).join('')}
+          <div class="aviso">
+            <b>Este es el único tramo que calificas en vivo.</b>
+            La transcripción de Meet queda en el idioma con el que arrancó y el inglés sale
+            escrito con fonética española: no sirve como evidencia. Marca el nivel apenas
+            termine el tramo, mientras lo tienes fresco.
           </div>
-          <div class="anchor" id="ingBox">${S.ingNivel ? esc(ANCLA_ING[S.ingNivel]) : 'Marca el nivel que corresponde a lo que se oyó.'}</div>
-          <p class="hint">Se mide por conducta, no por certificados. Un candidato que responde en
-          inglés con frases que suenan escritas —sin titubeos, con vocabulario más pulido que su
-          español— es una señal, no un C1.</p>
-        `}
+        ` : ''}
+
+        <div class="lvlttl">Nivel observado</div>
+        <div class="lvls ing">
+          ${NIVELES_ING.map(v => `<button class="lv ${S.ingNivel===v?'sel':''}" data-ing="${v}" type="button">
+            <div class="n">${v}</div></button>`).join('')}
+        </div>
+        <div class="anchor" id="ingBox">${S.ingNivel ? esc(ANCLA_ING[S.ingNivel]) : 'Marca el nivel que corresponde a lo que se oyó.'}</div>
+
+        <div class="fttl" style="margin-top:16px">Qué te hizo marcar ese nivel</div>
+        <textarea data-ingnota rows="3" placeholder="Qué sostuvo y qué no: si buscó palabras, si se autocorrigió, si aguantó el tema técnico o se replegó a frases hechas.">${esc(S.ingNota||'')}</textarea>
+        <div class="minuto">
+          <label for="ingMin">Minuto de la grabación donde ocurrió</label>
+          <input id="ingMin" data-ingmin value="${esc(S.ingMin||'')}" placeholder="p. ej. 18:40" inputmode="numeric">
+        </div>
+        <p class="hint">El minuto no es burocracia: es lo que le permite a quien revisa ir
+        directo a ese tramo y comprobarlo. Sin él, tu criterio no es verificable por nadie más.</p>
+
+        <p class="hint">Se mide por conducta, no por certificados. Un candidato que responde en
+        inglés con frases que suenan escritas —sin titubeos, con vocabulario más pulido que su
+        español— es una señal, no un C1.</p>
+
+        ${!enVivo && !S.ingNivel ? `<div class="aviso malo">
+          <b>No quedó marcado durante la llamada.</b>
+          Puedes marcarlo ahora si lo recuerdas con precisión, o dejarlo sin marcar: el acta
+          dirá que el inglés no se evaluó, que es mejor que reportar un nivel que no observaste.
+        </div>` : ''}
 
         <div class="nav">
           <button data-prev type="button">Atrás</button>
@@ -1411,6 +1469,10 @@ function render(){
         $('#ingBox').textContent = S.ingNivel ? ANCLA_ING[S.ingNivel] : 'Marca el nivel que corresponde a lo que se oyó.';
       });
     });
+    const nota = st.querySelector('[data-ingnota]');
+    if(nota) nota.addEventListener('input', e => { S.ingNota = e.target.value; touch(); });
+    const min = st.querySelector('[data-ingmin]');
+    if(min) min.addEventListener('input', e => { S.ingMin = e.target.value; touch(); });
   }
 
   // --- FIN DE LA ENTREVISTA: se cuelga, y la transcripción llega después. ---
@@ -2049,11 +2111,9 @@ function aplicarTranscripcion(an){
     if(prop.cubierto !== false && prop.nivel) r.lvl = Number(prop.nivel) || null;
     if(prop.evidencia) r.ev = String(prop.evidencia);
   });
-  const ing = S.tran.ingles || null;
-  if(ing){
-    S.ingObs = ing;
-    if(!S.ingNivel && ing.evaluado !== false && ing.nivel_observado) S.ingNivel = ing.nivel_observado;
-  }
+  // El inglés NO se toca aquí. La transcripción viene en un solo idioma y el tramo en
+  // inglés sale escrito con fonética española: proponer un nivel desde ahí sería inventarlo.
+  // Lo marca el evaluador en vivo, en la fase de inglés.
   const d = S.tran.declara || {};
   S.dec = S.dec || {};
   ['pretension','disponibilidad','motivacion','nogo'].forEach(k => {
@@ -2085,7 +2145,9 @@ async function emitirActa(){
     const out = await api('/api/sessions/'+S.sid+'/issue', {method:'POST', body:{
       candidate: S.cand, identity: S.idc, signals: S.sig, data:{mode:S.mode},
       declara: S.dec || {}, recomendacion: S.rec || {}, trayectoria: S.tray || null,
-      ingles: S.ing ? {...(S.ingObs||{}), requerido:true, nivel_exigido:S.ing.nivel, confirmado:S.ingNivel||null} : null,
+      ingles: S.ing ? {requerido:true, nivel_exigido:S.ing.nivel || null, uso:S.ing.uso || null,
+                       confirmado:S.ingNivel||null, nota:S.ingNota||'', minuto:S.ingMin||'',
+                       fuente:'evaluador_en_vivo'} : null,
       ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||''})),
     }});
     S.fin = true; S.fecha = Date.now(); S.hash = out.integrity_hash;
@@ -2121,7 +2183,8 @@ function verActa(){
     const snap = S.snapIngles;                 // congelado al emitir
     if(snap) return snap;
     if(!S.ing) return null;
-    return {...(S.ingObs || {}), confirmado: S.ingNivel || null, nivel_exigido: S.ing.nivel || null};
+    return {confirmado: S.ingNivel || null, nivel_exigido: S.ing.nivel || null,
+            nota: S.ingNota || '', minuto: S.ingMin || '', fuente: 'evaluador_en_vivo'};
   })();
   const tray = (S.tray || []).filter(t => t.empresa || t.cargo);
   const riesgos = (rec.riesgos||[]).filter(x => (x.r||'').trim());
@@ -2214,21 +2277,29 @@ function verActa(){
       <div class="zona"><span class="zn">Inglés</span><h3>Lo que se oyó en inglés</h3>
         <span class="zs">${ingA.nivel_exigido ? 'El cargo pide: ' + esc(ingA.nivel_exigido) : 'Medido en la sesión'}</span></div>
       <div class="zbox">
-        ${ingA.evaluado === false || !ingA.confirmado ? `
-          <p class="dtx"><b>No evaluado en esta sesión.</b> No hubo un tramo en inglés en la
+        ${!ingA.confirmado ? `
+          <p class="dtx"><b>No evaluado en esta sesión.</b> No se midió el inglés en la
           conversación, así que este informe no dice nada sobre su inglés — ni a favor ni en contra.</p>
         ` : `
           <div class="ingfila">
             <div class="ingniv">${esc(ingA.confirmado)}</div>
             <div class="ingtx">
               <b>${esc(ANCLA_ING[ingA.confirmado] || '')}</b>
-              ${ingA.por_que ? `<p class="dtx" style="margin-top:6px">${esc(ingA.por_que)}</p>` : ''}
+              ${ingA.nota ? `<p class="dtx" style="margin-top:6px">${esc(ingA.nota)}</p>` : ''}
             </div>
           </div>
-          ${ingA.evidencia ? `<div class="aev" style="margin-top:10px"><i>“${esc(ingA.evidencia)}”</i></div>` : ''}
-          ${ingA.nota ? `<p class="hint">${esc(ingA.nota)}</p>` : ''}
+          <!-- El resto del acta se sostiene en cita textual de la transcripción. Esto no, y
+               callarlo sería darle al lector una confianza que este dato no tiene. Meet
+               transcribe en un solo idioma por archivo, así que el tramo en inglés no queda
+               en texto utilizable: lo califica el evaluador escuchando, en vivo. -->
+          <div class="aev" style="margin-top:10px"><b>Cómo se midió:</b> a diferencia del resto
+            de este informe, el inglés no proviene de la transcripción. La transcripción de la
+            llamada queda en un solo idioma y no recoge el tramo en inglés de forma utilizable.
+            Este nivel lo marcó ${esc(S.eval || 'el evaluador')} escuchando en vivo, contra la
+            escala de conducta${ingA.minuto ? `, y quedó anotado el minuto <b>${esc(ingA.minuto)}</b> de la grabación para poder comprobarlo` : ''}.</div>
           <p class="hint">Medido por conducta en un tramo de la entrevista, no por certificado.
-          No reemplaza una prueba estandarizada si el cliente la exige.</p>
+          Es un juicio del evaluador, no una medición instrumentada: si el cliente necesita
+          certeza sobre el idioma, una prueba estandarizada sigue siendo el camino.</p>
         `}
       </div>` : ''}
 
