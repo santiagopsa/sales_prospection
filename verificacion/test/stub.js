@@ -9,6 +9,16 @@ const crypto = require('crypto');
 const PUB = path.join(__dirname, '..', 'public');
 const MOUNT = '/verificacion'; // igual que en el servidor real
 const { LVLTXT, semaforo, bloqueos, estadoIdentidad, tipoDocumento } = require('../rules'); // reglas reales del servidor
+const A = require('../archivos'); // misma decisión de "qué es este archivo" que app.js
+
+// Lo que el stub devuelve al "leer" un .docx o .pdf, ya que no tiene mammoth ni pdf-parse.
+const FAKE_TRANS = (
+  'Reclutador: cuentame de tu experiencia con este requisito.\n' +
+  'Candidato: en Alpina, entre marzo y noviembre de 2023, yo lleve el rollout. ' +
+  'Lo que se nos cayo fue el maestro de materiales la primera semana del go-live.\n' +
+  'Reclutador: que transaccion usas para listas de materiales?\n' +
+  'Candidato: CS01 para crear, CS02 para modificar.\n'
+).repeat(8);
 const FORMATO_ACTA = 'v3-2026-08'; // igual que en app.js
 const db = { companies:[], vacancies:[], requirements:[], sessions:[], ratings:[], seq:1 };
 const nid = () => db.seq++;
@@ -68,10 +78,28 @@ const server = http.createServer(async (req, res) => {
 
   if(p === '/api/health') return json(res,200,{ok:true, db:true, dbReady:true, llm:true, model:'stub', build:'stub', prefill:false});
 
+  // Antes este stub aceptaba cualquier cosa y devolvía el texto crudo: era MÁS permisivo
+  // que el servidor real, y por eso ninguna prueba de navegador vio que la pantalla de
+  // transcripción mandaba el nombre en el campo equivocado. Ahora usa la misma decisión
+  // que app.js (archivos.js), así que si el frontend manda mal el nombre, falla aquí.
   if(p === '/api/extract-text' && m==='POST'){
     const b = await body(req);
     const buf = Buffer.from(b.dataBase64||'', 'base64');
-    const text = buf.toString('utf8').replace(/\r\n/g,'\n').trim();
+    const ext = A.extensionDe(A.nombreDe(b), buf);
+    if(!A.CONOCIDAS.includes(ext)){
+      const crudo = buf.toString('utf8');
+      if(A.pareceBinario(crudo)) return json(res,415,{error: A.mensajeNoLeible(ext)});
+    }
+    // El stub no trae mammoth ni pdf-parse: para .docx/.pdf devuelve un texto de mentira
+    // con la forma correcta, que es lo que las pruebas de flujo necesitan.
+    let text;
+    if(ext === 'docx' || ext === 'pdf'){
+      text = FAKE_TRANS;
+    } else {
+      text = buf.toString('utf8');
+      if(ext === 'vtt' || ext === 'srt') text = A.limpiarSubtitulos(text);
+    }
+    text = text.replace(/\r\n/g,'\n').trim();
     return json(res,200,{ok:true, text, chars:text.length});
   }
 

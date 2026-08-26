@@ -15,6 +15,7 @@ const { LVLTXT, clean, esCierre, semaforo, estadoIdentidad, bloqueos, tipoDocume
 const didit = require('./didit');
 const { T, initSchema } = require('./schema');
 const { crearPedirJson } = require('./llm');
+const A = require('./archivos');
 
 // Versión del formato del acta. Queda grabada en cada documento emitido: si mañana el acta
 // cambia, el informe viejo sigue diciendo con qué formato se dibujó.
@@ -172,7 +173,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
   const BUILD = (() => {
     try {
       const h = require('crypto').createHash('sha1');
-      for (const f of ['app.js', 'llm.js', 'json_llm.js', 'rules.js', 'prompts.js', 'schema.js', 'didit.js']) {
+      for (const f of ['app.js', 'llm.js', 'json_llm.js', 'rules.js', 'prompts.js', 'schema.js', 'didit.js', 'archivos.js']) {
         try { h.update(require('fs').readFileSync(path.join(__dirname, f))); } catch (e) {}
       }
       h.update(VER);
@@ -210,13 +211,14 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
   // -------------------------------------------------------------------------
   r.post('/api/extract-text', async (req, res) => {
     try {
-      const { filename, dataBase64 } = req.body || {};
+      const { dataBase64 } = req.body || {};
       if (!dataBase64) return res.status(400).json({ error: 'falta el archivo' });
       const buf = Buffer.from(dataBase64, 'base64');
-      const ext = (filename || '').toLowerCase().split('.').pop();
+      // La decisión de qué es el archivo vive en archivos.js, compartida con el stub.
+      const ext = A.extensionDe(A.nombreDe(req.body), buf);
 
       let text = '';
-      if (['txt', 'md', 'vtt', 'srt', 'csv', 'json', 'log'].includes(ext)) {
+      if (A.PLANAS.includes(ext)) {
         text = buf.toString('utf8');
       } else if (ext === 'docx') {
         let mammoth;
@@ -230,19 +232,12 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         text = (await pdfParse(buf)).text || '';
       } else {
         text = buf.toString('utf8');
-        if (/�/.test(text.slice(0, 2000))) {
-          return res.status(415).json({ error: `No sé leer archivos .${ext}. Usa .txt, .docx, .pdf, .vtt o pega el texto.` });
+        if (A.pareceBinario(text)) {
+          return res.status(415).json({ error: A.mensajeNoLeible(ext) });
         }
       }
 
-      // Subtítulos: quitar marcas de tiempo de VTT/SRT.
-      if (ext === 'vtt' || ext === 'srt') {
-        text = text
-          .replace(/^WEBVTT.*$/gm, '')
-          .replace(/^\d+$/gm, '')
-          .replace(/^[\d:.,]+\s*-->\s*[\d:.,]+.*$/gm, '')
-          .replace(/\n{3,}/g, '\n\n');
-      }
+      if (ext === 'vtt' || ext === 'srt') text = A.limpiarSubtitulos(text);
 
       text = text.replace(/\r\n/g, '\n').trim();
       res.json({ ok: true, text, chars: text.length });

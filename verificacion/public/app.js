@@ -1114,20 +1114,9 @@ function render(){
         <div class="say"><div class="lb">DILO ASÍ</div><p>“Gracias por conectarte. Esta sesión queda grabada, como todas las nuestras. ${cierre ? 'Al final te voy a enviar un link para confirmar tu identidad — lo haces desde tu celular en un minuto, y no queda ninguna foto de tu documento con nosotros. ' : ''}¿Arrancamos?”</p></div>
         ${idChecksDe(S.kind).map(c => `<button class="chk ${S.idc[c.id]?'on':''}" data-idc="${c.id}" ${c.id==='shot'?'disabled style="opacity:.75;cursor:default"':''} type="button"><span class="box">✓</span><span class="tx">${c.t}<small>${c.d}</small></span></button>`).join('')}
 
-        ${cierre ? `
-        <div class="shotbox ${S.idc.shot?'has':''}" id="shotBox">
-          <input type="file" id="shotFile" accept="image/*" hidden>
-          <div class="shotin">
-            <div class="shotic">${S.idc.shot?'✓':'⌗'}</div>
-            <div class="shottx">
-              <b id="shotTitle">${S.idc.shot?'Captura guardada':'Captura el rostro del candidato'}</b>
-              <span id="shotSub">${S.idc.shot
-                ? 'Se comparará con su verificación de identidad. Puedes reemplazarla si quedó borrosa.'
-                : 'Toma un pantallazo del video con la cara de frente y visible, y suéltalo aquí. También puedes pegarlo con Ctrl+V.'}</span>
-            </div>
-          </div>
-        </div>
-        <p class="hint">La captura se borra sola en cuanto el cotejo termina. Lo que queda guardado es el puntaje, no la imagen.</p>
+        ${cierre ? cajaCaptura('apertura') + `
+        <p class="hint">Si el candidato todavía no se acomoda en cámara, no insistas ahora:
+        vuelves a tener el recuadro al final, antes de colgar.</p>
         ` : `
         <p class="hint" style="margin-top:14px">Este es un <b>sondeo</b>: no se pide identidad ni se guarda ninguna imagen. Si el candidato avanza a finalista, ahí se hace el cierre verificado.</p>
         `}
@@ -1434,12 +1423,12 @@ function render(){
         <p class="lede" style="margin-bottom:16px">Ahora despídete y cuelga. La evidencia sale de la
         transcripción, no de lo que alcanzaste a escribir.</p>
 
-        ${cierre && !S.idc.shot ? `<div class="aviso malo">
+        ${cierre ? (!S.idc.shot ? `<div class="aviso malo">
           <b>Falta la captura del rostro, y solo se puede tomar con la llamada abierta.</b>
           Es la imagen contra la que se coteja la verificación de identidad: sin ella, Didit
-          certifica a quien haya hecho el trámite, no a quien entrevistaste. Vuelve a Apertura
-          y tómala <b>antes de colgar</b> — después ya no hay manera.
-        </div>` : ''}
+          certifica a quien haya hecho el trámite, no a quien entrevistaste. Tómala
+          <b>antes de colgar</b> — aquí mismo, sin salir de esta pantalla.
+        </div>` : '') + cajaCaptura('fin') : ''}
 
         <div class="pasos">
           <div class="paso"><div class="pn">1</div><div>
@@ -1475,6 +1464,7 @@ function render(){
     // transcripción, o sea horas más tarde— es tenerla cuando ya no sirve.
     if(cierre){
       montarIdentidad(st);
+      montarCaptura();
       const bc = st.querySelector('#btnCopiarLink');
       if(bc) bc.addEventListener('click', () => {
         navigator.clipboard?.writeText(S.diditUrl).then(() => toast('Link copiado')).catch(() => toast('No se pudo copiar'));
@@ -1520,7 +1510,29 @@ function render(){
     const faltaId = idChecksDe(S.kind).filter(c => !S.idc[c.id]);
     const sinLvl = S.reqs.map((r,i) => ({r,i})).filter(x => !x.r.lvl);
     const sinEv  = S.reqs.map((r,i) => ({r,i})).filter(x => (x.r.ev||'').trim().length <= EV_MIN);
-    // fase 0 = identidad, fase i+1 = requisito i
+    // El índice de cada fase se BUSCA en la lista viva. Antes estaba escrito a mano
+    // ("fase 0 = identidad, fase i+1 = requisito i"), que era cierto cuando había una
+    // sola lista de fases. Con la lista partida en dos momentos —entrevista y
+    // calificación— esos números apuntaban a otra cosa: "Ir y completar" mandaba al
+    // requisito equivocado, y la identidad ni siquiera existe en esta lista.
+    const FC = fases();
+    const idxDe = pred => { const i = FC.findIndex(pred); return i < 0 ? null : i; };
+    const irAReq = i => idxDe(f => f.k === 'req' && f.i === i);
+
+    // Lo que falta de identidad se resuelve AQUÍ, no mandando al reclutador a otra
+    // pantalla: la Apertura pertenece al momento de la entrevista y ya no está en esta
+    // lista. Los checks se marcan y la captura se sube sin moverse del cierre.
+    const panelFaltaId = () => {
+      if(!faltaId.length) return '';
+      const marcables = faltaId.filter(c => c.id !== 'shot');
+      const faltaShot = faltaId.some(c => c.id === 'shot');
+      return `<div class="gatefix">
+        ${marcables.map(c => `<button class="chk" data-idc="${c.id}" type="button">
+          <span class="box">✓</span><span class="tx">${esc(c.t)}<small>${esc(c.d)}</small></span></button>`).join('')}
+        ${faltaShot ? cajaCaptura('cierre') : ''}
+      </div>`;
+    };
+
     const gate = (ok, titulo, detalle, irA) => `
       <div class="gate ${ok?'ok':'no'}">
         <span class="ic">${ok?'✓':'!'}</span>
@@ -1532,10 +1544,12 @@ function render(){
       <div class="card">
         <h2>Cierre de la sesión</h2>
         <div class="cs" style="margin-bottom:14px">Los veredictos se calculan solos desde los niveles que marcaste</div>
-        ${S.reqs.map(r => {
+        ${S.reqs.map((r, i) => {
           const v = r.lvl ? (r.lvl>=4?'ok':(r.lvl===3?'par':'no')) : 'nv';
           const tx = r.lvl ? LVLTXT[r.lvl] : 'SIN CALIFICAR';
-          return `<div class="res"><div class="rn">${esc(r.n)}<small>${esc((r.ev||'').trim().slice(0,110)||'sin evidencia registrada')}${(r.ev||'').length>110?'…':''}</small></div>
+          const p = porQue(r, i);
+          return `<div class="res"><div class="rn">${esc(r.n)}<small>${esc(p.texto)}</small>${
+                    p.aviso ? `<small class="ajus">${esc(p.aviso)}</small>` : ''}</div>
                   <div class="rl">${r.lvl||'–'} / 5</div><span class="vd ${v}">${tx}</span></div>`;
         }).join('')}
       </div>
@@ -1551,13 +1565,14 @@ function render(){
         <div class="fttl" style="margin-bottom:11px">Sin carpeta completa no hay acta</div>
         ${gate(idOk, 'Identidad verificada y grabación activa',
                faltaId.length ? `Falta${faltaId.length>1?'n':''}: ${faltaId.map(c=>esc(c.t.toLowerCase())).join(' · ')}` : '',
-               faltaId.length ? 0 : null)}
+               null)}
+        ${panelFaltaId()}
         ${gate(allLvl, 'Todos los requisitos calificados',
                sinLvl.length ? `Sin nivel: ${sinLvl.map(x=>esc(x.r.n)).join(' · ')}` : '',
-               sinLvl.length ? sinLvl[0].i+1 : null)}
+               sinLvl.length ? irAReq(sinLvl[0].i) : null)}
         ${gate(evOk, 'Evidencia textual registrada en cada requisito',
                sinEv.length ? `Muy corta o vacía en: ${sinEv.map(x=>esc(x.r.n)).join(' · ')}` : '',
-               sinEv.length ? sinEv[0].i+1 : null)}
+               sinEv.length ? irAReq(sinEv[0].i) : null)}
         ${S.kind==='cierre' ? gate(!idEspera, 'Verificación de identidad resuelta',
                idEspera ? (idn.texto || 'Enviada, sin completar') : '', null) : ''}
         ${gate(sem!=='r', 'Semáforo permite emisión',
@@ -1573,10 +1588,16 @@ function render(){
           : '<b>El acta no se puede generar todavía.</b> Arriba está señalado en rojo lo que falta; toca la línea para ir directo a esa pantalla.'}</p>
       </div>`;
     st.querySelectorAll('[data-ir]').forEach(b => b.addEventListener('click', e => goFase(+e.currentTarget.dataset.ir)));
+    st.querySelectorAll('[data-idc]').forEach(b => b.addEventListener('click', e => {
+      const k = e.currentTarget.dataset.idc;
+      if(k === 'shot') return;             // este se marca solo al subir la imagen
+      S.idc[k] = !S.idc[k]; touch(); render();
+    }));
     st.querySelector('#btnActa').addEventListener('click', emitirActa);
     st.querySelector('#btnJson').addEventListener('click', copiarJSON);
     if(S.kind === 'cierre'){
       montarIdentidad(st);
+      montarCaptura();
       const bc = st.querySelector('#btnCopiarLink');
       if(bc) bc.addEventListener('click', () => {
         navigator.clipboard?.writeText(S.diditUrl).then(() => toast('Link copiado')).catch(() => toast('No se pudo copiar'));
@@ -1743,6 +1764,35 @@ async function recargarIdentidad(){
 /* ===================== captura del rostro =====================
    El pantallazo se reduce en el navegador antes de subirlo: no hace falta mandar
    una imagen de 3 MB para comparar dos caras, y así el dato biométrico viaja lo mínimo. */
+/* El recuadro de la captura aparece en tres momentos, porque TOMARLA y SUBIRLA no son
+   lo mismo. Tomarla exige la llamada abierta (Apertura y Fin de la entrevista). Subirla
+   se puede después, desde el archivo que quedó en el disco — y por eso también está en
+   el Cierre: antes, si el reclutador la había tomado pero no subido, no tenía dónde
+   ponerla, y el botón "Ir y completar" lo mandaba a un requisito. */
+function cajaCaptura(momento){
+  const hay = !!S.idc.shot;
+  const titulo = hay ? 'Captura guardada'
+    : momento === 'cierre' ? 'Sube la captura del rostro'
+    : 'Captura el rostro del candidato';
+  const sub = hay
+    ? 'Se comparará con su verificación de identidad. Puedes reemplazarla si quedó borrosa.'
+    : momento === 'cierre'
+      ? 'Si la tomaste durante la llamada, suéltala aquí o pégala con Ctrl+V. Si no alcanzaste a tomarla, ya no hay manera: el acta saldrá sin cotejo de rostro y hay que decirlo.'
+      : 'Toma un pantallazo del video con la cara de frente y visible, y suéltalo aquí. También puedes pegarlo con Ctrl+V.';
+  return `
+    <div class="shotbox ${hay?'has':''}" id="shotBox">
+      <input type="file" id="shotFile" accept="image/*" hidden>
+      <div class="shotin">
+        <div class="shotic">${hay?'✓':'⌗'}</div>
+        <div class="shottx">
+          <b id="shotTitle">${titulo}</b>
+          <span id="shotSub">${sub}</span>
+        </div>
+      </div>
+    </div>
+    <p class="hint">La captura se borra sola en cuanto el cotejo termina. Lo que queda guardado es el puntaje, no la imagen.</p>`;
+}
+
 function montarCaptura(){
   const box = $('#shotBox'), file = $('#shotFile');
   if(!box) return;
@@ -1769,10 +1819,12 @@ function reducirImagen(file, max = 900, calidad = 0.85){
   return new Promise((res, rej) => {
     const img = new Image();
     img.onload = () => {
-      const esc = Math.min(1, max / Math.max(img.width, img.height));
+      // 'escala', no 'esc': esc es el escapador de HTML global y sombrearlo aquí ya
+      // costó un error de TDZ una vez en qrGrande.
+      const escala = Math.min(1, max / Math.max(img.width, img.height));
       const c = document.createElement('canvas');
-      c.width = Math.round(img.width * esc);
-      c.height = Math.round(img.height * esc);
+      c.width = Math.round(img.width * escala);
+      c.height = Math.round(img.height * escala);
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(img.src);
       res(c.toDataURL('image/jpeg', calidad).split(',')[1]);
@@ -1835,6 +1887,35 @@ function drawSig(){
    pierde es la repregunta que desarma a un impostor. La evidencia sale de la transcripción.
    Google tarda unos minutos en generarla, así que este paso vive fuera de la llamada y la
    sesión se puede cerrar y retomar sin perder nada. */
+
+/* Por qué cumple o no cumple.
+   Antes este renglón mostraba la cita textual recortada a 110 caracteres, que es la
+   evidencia, no el juicio: el lector tenía que deducir solo por qué un "4/5" era CUMPLE.
+   Ahora dice el razonamiento y deja la cita para el acta, que es donde importa el
+   literal. El orden de las fuentes no es capricho:
+     1. lo que la transcripción sostiene ("por_que_ese_nivel");
+     2. si no hubo transcripción, el ancla de la rúbrica — que ES la definición del nivel;
+     3. si no hay nivel, se dice que no se midió, no se rellena.
+   Y si el evaluador movió el nivel respecto a lo que propuso la transcripción, se avisa:
+   la justificación de arriba explica OTRO nivel, y callarlo sería presentar como
+   sostenido algo que la conversación no sostiene. */
+function porQue(r, i){
+  const p = propuestaDe(i) || {};
+  const propio = String(p.por_que_ese_nivel || '').trim();
+  const nivelProp = Number(p.nivel) || null;
+
+  if(!r.lvl) return { texto: p.cubierto === false
+    ? 'No se tocó en la conversación: queda sin medir, ni a favor ni en contra.'
+    : 'Sin calificar todavía.' };
+
+  const texto = propio || ANCLA_CORTA[r.lvl] || '';
+  let aviso = '';
+  if(propio && nivelProp && nivelProp !== r.lvl){
+    aviso = `El evaluador ${r.lvl > nivelProp ? 'subió' : 'bajó'} el nivel de ${nivelProp} a ${r.lvl}: ` +
+            `la explicación de arriba es la del ${nivelProp}. Justifícalo en la evidencia.`;
+  }
+  return { texto, aviso };
+}
 
 function propuestaDe(i){
   const t = S.tran;
@@ -1924,7 +2005,9 @@ async function leerArchivoTrans(f){
       r.onerror = () => no(new Error('no se pudo leer el archivo'));
       r.readAsDataURL(f);
     });
-    const out = await api('/api/extract-text', {method:'POST', body:{name:f.name, dataBase64:b64}});
+    // El campo se llama `filename` — mandarlo como `name` dejaba al servidor sin
+    // extensión y un .docx respondía "No sé leer archivos .".
+    const out = await api('/api/extract-text', {method:'POST', body:{filename:f.name, dataBase64:b64}});
     $('#transText').value = out.text || '';
     $('#transText').dispatchEvent(new Event('input'));
     $('#transDropT').textContent = f.name;

@@ -328,7 +328,14 @@ input,textarea,select{font:inherit;color:inherit}
 .res{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
 .res:last-child{border-bottom:none}
 .res .rn{font-size:14.5px;font-weight:600;flex:1}
-.res .rn small{display:block;font-size:11.5px;color:var(--ink3);font-weight:400}
+.res .rn small{display:block;font-size:11.5px;color:var(--ink3);font-weight:400;line-height:1.45;margin-top:3px}
+/* El aviso de "el evaluador movió el nivel" no es una nota al pie: contradice lo que
+   dice el renglón de arriba, así que se lee en el color de advertencia. */
+.res .rn small.ajus{color:var(--crit);font-weight:500}
+/* Con la explicación adentro el renglón crece: el nivel y el veredicto se alinean con el
+   título, no con el centro del bloque. */
+.res{align-items:flex-start}
+.res .rl,.res .vd{margin-top:1px}
 .res .rl{font-variant-numeric:tabular-nums;font-size:14px;font-weight:700;color:var(--ink2)}
 .vd{font-size:10.5px;font-weight:800;letter-spacing:.05em;padding:3px 9px;border-radius:5px;
   font-family:Montserrat,"Helvetica Neue",Arial,sans-serif}
@@ -353,6 +360,12 @@ input,textarea,select{font:inherit;color:inherit}
   border-radius:6px;padding:4px 10px;white-space:nowrap}
 .gate .ir:hover{border-color:var(--acc);background:var(--acc-soft)}
 .gate:last-of-type{border-bottom:none}
+/* Lo que falta de identidad se arregla dentro del mismo renglón: sangrado para que se
+   lea como "esto pertenece al punto de arriba", no como una sección nueva. */
+.gatefix{margin:2px 0 12px 29px;padding-bottom:10px;border-bottom:1px solid var(--line);
+  display:flex;flex-direction:column;gap:9px}
+.gatefix .chk{margin:0}
+.gatefix .hint{margin:0}
 .gate .ic{flex:none;width:19px;height:19px;margin-top:1px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700}
 .gate.ok .ic{background:var(--good);color:var(--on-acc)}
 .gate.no .ic{background:var(--crit-soft);color:var(--crit);border:1.5px solid var(--crit)}
@@ -401,7 +414,10 @@ input,textarea,select{font:inherit;color:inherit}
 
 .aviso{background:var(--warn-soft);border:1px solid var(--warn);border-radius:10px;padding:12px 16px;
   margin-bottom:14px;font-size:13px;color:var(--ink2);line-height:1.55}
-.aviso b{display:block;color:var(--warn);font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;margin-bottom:3px}
+/* Solo el PRIMER <b> es el titular del aviso. Antes lo eran todos, así que un énfasis
+   en mitad de una frase la partía en tres renglones sueltos. */
+.aviso > b:first-child{display:block;color:var(--warn);font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;margin-bottom:3px}
+.aviso b{color:inherit}
 @media print{ .aviso{border-color:#999;background:#fff} }
 
 /* ---- trayectoria ---- */
@@ -567,7 +583,7 @@ input,textarea,select{font:inherit;color:inherit}
 
 /* Un fallo del análisis no puede irse solo como un toast: el mensaje dice qué hacer. */
 .aviso.malo{background:var(--crit-soft);border-color:var(--crit)}
-.aviso.malo b{color:var(--crit)}
+.aviso.malo > b:first-child{color:var(--crit)}
 
 /* Lo que devolvió el modelo, para poder diagnosticar sin entrar al registro del servidor. */
 .crudo{margin-top:10px}
