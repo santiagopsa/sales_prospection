@@ -400,6 +400,15 @@ input,textarea,select{font:inherit;color:inherit}
 .asec{font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:.11em;
   text-transform:uppercase;color:var(--ink3);margin:20px 0 10px}
 .aev{font-size:13px;color:var(--ink2);line-height:1.5;margin-top:5px}
+/* La explicación del veredicto es el cuerpo del requisito en el acta, no una nota al pie:
+   es lo primero que lee quien no estuvo en la entrevista. */
+.aex{font-size:13.5px;color:var(--ink);line-height:1.58;margin-top:7px}
+/* Lo que quedó sin comprobar se lee distinto de lo que sí se midió. Un informe que solo
+   dice lo que confirmó se lee como propaganda; este dice dónde no llegó. */
+.afalta{font-size:12.5px;color:var(--ink2);line-height:1.5;margin-top:6px;
+  padding-left:11px;border-left:2px solid var(--warn)}
+.afalta b{color:var(--warn);font-weight:600}
+@media print{ .afalta{border-left-color:#999} .afalta b{color:#000} }
 .aback{margin-top:20px;border:1.5px solid var(--ink);border-radius:9px;padding:14px 17px;
   display:flex;gap:18px;align-items:center}
 .aback .abtx{flex:1;min-width:0}

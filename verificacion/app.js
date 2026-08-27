@@ -1071,10 +1071,11 @@ ${!code ? `
           for (let i = 0; i < ratings.length; i++) {
             const q = ratings[i];
             await c.query(
-              `INSERT INTO ${T.ratings} (session_id, requirement_id, req_text, ord, level, verdict, evidence)
-               VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+              `INSERT INTO ${T.ratings} (session_id, requirement_id, req_text, ord, level, verdict, evidence, analisis, falta)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
               [id, q.requirement_id || null, clean(q.req_text), i, q.level || null,
-               q.level ? LVLTXT[q.level] : null, clean(q.evidence) || null]
+               q.level ? LVLTXT[q.level] : null, clean(q.evidence) || null,
+               clean(q.analisis) || null, clean(q.falta) || null]
             );
           }
           await c.query('COMMIT');
@@ -1135,7 +1136,8 @@ ${!code ? `
         cliente: s0.company_name || null,
         evaluador: clean(b.evaluator) || s0.evaluator || null,
         kind: s0.kind,
-        ratings: ratings.map(x => ({ req_text: x.req_text, level: x.level, evidence: x.evidence || '' })),
+        ratings: ratings.map(x => ({ req_text: x.req_text, level: x.level, evidence: x.evidence || '',
+                                     analisis: x.analisis || '', falta: x.falta || '' })),
         identity, signals,
         identidad,
         face_score: s0.face_score ?? null,

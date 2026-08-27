@@ -268,7 +268,8 @@ async function verSesion(id){
     const snap = s.snapshot || null;
     const fuente = snap || s;
     const reqs = (snap ? snap.ratings : (s.ratings || [])).map(r => ({
-      rid: r.requirement_id, n: r.req_text, lvl: r.level, ev: r.evidence || '', r: {},
+      rid: r.requirement_id, n: r.req_text, lvl: r.level, ev: r.evidence || '',
+      exp: r.analisis || '', falta: r.falta || '', r: {},
     }));
     S = {
       sid: s.id, id: s.report_code,
@@ -1103,7 +1104,8 @@ function cuerpoSesion(){
   return {
     identity: S.idc, signals: S.sig, data: {mode:S.mode, fase:S.fase},
     declara: S.dec || {}, recomendacion: S.rec || {}, trayectoria: S.tray || null,
-    ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||''})),
+    ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||'',
+                               analisis:r.exp||'', falta:r.falta||''})),
     // El inglés se guarda entero en la sesión —si se evalúa, qué se marcó y de dónde salió—
     // y no se recalcula desde la vacante: la vacante puede cambiar después, y el evaluador
     // pudo apagarlo para este candidato. La sesión manda sobre la vacante.
@@ -1142,7 +1144,19 @@ window.addEventListener('pagehide', () => {
 });
 function touch(){ saveLocal(); sync(); }
 
+/* Qué pantalla hay que repintar cuando algo cambia por debajo — subir la captura, crear
+   el link de identidad, refrescar el estado del cotejo. Por defecto es la fase en vivo.
+   La pantalla de espera lo cambia mientras está abierta: render() dibuja en #stage, así
+   que llamarlo desde allá dejaría la pantalla que el reclutador está mirando congelada. */
+let REPINTAR = () => render();
+
 function render(){
+  REPINTAR = () => render();
+  // Simétrico a lo que hace pantallaTranscripcion() con #stage: si estamos dibujando la
+  // fase en vivo, la sala de espera ya no está en uso y su marcado tiene que irse. Dos
+  // pantallas con los mismos nombres de elemento en el documento hacen que un clic —o un
+  // archivo— entre por la que está oculta.
+  $('#transStage').innerHTML = '';
   drawNav();
   const F = fases(), f = F[S.fase], st = $('#stage');
   if(!f) return;
@@ -1172,7 +1186,7 @@ function render(){
       if(k === 'shot') return;              // este se marca solo al subir la captura
       S.idc[k] = !S.idc[k]; touch(); render();
     }));
-    if(cierre) montarCaptura();
+    if(cierre) montarCaptura(st);
   }
 
   // --- GUÍA: lo que se ve DURANTE la llamada. Solo munición, cero campos que llenar. ---
@@ -1514,10 +1528,10 @@ function render(){
 
         <div class="nav">
           <button data-prev type="button">Atrás</button>
-          <button class="pri" id="btnATranscripcion" type="button">Ya tengo la transcripción</button>
+          <button class="pri" id="btnATranscripcion" type="button">Continuar</button>
         </div>
         <button class="back" id="btnEsperarTrans" type="button" style="color:var(--acc);margin-top:10px">
-          Todavía no está lista — guardar y salir</button>
+          Guardar y salir — la retomo desde el tablero</button>
       </div>
       ${cierre ? bloqueIdentidad() : ''}`;
 
@@ -1526,7 +1540,7 @@ function render(){
     // transcripción, o sea horas más tarde— es tenerla cuando ya no sirve.
     if(cierre){
       montarIdentidad(st);
-      montarCaptura();
+      montarCaptura(st);
       const bc = st.querySelector('#btnCopiarLink');
       if(bc) bc.addEventListener('click', () => {
         navigator.clipboard?.writeText(S.diditUrl).then(() => toast('Link copiado')).catch(() => toast('No se pudo copiar'));
@@ -1659,7 +1673,7 @@ function render(){
     st.querySelector('#btnJson').addEventListener('click', copiarJSON);
     if(S.kind === 'cierre'){
       montarIdentidad(st);
-      montarCaptura();
+      montarCaptura(st);
       const bc = st.querySelector('#btnCopiarLink');
       if(bc) bc.addEventListener('click', () => {
         navigator.clipboard?.writeText(S.diditUrl).then(() => toast('Link copiado')).catch(() => toast('No se pudo copiar'));
@@ -1780,7 +1794,7 @@ function montarIdentidad(st){
       }});
       S.diditUrl = out.url;
       S.ident = {estado:'pendiente', texto:'Enviada, sin completar', didit_status: out.status};
-      saveLocal(); render();
+      saveLocal(); REPINTAR();
       toast('Link listo — cópialo y mándaselo');
     }catch(e){
       toast(e.message.includes('no está configurada')
@@ -1819,7 +1833,9 @@ async function recargarIdentidad(){
                face_verdict: s.face_verdict, face_score: s.face_score};
     if(s.didit_url) S.diditUrl = s.didit_url;
     saveLocal();
-    if(fases()[S.fase].k === 'cierre') render();
+    // Antes solo repintaba estando en la fase de cierre; ahora también en la sala de espera.
+    const enEspera = !!document.querySelector('#vTrans.on');
+    if(enEspera || fases()[S.fase].k === 'cierre') REPINTAR();
   }catch(e){}
 }
 
@@ -1833,14 +1849,16 @@ async function recargarIdentidad(){
    ponerla, y el botón "Ir y completar" lo mandaba a un requisito. */
 function cajaCaptura(momento){
   const hay = !!S.idc.shot;
+  // Con la llamada abierta se TOMA; después solo se SUBE la que ya se tomó.
+  const enLlamada = momento === 'apertura' || momento === 'fin';
   const titulo = hay ? 'Captura guardada'
-    : momento === 'cierre' ? 'Sube la captura del rostro'
-    : 'Captura el rostro del candidato';
+    : enLlamada ? 'Captura el rostro del candidato'
+    : 'Sube la captura del rostro';
   const sub = hay
     ? 'Se comparará con su verificación de identidad. Puedes reemplazarla si quedó borrosa.'
-    : momento === 'cierre'
-      ? 'Si la tomaste durante la llamada, suéltala aquí o pégala con Ctrl+V. Si no alcanzaste a tomarla, ya no hay manera: el acta saldrá sin cotejo de rostro y hay que decirlo.'
-      : 'Toma un pantallazo del video con la cara de frente y visible, y suéltalo aquí. También puedes pegarlo con Ctrl+V.';
+    : enLlamada
+      ? 'Toma un pantallazo del video con la cara de frente y visible, y suéltalo aquí. También puedes pegarlo con Ctrl+V.'
+      : 'Suelta aquí el pantallazo que tomaste durante la llamada, o pégalo con Ctrl+V. Si no alcanzaste a tomarlo, ya no hay manera: el acta saldrá sin cotejo de rostro y hay que decirlo.';
   return `
     <div class="shotbox ${hay?'has':''}" id="shotBox">
       <input type="file" id="shotFile" accept="image/*" hidden>
@@ -1855,8 +1873,12 @@ function cajaCaptura(momento){
     <p class="hint">La captura se borra sola en cuanto el cotejo termina. Lo que queda guardado es el puntaje, no la imagen.</p>`;
 }
 
-function montarCaptura(){
-  const box = $('#shotBox'), file = $('#shotFile');
+function montarCaptura(donde){
+  // Acotado a su contenedor a propósito: el recuadro de la captura vive en varias
+  // pantallas y, si dos están en el DOM a la vez, buscarlo global engancha el de la
+  // pantalla equivocada — la oculta. Ya pasó entre la fase en vivo y la sala de espera.
+  const raiz = donde || document;
+  const box = raiz.querySelector('#shotBox'), file = raiz.querySelector('#shotFile');
   if(!box) return;
 
   box.addEventListener('click', () => file.click());
@@ -1869,7 +1891,9 @@ function montarCaptura(){
   if(!window._pegaCaptura){
     window._pegaCaptura = true;
     document.addEventListener('paste', e => {
-      if(!$('#shotBox')) return;
+      // Solo pega en el recuadro que el usuario está viendo.
+      const visible = [...document.querySelectorAll('.screen.on #shotBox')][0];
+      if(!visible) return;
       const it = [...(e.clipboardData?.items || [])].find(x => x.type.startsWith('image/'));
       if(it) subirCaptura(it.getAsFile());
     });
@@ -1902,7 +1926,7 @@ async function subirCaptura(file){
   try{
     const b64 = await reducirImagen(file);
     await api(`/api/sessions/${S.sid}/shot`, {method:'POST', body:{dataBase64:b64, mime:'image/jpeg'}});
-    S.idc.shot = true; touch(); render();
+    S.idc.shot = true; touch(); REPINTAR();
     toast('Captura guardada');
   }catch(e){
     toast('No se pudo guardar: ' + e.message);
@@ -1963,20 +1987,23 @@ function drawSig(){
    sostenido algo que la conversación no sostiene. */
 function porQue(r, i){
   const p = propuestaDe(i) || {};
-  const propio = String(p.por_que_ese_nivel || '').trim();
-  const nivelProp = Number(p.nivel) || null;
+  // r.exp sobrevive a recargar la sesión; la propuesta en memoria solo existe en la
+  // sesión donde se analizó la transcripción.
+  const propio = String(r.exp || p.por_que_ese_nivel || '').trim();
+  const nivelProp = Number(r.nivelProp != null ? r.nivelProp : p.nivel) || null;
 
   if(!r.lvl) return { texto: p.cubierto === false
     ? 'No se tocó en la conversación: queda sin medir, ni a favor ni en contra.'
     : 'Sin calificar todavía.' };
 
   const texto = propio || ANCLA_CORTA[r.lvl] || '';
+  const esAncla = !propio;   // no hubo explicación: lo que sale es la definición del nivel
   let aviso = '';
   if(propio && nivelProp && nivelProp !== r.lvl){
     aviso = `El evaluador ${r.lvl > nivelProp ? 'subió' : 'bajó'} el nivel de ${nivelProp} a ${r.lvl}: ` +
             `la explicación de arriba es la del ${nivelProp}. Justifícalo en la evidencia.`;
   }
-  return { texto, aviso };
+  return { texto, aviso, esAncla };
 }
 
 function propuestaDe(i){
@@ -1995,22 +2022,46 @@ async function marcarFinEntrevista(){
 
 function pantallaTranscripcion(err){
   go('vTrans');
+  // Esta pantalla es la SALA DE ESPERA, no un formulario que exige la transcripción para
+  // entrar. Google se demora minutos en entregarla, y en esos minutos hay algo que sí
+  // corre contra el reloj: la identidad. Mientras más se enfría la conversación, menos
+  // probable es que el candidato haga el trámite. Antes esos minutos no tenían dónde
+  // ocurrir y el reclutador quedaba mirando un cuadro vacío.
+  REPINTAR = () => pantallaTranscripcion(err);
+  // La fase en vivo se vacía mientras estamos aquí. Comparten nombres de elemento
+  // (#shotBox, #btnEnviarId) y tenerlas ambas en el documento hace que un clic caiga
+  // en la pantalla oculta. render() la vuelve a dibujar al regresar.
+  $('#stage').innerHTML = '';
+  const cierre = S.kind === 'cierre';
+  const idn = S.ident || {};
+  const idResuelta = ['verificada','rechazada'].includes(idn.estado);
+  const faltaIdentidad = cierre && (!S.idc.shot || !idResuelta);
+
   $('#transStage').innerHTML = `
     <button class="back" data-salir type="button">← Guardar y salir</button>
     <div class="setup" style="max-width:760px">
-      <h1>La transcripción de la entrevista</h1>
-      <p class="lede">De aquí sale la evidencia que va al acta: las citas de lo que dijo
-      ${esc(S.cand || 'el candidato')}, en sus palabras. Tú confirmas cada nivel después.</p>
+      <h1>Colgaste. Ahora hay dos cosas</h1>
+      <p class="lede">La identidad se cierra <b>ya</b>, mientras la conversación está tibia.
+      La transcripción llega cuando Google la entregue — y para eso no tienes que quedarte aquí.</p>
+
+      ${faltaIdentidad ? `
+      <div class="fset">
+        <div class="fttl">1 · Ciérrale la identidad a ${esc((S.cand || 'el candidato').split(' ')[0])}</div>
+        <p class="hint" style="margin-top:0">Esto no depende de la transcripción y sí depende del tiempo:
+        el trámite lo hace el candidato desde su celular, y lo hace mucho menos si se lo mandas mañana.</p>
+        ${!S.idc.shot ? cajaCaptura('espera') : ''}
+        ${bloqueIdentidad()}
+      </div>` : ''}
 
       <div class="fset">
-        <div class="fttl">Dónde encontrarla</div>
+        <div class="fttl">${faltaIdentidad ? '2 · ' : ''}Dónde encontrar la transcripción</div>
         <p class="hint" style="margin-top:0">Google la deja en el Drive de la reunión, en la carpeta
         <b>Meet Recordings</b>, unos minutos después de colgar. Si todavía no aparece, no pasa nada:
         guarda y vuelve más tarde — esta verificación queda esperándote en el tablero.</p>
       </div>
 
       <div class="fset">
-        <div class="fttl">Pégala aquí</div>
+        <div class="fttl">Pégala aquí cuando la tengas</div>
         <div class="drop" id="transDrop">
           <div class="dropin">
             <div class="dropic">↑</div>
@@ -2040,6 +2091,15 @@ function pantallaTranscripcion(err){
   };
   ta.addEventListener('input', revisar);
   revisar();
+
+  if(faltaIdentidad){
+    montarIdentidad($('#transStage'));
+    montarCaptura($('#transStage'));
+    const bc = $('#transStage').querySelector('#btnCopiarLink');
+    if(bc) bc.addEventListener('click', () => {
+      navigator.clipboard?.writeText(S.diditUrl).then(() => toast('Link copiado')).catch(() => toast('No se pudo copiar'));
+    });
+  }
 
   $('#transStage').querySelector('[data-salir]').addEventListener('click', async () => {
     await marcarFinEntrevista(); loadTablero();
@@ -2110,6 +2170,11 @@ function aplicarTranscripcion(an){
     if(!r) return;
     if(prop.cubierto !== false && prop.nivel) r.lvl = Number(prop.nivel) || null;
     if(prop.evidencia) r.ev = String(prop.evidencia);
+    // Lo que de verdad se lee en el informe: la explicación del analista y lo que quedó
+    // sin comprobar. La cita se queda como rastro, no como cuerpo del documento.
+    if(prop.por_que_ese_nivel) r.exp = String(prop.por_que_ese_nivel);
+    if(prop.falta_por_verificar) r.falta = String(prop.falta_por_verificar);
+    r.nivelProp = Number(prop.nivel) || null;
   });
   // El inglés NO se toca aquí. La transcripción viene en un solo idioma y el tramo en
   // inglés sale escrito con fonética española: proponer un nivel desde ahí sería inventarlo.
@@ -2148,7 +2213,8 @@ async function emitirActa(){
       ingles: S.ing ? {requerido:true, nivel_exigido:S.ing.nivel || null, uso:S.ing.uso || null,
                        confirmado:S.ingNivel||null, nota:S.ingNota||'', minuto:S.ingMin||'',
                        fuente:'evaluador_en_vivo'} : null,
-      ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||''})),
+      ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||'',
+                                 analisis:r.exp||'', falta:r.falta||''})),
     }});
     S.fin = true; S.fecha = Date.now(); S.hash = out.integrity_hash;
     S.doc = out.documento || null;
@@ -2236,16 +2302,29 @@ function verActa(){
       <div class="zona"><span class="zn">Zona 1</span><h3>Lo que medimos</h3>
         <span class="zs">Evidencia de la sesión · escala anclada 1-5</span></div>
       <div class="zbox">
-        ${S.reqs.map(r => {
+        ${S.reqs.map((r, i) => {
           const v = r.lvl>=4?'ok':(r.lvl===3?'par':'no');
+          // Antes aquí se pegaba r.ev — la cita cruda de la transcripción, a veces un
+          // párrafo entero. Eso es el rastro de auditoría, no el informe: quien lo lee no
+          // estuvo en la llamada y no tiene por qué interpretar un fragmento de diálogo.
+          // Ahora se imprime el juicio (por qué cumple o no) y lo que quedó sin comprobar.
+          const p = porQue(r, i);
+          // Cascada: explicación → cita archivada → ancla. La cita sigue siendo el cuerpo
+          // de las actas emitidas ANTES de este cambio: su snapshot guarda `evidence` y no
+          // `analisis`, y un documento ya entregado no se reescribe porque el software
+          // haya evolucionado. También cubre la sesión calificada a mano, donde lo único
+          // que hay es lo que el evaluador escribió.
+          const cuerpo = (!p.esAncla && p.texto) ? p.texto : (r.ev || p.texto);
+          const mostrarAncla = cuerpo !== ANCLA_CORTA[r.lvl];
           return `<div class="req">
             <div class="reqhd">
               <div class="reqn">${esc(r.n)}</div>
               <div class="reqv"><span class="rl">${r.lvl} / 5</span><span class="vd ${v}">${LVLTXT[r.lvl]}</span></div>
             </div>
             <div class="barra"><span class="fill ${v}" style="width:${r.lvl*20}%"></span></div>
-            ${r.ev?`<div class="aev">${esc(r.ev)}</div>`:''}
-            <div class="ancla">${ANCLA_CORTA[r.lvl]||''}</div>
+            ${cuerpo?`<div class="aex">${esc(cuerpo)}</div>`:''}
+            ${r.falta?`<div class="afalta"><b>Queda por verificar:</b> ${esc(r.falta)}</div>`:''}
+            ${mostrarAncla?`<div class="ancla">${ANCLA_CORTA[r.lvl]||''}</div>`:''}
           </div>`;
         }).join('')}
       </div>
@@ -2255,7 +2334,7 @@ function verActa(){
         ${cierre ? actaIdentidad() : ''}
         <div class="res"><div class="rn">Señales de asistencia durante la sesión</div><span class="vd ${nSig?'par':'ok'}">${nSig?nSig+' REGISTRADA'+(nSig>1?'S':''):'NINGUNA'}</span></div>
         <div class="res"><div class="rn">Grabación y bitácora</div><span class="vd ok">DISPONIBLES</span></div>
-        <div class="res"><div class="rn">Evidencia textual en cada requisito</div><span class="vd ok">REGISTRADA</span></div>
+        <div class="res"><div class="rn">Cita textual archivada por requisito<small>El fragmento literal de la conversación queda en el archivo de la sesión, disponible para auditoría</small></div><span class="vd ok">ARCHIVADA</span></div>
         ${nSig?`<div class="aev">Señales: ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(s.t)).join(' · ')}. Se reportan como observación factual; no constituyen un juicio sobre el candidato.</div>`:''}
       </div>
 

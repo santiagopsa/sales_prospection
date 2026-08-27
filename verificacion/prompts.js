@@ -242,6 +242,11 @@ ${String(transcripcion == null ? '' : transcripcion).trim()}
 FIN_DE_LA_TRANSCRIPCION>>>
 ═══════════════════════════════════════════════════════════
 
+QUÉ SE IMPRIME Y QUÉ NO — importa para saber cómo escribir cada campo:
+- "por_que_ese_nivel" y "falta_por_verificar" VAN AL INFORME que lee el cliente. Se escriben en tu voz de analista, completos, para alguien que no estuvo en la llamada. Antes ese informe pegaba la cita cruda y el lector tenía que interpretarla solo; ahora lee tu explicación.
+- "evidencia" NO va al informe: queda como rastro de auditoría para quien revise la sesión. Por eso sí es cita literal.
+- Un requisito sin "falta_por_verificar" está afirmando que quedó cubierto por completo. No lo dejes vacío por comodidad: casi siempre hay algo que no se alcanzó a contrastar, y decirlo es lo que hace creíble al resto.
+
 REGLA DE ORO — LA EVIDENCIA ES CITA, NO RESUMEN:
 - El campo "evidencia" debe ser lo que dijo el CANDIDATO, en sus palabras, copiado de la transcripción. Puedes recortar con "…" pero NO parafrasear ni pulir.
 - Si un requisito NO se tocó en la conversación, dilo: "cubierto": false, "nivel": null, y la evidencia vacía. NO propongas un nivel a partir del CV, del cargo ni de lo que parezca razonable. Un requisito sin conversación es un requisito sin medir, y eso es un dato importante, no un hueco que haya que rellenar.
@@ -268,8 +273,9 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL NI BLOQUES DE CÓDIGO:
       "requisito": "el enunciado tal como se lo pasaron",
       "cubierto": true,
       "nivel": 4,
-      "evidencia": "cita textual de lo que dijo el candidato, recortada con … si hace falta",
-      "por_que_ese_nivel": "una frase: qué elementos de la rúbrica se cumplieron y cuáles no",
+      "evidencia": "cita textual de lo que dijo el candidato, recortada con … si hace falta. USO INTERNO: es el rastro de auditoría, no se imprime en el informe",
+      "por_que_ese_nivel": "2 o 3 frases TUYAS, de analista, explicando el veredicto: qué demostró concretamente y qué no. Esto SÍ se imprime en el informe del cliente, así que escríbelo para que lo lea alguien que no estuvo en la llamada y no va a leer la transcripción. No cites textualmente aquí: resume lo que sostuvo",
+      "falta_por_verificar": "qué quedó sin comprobar sobre ESTE requisito: el detalle que no se alcanzó a preguntar, la parte del criterio que no se tocó, la afirmación que no se pudo contrastar. Vacío solo si de verdad quedó cubierto por completo",
       "detalles": [{"detalle": "el detalle verificable", "respondio": "lo que contestó, citado", "correcto": true}],
       "senales": ["señal de impostor observada en este tema, con la cita que la sostiene"],
       "nota": "solo si algo de la transcripción es dudoso o está mal transcrito, vacío si no"

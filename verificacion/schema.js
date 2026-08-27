@@ -156,6 +156,12 @@ async function initSchema(pool) {
     `ALTER TABLE ${T.vacancies} ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
+
+    // El informe del cliente dejó de pegar la cita cruda de la transcripción y pasó a
+    // explicar el veredicto. `analisis` es esa explicación y `falta` lo que quedó sin
+    // comprobar. `evidence` se conserva: es el rastro de auditoría, no el texto que se lee.
+    `ALTER TABLE ${T.ratings} ADD COLUMN IF NOT EXISTS analisis TEXT`,
+    `ALTER TABLE ${T.ratings} ADD COLUMN IF NOT EXISTS falta TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_v_req_vacancy ON ${T.requirements}(vacancy_id)`,
     `CREATE INDEX IF NOT EXISTS idx_v_sess_vacancy ON ${T.sessions}(vacancy_id)`,
     `CREATE INDEX IF NOT EXISTS idx_v_rat_session ON ${T.ratings}(session_id)`,

@@ -11,7 +11,10 @@ Lo que hay que sostener:
   · un requisito que no se tocó dice que no se midió, ni a favor ni en contra;
   · si el evaluador mueve el nivel que propuso la transcripción, se avisa: la explicación
     quedó explicando otro nivel, y callarlo sería presentar como sostenido algo que la
-    conversación no sostiene.
+    conversación no sostiene;
+  · y EL ACTA hace lo mismo: explica el veredicto en vez de pegar la cita cruda de la
+    transcripción, y dice qué quedó sin verificar. Quien lee el informe no estuvo en la
+    llamada y no tiene por qué interpretar un fragmento de diálogo.
 """
 from playwright.sync_api import sync_playwright
 import sys, time, subprocess, os, random, urllib.request
@@ -128,6 +131,36 @@ with sync_playwright() as pw:
             errs.append("(C) le inventa un ancla a un requisito sin nivel")
         pg3.screenshot(path="/tmp/pk/pq_03_sin_medir.png", full_page=True)
     pg3.close()
+
+    # ---------- D. EL ACTA: explicación y pendientes, no la cita ----------
+    pg4 = br.new_page(viewport={"width": 1180, "height": 1100})
+    pg4.on("pageerror", lambda e: errs.append(f"JS: {e}"))
+    pg4.on("dialog", lambda d: d.accept())
+    if not hasta_cierre(pg4, (5, 4)):
+        errs.append("(D) no se llegó al cierre")
+    else:
+        for _ in range(4):
+            if pg4.query_selector("#btnActa"):
+                break
+            pg4.click("[data-next]"); pg4.wait_for_timeout(330)
+        if pg4.query_selector('[data-rec="reserva"]'):
+            pg4.click('[data-rec="reserva"]'); pg4.wait_for_timeout(150)
+            pg4.fill('[data-r="texto"]', "Sostiene el nucleo del cargo.")
+            pg4.wait_for_timeout(200); pg4.click("[data-next]"); pg4.wait_for_timeout(500)
+        pg4.click("#btnActa"); pg4.wait_for_selector("#vActa.on", timeout=9000); pg4.wait_for_timeout(600)
+        acta = pg4.inner_text("#actaStage")
+        if CITA in acta:
+            errs.append("REGRESIÓN: el acta sigue pegando la cita cruda de la transcripción")
+        if "rollout completo en Alpina" not in acta:
+            errs.append("el acta no trae la explicación del veredicto")
+        if "Queda por verificar" not in acta:
+            errs.append("el acta no dice qué quedó sin verificar")
+        if "cuántos usuarios" not in acta:
+            errs.append("no imprime el pendiente concreto que devolvió el análisis")
+        if "REGISTRADA" in acta and "Evidencia textual en cada requisito" in acta:
+            errs.append("el sello sigue prometiendo evidencia textual que ya no se imprime")
+        pg4.screenshot(path="/tmp/pk/pq_04_acta.png", full_page=True)
+    pg4.close()
     br.close()
 
 STUB.terminate()

@@ -244,7 +244,8 @@ const server = http.createServer(async (req, res) => {
                       ...(b.ingles ? {ingles:b.ingles} : {})});
     db.ratings = db.ratings.filter(r=>r.session_id!==s.id);
     (b.ratings||[]).forEach((r,i)=>db.ratings.push({id:nid(), session_id:s.id, req_text:r.req_text,
-      requirement_id:r.requirement_id, ord:i, level:r.level, verdict:r.level?LVLTXT[r.level]:null, evidence:r.evidence}));
+      requirement_id:r.requirement_id, ord:i, level:r.level, verdict:r.level?LVLTXT[r.level]:null,
+      evidence:r.evidence, analisis:r.analisis||'', falta:r.falta||''}));
     return json(res,200,{ok:true, id:s.id, semaforo:sem, identidad:estadoIdentidad(ctx)});
   }
 
@@ -264,7 +265,8 @@ const server = http.createServer(async (req, res) => {
     const snapshot = {formato:FORMATO_ACTA, emitido:new Date().toISOString(), documento:doc,
       candidato:b.candidate, cargo:(v&&v.title)||null, cliente:(v&&v.company_name)||null,
       evaluador:b.evaluator||s.evaluator||null, kind:s.kind,
-      ratings:ratings.map(r=>({req_text:r.req_text, level:r.level, evidence:r.evidence||''})),
+      ratings:ratings.map(r=>({req_text:r.req_text, level:r.level, evidence:r.evidence||'',
+                               analisis:r.analisis||'', falta:r.falta||''})),
       identity:b.identity||{}, signals:b.signals||{}, identidad,
       face_score:s.face_score??null, declara:b.declara||{}, recomendacion:b.recomendacion||{},
       trayectoria:b.trayectoria||s.trayectoria||[], semaforo:sem.color, integrity_hash:hash,
@@ -311,7 +313,8 @@ const server = http.createServer(async (req, res) => {
         cubierto: i !== 1,
         nivel: i === 1 ? null : (i === 0 ? 5 : 4),
         evidencia: i === 1 ? '' : 'En Alpina, entre marzo y noviembre de 2023, yo llevé el rollout de PP… lo que se nos cayó fue el maestro de materiales la primera semana.',
-        por_que_ese_nivel: i === 1 ? '' : 'Escena con empresa y fechas, rol individual claro y fricción narrada.',
+        por_que_ese_nivel: i === 1 ? '' : 'Narró un rollout completo en Alpina con fechas, alcance y su rol individual, y describió la falla del maestro de materiales en el go-live y cómo la resolvió. Respondió las transacciones de listas de materiales sin dudar.',
+        falta_por_verificar: i === 1 ? 'No se abordó en la conversación.' : 'No se contrastó el tamaño del rollout: no dijo cuántos usuarios ni cuántas plantas cubría.',
         detalles: i === 1 ? [] : [{detalle:'¿Qué transacción usa para listas de materiales?', respondio:'CS01, y CS02 para modificar', correcto:true}],
         senales: [],
         nota: ''
