@@ -241,7 +241,8 @@ const server = http.createServer(async (req, res) => {
     Object.assign(s, {identity:b.identity||{}, signals:b.signals||{}, semaforo:sem.color,
                       declara:b.declara||{}, recomendacion:b.recomendacion||{},
                       ...(b.trayectoria ? {trayectoria:b.trayectoria} : {}),
-                      ...(b.ingles ? {ingles:b.ingles} : {})});
+                      ...(b.ingles ? {ingles:b.ingles} : {}),
+                      ...(b.kind === 'cierre' ? {kind:'cierre'} : {})});
     db.ratings = db.ratings.filter(r=>r.session_id!==s.id);
     (b.ratings||[]).forEach((r,i)=>db.ratings.push({id:nid(), session_id:s.id, req_text:r.req_text,
       requirement_id:r.requirement_id, ord:i, level:r.level, verdict:r.level?LVLTXT[r.level]:null,

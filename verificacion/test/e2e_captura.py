@@ -198,10 +198,28 @@ with sync_playwright() as pw:
     if not pg3.query_selector("#btnVerifDespues"):
         errs.append("REGRESIÓN: el sondeo no ofrece verificar la identidad después")
     else:
-        pg3.click("#btnVerifDespues"); pg3.wait_for_timeout(600)
+        pg3.click("#btnVerifDespues"); pg3.wait_for_timeout(700)
         if not pg3.query_selector("#btnEnviarId"):
             errs.append("al pedir verificación diferida no aparece cómo generar el link")
         pg3.screenshot(path="/tmp/pk/cap_07_diferida.png", full_page=True)
+        # El ascenso tiene que sobrevivir a recargar desde el tablero: si solo vive en el
+        # navegador, el reclutador vuelve mañana y la verificación diferida desapareció.
+        pg3.click("#btnEnviarId"); pg3.wait_for_timeout(1600)
+        pg3.wait_for_timeout(1200)      # que alcance a guardarse
+        # Se limpia el almacenamiento local a propósito: si no, la sesión se restaura del
+        # navegador y la prueba pasaría aunque el servidor no hubiera guardado nada.
+        pg3.evaluate("localStorage.clear()")
+        pg3.reload(); pg3.wait_for_timeout(1100)
+        # El tablero lista las verificaciones aparte de las vacantes: se abre directo.
+        fila = pg3.query_selector('#sesList [data-ses]')
+        if not fila:
+            errs.append("no se ve la sesión al volver por el tablero")
+        else:
+            fila.click(); pg3.wait_for_timeout(1600)
+            cuerpo = pg3.inner_text("body")
+            if "Verificación de identidad" not in cuerpo:
+                errs.append("REGRESIÓN: el ascenso a verificación no se guardó en el servidor — "
+                            "al volver, la sesión es un sondeo otra vez")
     pg3.close()
     br.close()
 

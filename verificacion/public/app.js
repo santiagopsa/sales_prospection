@@ -1107,6 +1107,10 @@ function goFase(i){ S.fase=i; S.tFase=Date.now(); saveLocal(); render();
 function cuerpoSesion(){
   return {
     identity: S.idc, signals: S.sig, data: {mode:S.mode, fase:S.fase},
+    // Un sondeo puede ascender a cierre cuando el candidato avanza y hay que verificar
+    // su identidad. Sin mandar esto, el ascenso vivía solo en el navegador y se perdía
+    // al recargar la sesión desde el tablero.
+    kind: S.kind,
     declara: S.dec || {}, recomendacion: S.rec || {}, trayectoria: S.tray || null,
     ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||'',
                                analisis:r.exp||'', falta:r.falta||''})),

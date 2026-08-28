@@ -453,6 +453,12 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
           set.push('updated_at=NOW()');
           const up = await c.query(`UPDATE ${T.vacancies} SET ${set.join(', ')} WHERE id=$1 RETURNING id`, val);
           if (!up.rows.length) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'not found' }); }
+          // Solo se asciende: un sondeo pasa a cierre cuando el candidato avanza y hay que
+          // verificar su identidad. El camino inverso borraría requisitos de la carpeta ya
+          // cumplidos, así que no existe.
+          if (b.kind === 'cierre') {
+            await c.query(`UPDATE ${T.sessions} SET kind='cierre' WHERE id=$1 AND kind<>'cierre'`, [id]);
+          }
 
           if (reqs) {
             const vivos = reqs.map(x => Number(x.id)).filter(Boolean);
