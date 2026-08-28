@@ -71,6 +71,10 @@ const DEFENSA = [
 const IDCHECKS = [
   {id:'grab', t:'Grabación activa antes de que entre el candidato', d:'Si Meet pide consentimiento, mejor: queda grabado que aceptó', kinds:['sondeo','cierre']},
   {id:'cam',  t:'Cámara encendida y rostro visible',                d:'Sin video no hay señales que observar; es lo normal en cualquier entrevista', kinds:['sondeo','cierre']},
+  // OJO: la captura se OFRECE siempre —también en un sondeo— pero solo es EXIGIBLE en un
+  // cierre. Son dos cosas distintas y confundirlas bloquea la emisión: un sondeo donde el
+  // candidato no encendió la cámara seguiría pudiendo producir su ficha. La caja de captura
+  // se dibuja en las dos, esta lista es solo lo que la carpeta exige para emitir.
   {id:'shot', t:'Captura del rostro tomada',                        d:'Se marca sola al subir la imagen; es contra lo que se coteja la verificación', kinds:['cierre']}
 ];
 const idChecksDe = kind => IDCHECKS.filter(c => c.kinds.includes(kind));
@@ -1167,15 +1171,16 @@ function render(){
       <div class="card">
         <h2>Apertura</h2>
         <div class="cs" style="margin-bottom:16px">Primeros minutos · ${cierre ? 'la identidad se verifica después de la llamada, no aquí' : 'en un sondeo no se pide ninguna identificación'}</div>
-        <div class="say"><div class="lb">DILO ASÍ</div><p>“Gracias por conectarte. Esta sesión queda grabada, como todas las nuestras. ${cierre ? 'Al final te voy a enviar un link para confirmar tu identidad — lo haces desde tu celular en un minuto, y no queda ninguna foto de tu documento con nosotros. ' : ''}¿Arrancamos?”</p></div>
+        <div class="say"><div class="lb">DILO ASÍ</div><p>“Gracias por conectarte. Esta sesión queda grabada, como todas las nuestras, y voy a tomar una captura de pantalla para dejar registro de con quién hablamos. ${cierre ? 'Al final te voy a enviar un link para confirmar tu identidad — lo haces desde tu celular en un minuto, y no queda ninguna foto de tu documento con nosotros. ' : ''}¿Arrancamos?”</p></div>
         ${idChecksDe(S.kind).map(c => `<button class="chk ${S.idc[c.id]?'on':''}" data-idc="${c.id}" ${c.id==='shot'?'disabled style="opacity:.75;cursor:default"':''} type="button"><span class="box">✓</span><span class="tx">${c.t}<small>${c.d}</small></span></button>`).join('')}
 
-        ${cierre ? cajaCaptura('apertura') + `
+        ${cajaCaptura('apertura')}
         <p class="hint">Si el candidato todavía no se acomoda en cámara, no insistas ahora:
         vuelves a tener el recuadro al final, antes de colgar.</p>
-        ` : `
-        <p class="hint" style="margin-top:14px">Este es un <b>sondeo</b>: no se pide identidad ni se guarda ninguna imagen. Si el candidato avanza a finalista, ahí se hace el cierre verificado.</p>
-        `}
+        ${cierre ? '' : `
+        <p class="hint">Este es un <b>sondeo</b>: no se le pide identidad al candidato hoy. La captura
+        se guarda de todos modos, para que si avanza a finalista se pueda verificar su identidad
+        contra esta cara <b>sin repetir la entrevista</b>.</p>`}
 
         <p class="hint"><b>Si algo se sale de lo normal</b> — se niega a encender la cámara, el video se congela cada vez que responde — no confrontes. Regístralo en las señales y sigue.</p>
         <div class="nav"><button class="pri" data-next type="button">Continuar</button></div>
@@ -1186,7 +1191,7 @@ function render(){
       if(k === 'shot') return;              // este se marca solo al subir la captura
       S.idc[k] = !S.idc[k]; touch(); render();
     }));
-    if(cierre) montarCaptura(st);
+    montarCaptura(st);
   }
 
   // --- GUÍA: lo que se ve DURANTE la llamada. Solo munición, cero campos que llenar. ---
@@ -1196,32 +1201,44 @@ function render(){
     const dets = Array.isArray(meta.detalles) ? meta.detalles : [];
     const sen  = Array.isArray(meta.senales) ? meta.senales : [];
     const guion = S.mode==='A' ? DEFENSA : SONDA;
-    const qMap = {1:null, 2:meta.q_escena, 3:meta.q_friccion, 5:meta.q_cruce};
+    const qs = preguntasDe(r);
 
     st.innerHTML = `
       <div class="card">
         <h2>${esc(r.n)}</h2>
         <div class="cs" style="margin-bottom:16px">Requisito ${f.i+1} de ${S.reqs.length} · unos 6 minutos · ${S.mode==='A'?'defensa del entregable':'sonda por experiencia'}</div>
         ${meta.criterio ? `<div class="say"><div class="lb">QUÉ BUSCAS OÍR</div><p style="font-style:normal">${esc(meta.criterio)}</p></div>` : ''}
-        <div class="steps">
-          ${guion.map((g,gi) => {
-            const q = S.mode==='B' ? qMap[gi+1] : null;
-            return `<div class="step"><div class="sn">${gi+1}</div><div class="sb">
-              <div class="st">${g.t}</div>
-              <div class="sd">${g.d.replace('[requisito]', esc(r.n))}</div>
-              ${q ? `<div class="sq">“${esc(q)}”</div>` : ''}
-            </div></div>`;
-          }).join('')}
+
+        <div class="preg">
+          ${qs.map((x,qi) => `<div class="pq">
+            <div class="pn">${qi+1}</div>
+            <div class="pb">
+              <div class="pt">${esc(x.t)}${x.cv?`<span class="pcv">del CV${x.donde?' · '+esc(x.donde):''}</span>`:''}</div>
+              <p class="px">“${esc(x.q)}”</p>
+            </div>
+          </div>`).join('')}
+          ${qs.length ? '' : '<p class="hint" style="margin:0">Esta vacante no trae preguntas cargadas. Sondea con el criterio de arriba: pide una escena concreta, la fricción, y contrasta un detalle.</p>'}
         </div>
+        <p class="hint">Léelas tal cual. Repregunta con lo que él conteste — <b>no tienes que construir nada en vivo</b>:
+        la evidencia sale de la transcripción cuando cuelgues.</p>
+
+        <details class="guionbox">
+          <summary>Cómo conducir el tramo, si lo necesitas</summary>
+          <div class="steps">
+            ${guion.map((g,gi) => `<div class="step"><div class="sn">${gi+1}</div><div class="sb">
+              <div class="st">${g.t}</div><div class="sd">${g.d.replace('[requisito]', esc(r.n))}</div>
+            </div></div>`).join('')}
+          </div>
+        </details>
+
         ${cvDeRequisito(r.n)}
         ${dets.length ? `<div class="detbox"><div class="dt">Detalles verificables — compara contra lo que responde</div>
           <div class="dets">${dets.map(d => `<div class="det"><span class="dq">${esc(d.detalle||'')}</span><span class="da">${esc(d.respuesta_esperada||'')}</span></div>`).join('')}</div></div>` : ''}
         ${sen.length ? `<div class="detbox"><div class="dt">Señales de impostor en este tema</div>
           <div class="sflags">${sen.map(s => `<span class="sflag">${esc(s)}</span>`).join('')}</div></div>` : ''}
 
-        <p class="hint">No tomes notas de evidencia. Escucha y repregunta — las citas salen de la
-        transcripción cuando termine la llamada. Lo único que sí conviene marcar en el momento son
-        las señales de abajo, porque son cosas que no quedan en el texto.</p>
+        <p class="hint"><b>No tomes notas de evidencia.</b> Lo único que conviene marcar en el
+        momento son las señales de abajo: son cosas que no quedan en el texto de la transcripción.</p>
 
         <div class="nav">
           <button data-prev type="button">Atrás</button>
@@ -1499,12 +1516,13 @@ function render(){
         <p class="lede" style="margin-bottom:16px">Ahora despídete y cuelga. La evidencia sale de la
         transcripción, no de lo que alcanzaste a escribir.</p>
 
-        ${cierre ? (!S.idc.shot ? `<div class="aviso malo">
+        ${!S.idc.shot ? `<div class="aviso malo">
           <b>Falta la captura del rostro, y solo se puede tomar con la llamada abierta.</b>
           Es la imagen contra la que se coteja la verificación de identidad: sin ella, Didit
           certifica a quien haya hecho el trámite, no a quien entrevistaste. Tómala
           <b>antes de colgar</b> — aquí mismo, sin salir de esta pantalla.
-        </div>` : '') + cajaCaptura('fin') : ''}
+        </div>` : ''}
+        ${cajaCaptura('fin')}
 
         <div class="pasos">
           <div class="paso"><div class="pn">1</div><div>
@@ -1538,9 +1556,9 @@ function render(){
     // La verificación de identidad vive también aquí, y no por comodidad: el momento de
     // mandarla es al colgar. Tenerla solo en el cierre —que ahora llega después de la
     // transcripción, o sea horas más tarde— es tenerla cuando ya no sirve.
+    montarCaptura(st);
     if(cierre){
       montarIdentidad(st);
-      montarCaptura(st);
       const bc = st.querySelector('#btnCopiarLink');
       if(bc) bc.addEventListener('click', () => {
         navigator.clipboard?.writeText(S.diditUrl).then(() => toast('Link copiado')).catch(() => toast('No se pudo copiar'));
@@ -1635,7 +1653,19 @@ function render(){
         ${nSig ? `<p class="hint" style="margin-top:12px"><b>Señales marcadas:</b> ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>s.t).join(' · ')}</p>` : ''}
       </div>
 
-      ${S.kind === 'cierre' ? bloqueIdentidad() : ''}
+      ${S.kind === 'cierre' ? bloqueIdentidad() : (S.idc.shot ? `
+      <div class="card">
+        <div class="cardhd" style="margin-bottom:10px">
+          <h2 style="font-size:17px">¿Avanzó en el proceso?</h2>
+          <span class="tag n">CAPTURA GUARDADA</span>
+        </div>
+        <p class="hint" style="margin-top:0">Este sondeo no pidió identidad, pero la captura del
+        rostro quedó guardada. Si el candidato pasa a finalista, puedes verificar su identidad
+        contra esa cara <b>sin volver a entrevistarlo</b>.</p>
+        <div class="tools" style="margin-top:12px">
+          <button class="pri" id="btnVerifDespues" type="button">Verificar identidad ahora</button>
+        </div>
+      </div>` : '')}
 
       <div class="card">
         <div class="fttl" style="margin-bottom:11px">Sin carpeta completa no hay acta</div>
@@ -1669,6 +1699,13 @@ function render(){
       if(k === 'shot') return;             // este se marca solo al subir la imagen
       S.idc[k] = !S.idc[k]; touch(); render();
     }));
+    const bvd = st.querySelector('#btnVerifDespues');
+    if(bvd) bvd.addEventListener('click', () => {
+      // No se repite la entrevista: la sesión pasa a exigir identidad y el cotejo se hace
+      // contra la captura que ya está guardada del día de la llamada.
+      S.kind = 'cierre'; S.idc = {...S.idc}; touch(); render();
+      toast('Ahora puedes generar el link — se cotejará contra la captura de la entrevista');
+    });
     st.querySelector('#btnActa').addEventListener('click', emitirActa);
     st.querySelector('#btnJson').addEventListener('click', copiarJSON);
     if(S.kind === 'cierre'){
@@ -1688,6 +1725,28 @@ function render(){
 
 // Las preguntas que salieron del CV para este requisito. Citan lo que el candidato escribió,
 // así que valen mucho más que las genéricas del cargo — y si el CV no lo menciona, eso también se dice.
+/* Las preguntas que el reclutador lee EN VOZ ALTA.
+   Antes la pantalla mostraba un guion genérico —"llévalo al último caso concreto"— y las
+   preguntas reales quedaban escondidas debajo, solo en modo B. Eso obliga a improvisar en
+   vivo, que es justo lo que no hay tiempo de hacer mientras se escucha y se observa.
+   Ahora son el cuerpo de la pantalla, literales y contadas: tres.
+   Si el CV trae una versión personalizada de la escena, esa REEMPLAZA a la genérica —no se
+   suma— porque "en tu CV dice que en Alpina lideraste el rollout, llévame ahí" y "cuéntame
+   un caso concreto" son la misma pregunta, y la primera es mejor. */
+function preguntasDe(r){
+  const meta = r.r || {};
+  const cv = ((S.cv && S.cv.por_requisito) || []).find(x =>
+    (x.requisito||'').trim().toLowerCase() === (r.n||'').trim().toLowerCase());
+  const delCv = ((cv && cv.preguntas) || []).filter(Boolean);
+  const qs = [];
+  if(delCv[0]) qs.push({t:'Escena', q:delCv[0], cv:true, donde:(cv && cv.donde) || ''});
+  else if(meta.q_escena) qs.push({t:'Escena', q:meta.q_escena});
+  if(meta.q_friccion) qs.push({t:'Fricción', q:meta.q_friccion});
+  if(meta.q_cruce) qs.push({t:'Cruce', q:meta.q_cruce});
+  else if(delCv[1]) qs.push({t:'Cruce', q:delCv[1], cv:true});
+  return qs.slice(0, 3);
+}
+
 function cvDeRequisito(nombre){
   const p = ((S.cv && S.cv.por_requisito) || []).find(x =>
     (x.requisito||'').trim().toLowerCase() === (nombre||'').trim().toLowerCase());
@@ -1698,12 +1757,9 @@ function cvDeRequisito(nombre){
       <p style="font-size:13.5px;color:var(--ink2);line-height:1.5">${esc(p.nota || 'Vas a tener que sondear sin apoyo del CV: pide la escena desde cero y no des por sentado que la tiene.')}</p>
     </div>`;
   }
-  const qs = (p.preguntas||[]).filter(Boolean);
-  if(!qs.length) return '';
-  return `<div class="detbox" style="border-left:3px solid var(--acc)">
-    <div class="dt">Del CV de ${esc((S.cand||'').split(' ')[0])}${p.donde?` · ${esc(p.donde)}`:''}</div>
-    ${qs.map(q => `<div class="sq" style="margin-top:6px">“${esc(q)}”</div>`).join('')}
-  </div>`;
+  // Las preguntas del CV ya salen arriba, dentro de las tres literales: repetirlas aquí
+  // sería darle al reclutador dos sitios donde leer lo mismo en mitad de una llamada.
+  return '';
 }
 
 /* ===================== identidad (solo en un cierre) ===================== */
@@ -1870,7 +1926,9 @@ function cajaCaptura(momento){
         </div>
       </div>
     </div>
-    <p class="hint">La captura se borra sola en cuanto el cotejo termina. Lo que queda guardado es el puntaje, no la imagen.</p>`;
+    <p class="hint">Se borra sola en cuanto se hace el cotejo de identidad: de ahí en adelante lo
+    que queda guardado es el puntaje, no la imagen. Si la verificación no llega a hacerse, la
+    captura se conserva mientras el proceso siga vivo y se elimina al cerrar la vacante.</p>`;
 }
 
 function montarCaptura(donde){
@@ -2035,7 +2093,10 @@ function pantallaTranscripcion(err){
   const cierre = S.kind === 'cierre';
   const idn = S.ident || {};
   const idResuelta = ['verificada','rechazada'].includes(idn.estado);
-  const faltaIdentidad = cierre && (!S.idc.shot || !idResuelta);
+  // La captura falta en cualquier sesión; la identidad solo se cierra en un cierre.
+  const faltaCaptura = !S.idc.shot;
+  const faltaIdentidad = cierre && !idResuelta;
+  const hayPendiente = faltaCaptura || faltaIdentidad;
 
   $('#transStage').innerHTML = `
     <button class="back" data-salir type="button">← Guardar y salir</button>
@@ -2044,17 +2105,20 @@ function pantallaTranscripcion(err){
       <p class="lede">La identidad se cierra <b>ya</b>, mientras la conversación está tibia.
       La transcripción llega cuando Google la entregue — y para eso no tienes que quedarte aquí.</p>
 
-      ${faltaIdentidad ? `
+      ${hayPendiente ? `
       <div class="fset">
-        <div class="fttl">1 · Ciérrale la identidad a ${esc((S.cand || 'el candidato').split(' ')[0])}</div>
-        <p class="hint" style="margin-top:0">Esto no depende de la transcripción y sí depende del tiempo:
-        el trámite lo hace el candidato desde su celular, y lo hace mucho menos si se lo mandas mañana.</p>
-        ${!S.idc.shot ? cajaCaptura('espera') : ''}
-        ${bloqueIdentidad()}
+        <div class="fttl">1 · ${faltaIdentidad
+          ? 'Ciérrale la identidad a ' + esc((S.cand || 'el candidato').split(' ')[0])
+          : 'Guarda la captura de la llamada'}</div>
+        <p class="hint" style="margin-top:0">${faltaIdentidad
+          ? 'Esto no depende de la transcripción y sí depende del tiempo: el trámite lo hace el candidato desde su celular, y lo hace mucho menos si se lo mandas mañana.'
+          : 'Aunque hoy sea un sondeo, la captura se guarda: si el candidato avanza, la identidad se verifica contra esta cara sin repetir la entrevista.'}</p>
+        ${faltaCaptura ? cajaCaptura('espera') : ''}
+        ${faltaIdentidad ? bloqueIdentidad() : ''}
       </div>` : ''}
 
       <div class="fset">
-        <div class="fttl">${faltaIdentidad ? '2 · ' : ''}Dónde encontrar la transcripción</div>
+        <div class="fttl">${hayPendiente ? '2 · ' : ''}Dónde encontrar la transcripción</div>
         <p class="hint" style="margin-top:0">Google la deja en el Drive de la reunión, en la carpeta
         <b>Meet Recordings</b>, unos minutos después de colgar. Si todavía no aparece, no pasa nada:
         guarda y vuelve más tarde — esta verificación queda esperándote en el tablero.</p>
@@ -2092,9 +2156,9 @@ function pantallaTranscripcion(err){
   ta.addEventListener('input', revisar);
   revisar();
 
-  if(faltaIdentidad){
-    montarIdentidad($('#transStage'));
+  if(hayPendiente){
     montarCaptura($('#transStage'));
+    if(faltaIdentidad) montarIdentidad($('#transStage'));
     const bc = $('#transStage').querySelector('#btnCopiarLink');
     if(bc) bc.addEventListener('click', () => {
       navigator.clipboard?.writeText(S.diditUrl).then(() => toast('Link copiado')).catch(() => toast('No se pudo copiar'));

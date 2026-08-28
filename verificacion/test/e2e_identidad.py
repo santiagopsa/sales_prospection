@@ -73,7 +73,11 @@ with sync_playwright() as pw:
     ap = pg.inner_text("#stage").lower()
     for prohibido in ["muestras tu cédula", "cédula junto", "gestos aleatorios", "link para confirmar tu identidad"]:
         if prohibido in ap: errs.append(f"el sondeo le pide identificación al candidato: '{prohibido}'")
-    if pg.query_selector("#shotBox"): errs.append("el sondeo pide captura del rostro y no debería")
+    # Ahora el sondeo SÍ ofrece la captura —se guarda por si el candidato avanza— pero no
+    # la exige: la carpeta de un sondeo se completa sin ella.
+    if not pg.query_selector("#shotBox"): errs.append("el sondeo ya no ofrece guardar la captura")
+    if "captura del rostro tomada" in pg.inner_text("#stage").lower():
+        errs.append("el sondeo pone la captura como requisito de la carpeta y no debería")
     if len(pg.query_selector_all("[data-idc]")) != 2:
         errs.append(f"el sondeo debería tener 2 puntos de integridad, tiene {len(pg.query_selector_all('[data-idc]'))}")
     for k in ["grab","cam"]:

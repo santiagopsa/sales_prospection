@@ -137,12 +137,17 @@ with sync_playwright() as pw:
     pg2.on("pageerror", lambda e: errs.append(f"JS: {e}"))
     pg2.on("dialog", lambda d: d.accept())
     hasta_espera(pg2, kind="sondeo")
-    if pg2.query_selector("#shotBox") or pg2.query_selector("#btnEnviarId"):
+    # El sondeo sí puede guardar la captura desde la espera; lo que no pide es identidad.
+    if not pg2.query_selector("#shotBox"):
+        errs.append("el sondeo no deja guardar la captura desde la espera")
+    if pg2.query_selector("#btnEnviarId"):
         errs.append("aparece identidad en la espera de un sondeo, que no la pide")
     if not pg2.query_selector("#transText"):
         errs.append("(E) se perdió el cuadro de la transcripción en el sondeo")
     if "ciérrale la identidad" in pg2.inner_text("#transStage").lower():
         errs.append("(E) el sondeo habla de identidad")
+    if "sin repetir la entrevista" not in pg2.inner_text("#transStage"):
+        errs.append("(E) no explica por qué se guarda la captura en un sondeo")
     pg2.close()
     br.close()
 

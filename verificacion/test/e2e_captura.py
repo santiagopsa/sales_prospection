@@ -14,7 +14,8 @@ Lo que hay que sostener:
     cuando el reclutador de verdad la toma, con la llamada todavía abierta);
   · si al llegar al cierre falta la captura, se puede subir ahí mismo;
   · "Ir y completar" cae exactamente en el requisito que falta;
-  · en un sondeo no aparece ninguna captura, porque no se coteja identidad.
+  · en un sondeo la captura SÍ se ofrece y se guarda —para poder verificar la identidad
+    después sin repetir la entrevista— pero no es requisito para emitir su ficha.
 """
 from playwright.sync_api import sync_playwright
 import sys, time, subprocess, os, random, urllib.request
@@ -166,19 +167,41 @@ with sync_playwright() as pw:
         pg2.screenshot(path="/tmp/pk/cap_06_cierre_sube.png", full_page=True)
     pg2.close()
 
-    # ---------- E. En un sondeo no hay captura de ningún tipo ----------
+    # ---------- E. El sondeo la ofrece y la guarda, pero no la exige ----------
+    #  Cambió la decisión: antes el sondeo no guardaba ninguna imagen. Ahora sí, porque si
+    #  el candidato avanza semanas después había que repetirle la entrevista solo para
+    #  tener una cara contra la cual cotejar la identidad.
     pg3 = br.new_page(viewport={"width": 1180, "height": 1100})
     pg3.on("pageerror", lambda e: errs.append(f"JS: {e}"))
     pg3.on("dialog", lambda d: d.accept())
     sesion(pg3, "sondeo")
-    if pg3.query_selector("#shotBox"):
-        errs.append("aparece la captura del rostro en un sondeo")
+    if not pg3.query_selector("#shotBox"):
+        errs.append("el sondeo ya no deja guardar la captura del rostro")
+    if "sin repetir la entrevista" not in pg3.inner_text("#stage"):
+        errs.append("el sondeo no explica para qué se guarda la captura")
     for k in ["grab", "cam"]:
         pg3.click(f'[data-idc="{k}"]'); pg3.wait_for_timeout(90)
+    pg3.set_input_files("#shotFile", {"name": "rostro.png", "mimeType": "image/png", "buffer": PNG})
+    pg3.wait_for_timeout(1500)
     pg3.click("[data-next]"); pg3.wait_for_timeout(320)
     flujo.recorrer_guia(pg3)
-    if pg3.query_selector("#shotBox"):
-        errs.append("aparece la captura al final de un sondeo")
+    # Al final se puede reemplazar, igual que en un cierre.
+    if not pg3.query_selector("#shotBox"):
+        errs.append("no se puede corregir la captura al final de un sondeo")
+    # Y la verificación queda disponible para después, sin repetir la entrevista.
+    flujo.pegar_transcripcion(pg3)
+    flujo.confirmar_niveles(pg3, (5, 4))
+    for _ in range(6):
+        if "Cierre de la sesión" in pg3.inner_text("#stage"):
+            break
+        pg3.click("[data-next]"); pg3.wait_for_timeout(340)
+    if not pg3.query_selector("#btnVerifDespues"):
+        errs.append("REGRESIÓN: el sondeo no ofrece verificar la identidad después")
+    else:
+        pg3.click("#btnVerifDespues"); pg3.wait_for_timeout(600)
+        if not pg3.query_selector("#btnEnviarId"):
+            errs.append("al pedir verificación diferida no aparece cómo generar el link")
+        pg3.screenshot(path="/tmp/pk/cap_07_diferida.png", full_page=True)
     pg3.close()
     br.close()
 

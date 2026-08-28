@@ -53,7 +53,9 @@ with sync_playwright() as pw:
 
     # requisito 1: preguntas sacadas del CV
     r1 = pg.inner_text("#stage")
-    for must in ["Del CV de Jorge", "Alpina", "llévame a ese proyecto"]:
+    # La pregunta del CV ya no vive en un recuadro aparte: reemplaza a la genérica y se
+    # lee arriba, marcada como "del CV".
+    for must in ["del CV", "Alpina", "llévame a ese proyecto"]:
         if must.lower() not in r1.lower(): errs.append(f"el requisito 1 no trae del CV: {must}")
     pg.screenshot(path="/tmp/pk/cv_02_requisito.png", full_page=True)
     pg.click("[data-next]"); pg.wait_for_timeout(400)

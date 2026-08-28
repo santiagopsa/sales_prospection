@@ -55,6 +55,14 @@ QUÉ ES UN REQUISITO EXCLUYENTE (y qué no):
 PARA CADA EXCLUYENTE, construye el material de verificación. Esta es la parte más importante:
 - "criterio_cumple": qué debería poder narrar, con detalle, alguien que SÍ tiene esa experiencia real. Escríbelo concreto y en términos de conducta observable, no de conocimiento abstracto.
 - "detalles_verificables": exactamente 3 hechos duros que solo conoce quien lo hizo de verdad (versión de la herramienta, tamaño típico del equipo, cuánto suele durar, con qué se integra, qué se rompe primero, qué nombre real tiene un paso del proceso). Son las anclas que el evaluador no técnico compara contra tu propia respuesta. Para cada uno escribe la respuesta esperada, corta.
+
+LAS TRES PREGUNTAS — se leen EN VOZ ALTA, tal cual, sin adaptarlas:
+El reclutador las lee mientras escucha al candidato y observa cómo responde. No tiene tiempo de
+reformular ni de construir nada en el momento. Así que escríbelas como se van a decir: en segunda
+persona, dirigidas al candidato, completas, y que se entiendan solas sin haber leído el resto de la
+ficha. Nada de instrucciones al reclutador dentro de la pregunta, nada de corchetes para rellenar,
+nada de "pídele que...". Una sola pregunta por campo, no tres encadenadas. Cortas: si no se puede
+decir de un tirón sin tomar aire, está mal escrita.
 - "pregunta_escena": pide un caso concreto — cuándo, en qué empresa, qué hizo ÉL y no el equipo.
 - "pregunta_friccion": pide la cicatriz — qué salió mal, qué tocó rehacer. La experiencia real siempre tiene fricción; la inventada es lisa.
 - "pregunta_cruce": una pregunta técnica corta cuya respuesta correcta conoces, que sirve para contrastar contra lo que dijo antes.
@@ -160,8 +168,10 @@ REGLA DE ORO — ANCLAJE ESTRICTO AL CV:
 
 QUÉ BUSCAR:
 
-1. **Para cada requisito excluyente**, dos o tres preguntas que solo tengan sentido para ESTE candidato,
-   citando la empresa, el proyecto o el periodo concreto donde dice haberlo hecho. Si el CV NO menciona
+1. **Para cada requisito excluyente**, UNA O DOS preguntas —no más— que solo tengan sentido para ESTE
+   candidato, citando la empresa, el proyecto o el periodo concreto donde dice haberlo hecho. Se leen en
+   voz alta tal cual: en segunda persona, completas, sin corchetes ni instrucciones adentro. La primera
+   reemplaza a la pregunta genérica del cargo, así que tiene que servir para abrir el tema por sí sola. Si el CV NO menciona
    nada relacionado con ese requisito, dilo: eso es lo más importante que puedes reportar, porque significa
    que el evaluador va a tener que sondear a ciegas.
 
