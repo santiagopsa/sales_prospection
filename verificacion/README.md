@@ -10,7 +10,7 @@ Un servicio, una base de datos, dos productos.
 
 Convierte el **levantamiento de perfil** con el cliente en una **verificación auditable** del finalista.
 
-El reclutador carga la transcripción de la reunión (o el job description). Claude extrae la empresa, la vacante y los **requisitos excluyentes** — y para cada uno construye el material con el que se verifica: qué debe poder narrar el candidato, tres detalles duros que solo conoce quien lo hizo de verdad, y las preguntas de escena, fricción y cruce. El reclutador revisa, corrige y guarda.
+El reclutador carga la transcripción de la reunión (o el job description). Claude extrae la empresa, la vacante y **hasta tres requisitos excluyentes** — y para cada uno construye el material con el que se verifica: qué debe poder narrar el candidato, tres detalles duros que solo conoce quien lo hizo de verdad, y las preguntas que se leen en voz alta. Extrae además el **perfil de conducta**: dos o tres rasgos que este cargo concreto necesita, cada uno con su pregunta. El reclutador revisa, corrige y guarda — puede cambiar todo eso después sin rehacer la vacante.
 
 Después, para cada finalista, la app guía una sesión de 25 minutos contra esos mismos requisitos, con escalas ancladas 1-5, señales observables y un semáforo que **calcula el servidor, no el navegador**. Si la carpeta no está completa, no hay acta.
 
@@ -18,7 +18,7 @@ Después, para cada finalista, la app guía una sesión de 25 minutos contra eso
 |---|-------|-------|----------|
 | 0 | Tablero | — | Vacantes y verificaciones recientes |
 | 1 | Levantamiento | Reclutador | Sube el archivo o pega el texto |
-| 2 | Análisis | Claude | Empresa, vacante y hasta 5 excluyentes · 20-40 s |
+| 2 | Análisis | Claude | Empresa, vacante, hasta 3 excluyentes y el perfil de conducta · 20-40 s |
 | 3 | Revisión | Reclutador | Corrige lo que la IA no pilló y guarda |
 | 4 | Vacante | — | Ficha con los requisitos y su material de verificación |
 | 5 | Sesión | Reclutador | Apertura → un requisito por pantalla → trayectoria → contexto → cierre |
@@ -93,6 +93,8 @@ verificacion.ratings       id · session_id → sessions · requirement_id → r
 
 Aparte a propósito: son la parte que no puede fallar y la única con pruebas propias.
 
+- **Máximo 3 requisitos excluyentes** (`MAX_REQ`). No es una preferencia de pantalla: la sesión dura 25 minutos y lo que se reparte entre los temas no es solo el tiempo sino la repregunta, que es donde se cae quien no hizo el trabajo. El levantamiento propone hasta 3, la revisión y la edición no dejan pasar de ahí, y el servidor devuelve `400` si alguien manda más por API. El **inglés no cuenta** contra el tope: no se pregunta, se escucha en un tramo aparte.
+- **Dos preguntas por requisito, tres como máximo.** Escena y fricción son obligatorias; el cruce solo se escribe cuando hay un hecho duro que separe a quien lo hizo de quien lo leyó. Si la vacante no trae cruce, la pantalla **no rellena** con una tercera: prefiere dos preguntas y seis minutos de seguimiento.
 - **Semáforo.** Verde: cero señales. Amarillo: 1-2 señales, o un cotejo de rostro dudoso. Rojo: 3 o más señales, o —solo en un cierre— que el rostro verificado no corresponda al de la entrevista.
 - **Sin carpeta completa no hay acta.** Cuatro condiciones: los cinco puntos de identidad marcados, todos los requisitos calificados, más de 10 caracteres de evidencia en cada uno (`EV_MIN` en `public/app.js`), y semáforo distinto de rojo. El botón de generar acta queda bloqueado hasta que las cuatro se cumplan, y el servidor las vuelve a revisar en `/issue`: si algo falta devuelve `409` con la lista de razones, así que el navegador no puede saltárselo. En la pantalla de cierre, cada condición que falla nombra exactamente qué le falta y ofrece un botón para ir a esa pantalla.
 - **Amarillo sí emite**, marcado como pendiente de cuatro ojos. Si prefieres que amarillo tampoco emita, es una línea en `bloqueos()`.
@@ -120,6 +122,13 @@ python3 verificacion/test/e2e_editar.py    # editar una vacante sin tocar las ac
 python3 verificacion/test/e2e_intake_error.py # que un análisis fallido diga qué pasó y qué hacer
 python3 verificacion/test/e2e_transcripcion.py # entrevistar sin escribir, calificar con la transcripción
 python3 verificacion/test/e2e_ingles.py    # el inglés se mide escuchando, no preguntando
+python3 verificacion/test/e2e_perfil.py    # tope de 3 requisitos, dos preguntas y el perfil de conducta
+```
+
+Y una herramienta que no afirma nada, solo deja mirar el resultado — capturas de cada pantalla y el PDF del informe:
+
+```bash
+SALIDA=~/Escritorio/informe python3 verificacion/test/shot_inf.py
 ```
 
 `test/stub.js` replica la API con `http` nativo y devuelve un levantamiento fijo en vez de llamar a Claude: prueba la interfaz sin API key, sin Postgres y sin `npm install`. Importa las reglas reales de `rules.js` y se monta en `/verificacion`, igual que en producción — así que lo que se prueba del semáforo, del acta y del punto de montaje es el código de verdad.
@@ -137,15 +146,23 @@ curl -sI localhost:3000/verificacion | head -1  # 301 hacia /verificacion/
 
 ## El informe y su verificación pública
 
-El acta sigue el formato del informe rediseñado, no una versión reducida:
+El informe es a la vez el acta de verificación y el documento con el que se presenta al candidato. Eso no es una concesión: lo que hace vendible a un candidato es exactamente lo que quedó verificado, y tener dos documentos separados invita a que el bonito diga cosas que el riguroso no sostiene.
 
-- **Sellos** arriba, derivados de lo que de verdad se midió en la sesión: identidad, supervisión, señales, requisitos.
-- **Zona 1 · Lo que medimos** — cada requisito con su barra, la evidencia textual y **el ancla citada debajo**. Sin el ancla, un "4/5" es un número sin criterio detrás.
-- **Integridad** — identidad con el puntaje de cotejo, señales, grabación, evidencia.
-- **Zona 2 · Lo que declara** — pretensión, disponibilidad, motivación y no negociables, marcados como *sus palabras, no nuestra medición*.
-- **Zona 3 · Nuestra recomendación** — veredicto, texto y riesgos con mitigación. Lo único del acta que es opinión, y va firmado.
+Va a dos columnas, formato `v4-2026-09`:
 
-Las zonas 2 y 3 se llenan en la fase **Contexto**, entre los requisitos y el cierre.
+- **Encabezado** con el nombre, el cargo, el cliente y una bajada que es un conteo, no un adjetivo: *de los 3 requisitos que definió el cliente, 2 quedaron sostenidos con evidencia de la sesión*.
+- **Sellos** y **cinta de datos** — identidad, supervisión, señales y requisitos medidos; después ubicación, disponibilidad, pretensión e inglés. Un chip solo aparece si el dato se recogió: un rótulo con nada detrás le dice al cliente que no preguntamos.
+- **Posicionamiento** — el párrafo del evaluador, arriba, donde se lee primero.
+- **Columna ancha · Ajuste al rol** — cada requisito con su barra, la explicación de por qué ese nivel, **lo que quedó por verificar** y el ancla citada debajo. Sin el ancla, un "4/5" es un número sin criterio detrás.
+- **Columna ancha · Conducta** — los rasgos que el cargo pedía y qué se observó de cada uno. Un rasgo que no se abordó sale como *no se abordó*.
+- **Columna ancha · Integridad** — identidad con el puntaje de cotejo, señales, grabación, evidencia archivada.
+- **Columna angosta · Lo que demostró** — tarjetas con lo que sostuvo en la conversación. Salen de la transcripción, **no del CV**: el CV lo escribió el candidato, la conversación la sostuvo delante de un evaluador.
+- **Columna angosta · Inglés** — el nivel, la conducta que lo define y de dónde salió el dato.
+- **Factores de cierre** — qué lo mueve, sus no negociables, las condiciones declaradas, y al lado la recomendación con sus riesgos y mitigación. Lo único del informe que es opinión, y va firmado.
+
+El contexto y la recomendación se llenan en la fase **Contexto**; la conducta y las tarjetas, en la fase **Conducta**, después de leer la transcripción.
+
+**Ojo con el formato.** El snapshot congela los *datos* de un informe emitido, que es lo que promete la firma de integridad. La maqueta no: un informe emitido bajo `v3-2026-08` se vuelve a dibujar con la de `v4`, con su mismo contenido. Si mañana hace falta que un informe viejo se vea exactamente como el día que se entregó, hay que guardar también el HTML, no solo los datos.
 
 Lo que **no** trae, porque no sale de la sesión: inglés por sub-habilidad, percentil contra la población evaluada y trayectoria confirmada vs. declarada. Eso vive en la base de datos de PeakU y en la verificación de referencias; conectarlo es un trabajo aparte.
 

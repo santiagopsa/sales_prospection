@@ -11,7 +11,7 @@
 const express = require('express');
 const path = require('path');
 const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt } = require('./prompts');
-const { LVLTXT, clean, esCierre, semaforo, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode } = require('./rules');
+const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode } = require('./rules');
 const didit = require('./didit');
 const { T, initSchema } = require('./schema');
 const { crearPedirJson } = require('./llm');
@@ -19,7 +19,11 @@ const A = require('./archivos');
 
 // Versión del formato del acta. Queda grabada en cada documento emitido: si mañana el acta
 // cambia, el informe viejo sigue diciendo con qué formato se dibujó.
-const FORMATO_ACTA = 'v3-2026-08';
+// v4: el informe pasó al formato de presentación — dos columnas, cinta de datos, conducta
+// observada y tarjetas de lo demostrado. El SNAPSHOT sigue congelando los datos, que es lo
+// que promete la firma de integridad; lo que cambia al cambiar de versión es cómo se dibujan.
+// Un informe emitido bajo v3 se vuelve a dibujar con la maqueta nueva, con su mismo contenido.
+const FORMATO_ACTA = 'v4-2026-09';
 
 // Fallback en memoria para correr sin Postgres (pruebas locales). Se pierde al reiniciar.
 const mem = { companies: [], vacancies: [], requirements: [], sessions: [], ratings: [], seq: 1 };
@@ -290,6 +294,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       if (!clean(emp.nombre)) return res.status(400).json({ error: 'Falta el nombre de la empresa' });
       if (!clean(vac.titulo)) return res.status(400).json({ error: 'Falta el título del cargo' });
       if (!reqs.length) return res.status(400).json({ error: 'Se necesita al menos un requisito excluyente' });
+      if (reqs.length > MAX_REQ) return res.status(400).json({ error: `Máximo ${MAX_REQ} requisitos excluyentes por vacante.` });
 
       if (pool) {
         const c = await pool.connect();
@@ -310,15 +315,16 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
           const v = await c.query(
             `INSERT INTO ${T.vacancies} (company_id,title,seniority,modality,city,salary_text,salary_min,salary_max,currency,
                                          context,urgency,recruiter,source_type,source_text,ai_raw,suggested_mode,
-                                         ingles_requerido,ingles_nivel,ingles_uso,ingles_cita)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING id`,
+                                         ingles_requerido,ingles_nivel,ingles_uso,ingles_cita,perfil)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb) RETURNING id`,
             [companyId, clean(vac.titulo), clean(vac.seniority) || null, clean(vac.modalidad) || null,
              clean(vac.ciudad) || null, clean(vac.salario_texto) || null,
              vac.salario_min ?? null, vac.salario_max ?? null, clean(vac.moneda) || null,
              clean(vac.contexto) || null, clean(vac.urgencia) || null, clean(b.recruiter) || null,
              clean(b.sourceType) || null, clean(b.sourceText) || null,
              b.aiRaw ? JSON.stringify(b.aiRaw) : null, clean(b.modalidad_sugerida) || null,
-             !!ing.requerido, clean(ing.nivel) || null, clean(ing.uso) || null, clean(ing.evidencia_cita) || null]
+             !!ing.requerido, clean(ing.nivel) || null, clean(ing.uso) || null, clean(ing.evidencia_cita) || null,
+             Array.isArray(b.perfil) ? JSON.stringify(b.perfil.filter(x => x && clean(x.rasgo))) : null]
           );
           const vacancyId = v.rows[0].id;
 
@@ -348,6 +354,9 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         salary_text: clean(vac.salario_texto), context: clean(vac.contexto), urgency: clean(vac.urgencia),
         recruiter: clean(b.recruiter), source_type: clean(b.sourceType), source_text: clean(b.sourceText),
         ai_raw: b.aiRaw || null, suggested_mode: clean(b.modalidad_sugerida), status: 'activa',
+        ingles_requerido: !!ing.requerido, ingles_nivel: clean(ing.nivel),
+        ingles_uso: clean(ing.uso), ingles_cita: clean(ing.evidencia_cita),
+        perfil: Array.isArray(b.perfil) ? b.perfil.filter(x => x && clean(x.rasgo)) : null,
         created_at: new Date().toISOString(),
       };
       mem.vacancies.push(vv);
@@ -427,7 +436,11 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       if (reqs && !reqs.length) {
         return res.status(400).json({ error: 'La vacante necesita al menos un requisito excluyente.' });
       }
+      if (reqs && reqs.length > MAX_REQ) {
+        return res.status(400).json({ error: `Máximo ${MAX_REQ} requisitos excluyentes por vacante.` });
+      }
       const jsonb = v => (v == null ? null : JSON.stringify(v));
+      const perfil = Array.isArray(b.perfil) ? b.perfil.filter(x => x && clean(x.rasgo)) : null;
 
       if (pool) {
         const c = await pool.connect();
@@ -450,15 +463,10 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
             if (b[k] !== undefined) { val.push(clean(b[k]) || null); set.push(`${k}=$${val.length}`); }
           }
           if (b.ingles_requerido !== undefined) { val.push(!!b.ingles_requerido); set.push(`ingles_requerido=$${val.length}`); }
+          if (perfil) { val.push(JSON.stringify(perfil)); set.push(`perfil=$${val.length}::jsonb`); }
           set.push('updated_at=NOW()');
           const up = await c.query(`UPDATE ${T.vacancies} SET ${set.join(', ')} WHERE id=$1 RETURNING id`, val);
           if (!up.rows.length) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'not found' }); }
-          // Solo se asciende: un sondeo pasa a cierre cuando el candidato avanza y hay que
-          // verificar su identidad. El camino inverso borraría requisitos de la carpeta ya
-          // cumplidos, así que no existe.
-          if (b.kind === 'cierre') {
-            await c.query(`UPDATE ${T.sessions} SET kind='cierre' WHERE id=$1 AND kind<>'cierre'`, [id]);
-          }
 
           if (reqs) {
             const vivos = reqs.map(x => Number(x.id)).filter(Boolean);
@@ -499,6 +507,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       if (!v) return res.status(404).json({ error: 'not found' });
       for (const k of campos) if (b[k] !== undefined) v[k] = clean(b[k]) || null;
       if (b.ingles_requerido !== undefined) v.ingles_requerido = !!b.ingles_requerido;
+      if (perfil) v.perfil = perfil;
       if (clean(b.company_name)) v.company_name = clean(b.company_name);
       v.updated_at = new Date().toISOString();
       if (reqs) {
@@ -614,15 +623,16 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         return res.status(400).json({ error: 'La transcripción está vacía o es demasiado corta. Una entrevista de 25 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.' });
       }
 
-      let cargo = '', candidato = '', modo = 'B', excluyentes = [];
+      let cargo = '', candidato = '', modo = 'B', excluyentes = [], perfil = [];
       if (pool) {
         const q = await pool.query(`
-          SELECT s.candidate, s.mode, v.id AS vid, v.title,
+          SELECT s.candidate, s.mode, v.id AS vid, v.title, v.perfil,
                  v.ingles_requerido, v.ingles_nivel, v.ingles_uso
           FROM ${T.sessions} s LEFT JOIN ${T.vacancies} v ON v.id = s.vacancy_id
           WHERE s.id = $1`, [id]);
         if (!q.rows.length) return res.status(404).json({ error: 'not found' });
         cargo = q.rows[0].title || ''; candidato = q.rows[0].candidate || ''; modo = q.rows[0].mode || 'B';
+        perfil = Array.isArray(q.rows[0].perfil) ? q.rows[0].perfil : [];
         if (q.rows[0].vid) {
           const rq = await pool.query(
             `SELECT id, text, criterio, detalles, senales FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`,
@@ -634,11 +644,12 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         if (!s) return res.status(404).json({ error: 'not found' });
         const v = mem.vacancies.find(x => x.id === s.vacancy_id);
         cargo = (v && v.title) || ''; candidato = s.candidate || ''; modo = s.mode || 'B';
+        perfil = (v && Array.isArray(v.perfil)) ? v.perfil : [];
         excluyentes = mem.requirements.filter(q => q.vacancy_id === (v && v.id)).sort((a, b) => a.ord - b.ord);
       }
 
       const out = await pedirJson(
-        buildTranscriptPrompt(transcript, { requisitos: excluyentes, candidato, cargo, modo }),
+        buildTranscriptPrompt(transcript, { requisitos: excluyentes, candidato, cargo, modo, perfil }),
         { etiqueta: 'transcripcion', maxTokens: 10000 });
       if (out.error) return res.status(502).json(out);
 
@@ -1066,13 +1077,25 @@ ${!code ? `
           const up = await c.query(
             `UPDATE ${T.sessions} SET identity=$2, signals=$3, data=$4, semaforo=$5,
                                       declara=$6, recomendacion=$7,
-                                      trayectoria=COALESCE($8::jsonb, trayectoria), updated_at=NOW()
+                                      trayectoria=COALESCE($8::jsonb, trayectoria),
+                                      ingles=COALESCE($9::jsonb, ingles),
+                                      perfil=COALESCE($10::jsonb, perfil),
+                                      impacto=COALESCE($11::jsonb, impacto), updated_at=NOW()
              WHERE id=$1 RETURNING id`,
             [id, JSON.stringify(identity), JSON.stringify(signals), JSON.stringify(b.data || {}), sem.color,
              JSON.stringify(b.declara || {}), JSON.stringify(b.recomendacion || {}),
-             b.trayectoria ? JSON.stringify(b.trayectoria) : null]
+             b.trayectoria ? JSON.stringify(b.trayectoria) : null,
+             b.ingles ? JSON.stringify(b.ingles) : null,
+             b.perfil ? JSON.stringify(b.perfil) : null,
+             b.impacto ? JSON.stringify(b.impacto) : null]
           );
           if (!up.rows.length) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'not found' }); }
+          // Solo se asciende: un sondeo pasa a cierre cuando el candidato avanza y hay que
+          // verificar su identidad contra la captura que ya se tomó. El camino inverso
+          // borraría requisitos de la carpeta ya cumplidos, así que no existe.
+          if (b.kind === 'cierre') {
+            await c.query(`UPDATE ${T.sessions} SET kind='cierre' WHERE id=$1 AND kind<>'cierre'`, [id]);
+          }
           await c.query(`DELETE FROM ${T.ratings} WHERE session_id=$1`, [id]);
           for (let i = 0; i < ratings.length; i++) {
             const q = ratings[i];
@@ -1095,11 +1118,18 @@ ${!code ? `
       if (!s) return res.status(404).json({ error: 'not found' });
       Object.assign(s, { identity, signals, data: b.data || {}, semaforo: sem.color,
                          declara: b.declara || {}, recomendacion: b.recomendacion || {},
-                         ...(b.trayectoria ? { trayectoria: b.trayectoria } : {}) });
+                         ...(b.trayectoria ? { trayectoria: b.trayectoria } : {}),
+                         ...(b.ingles ? { ingles: b.ingles } : {}),
+                         ...(b.perfil ? { perfil: b.perfil } : {}),
+                         ...(b.impacto ? { impacto: b.impacto } : {}),
+                         ...(b.kind === 'cierre' ? { kind: 'cierre' } : {}) });
       mem.ratings = mem.ratings.filter(x => x.session_id !== id);
+      // `analisis` y `falta` son lo que se imprime en el informe; sin guardarlos aquí, una
+      // sesión retomada volvía con el cuerpo vacío en la rama de memoria.
       ratings.forEach((q, i) => mem.ratings.push({
         id: nextId(), session_id: id, requirement_id: q.requirement_id || null, req_text: clean(q.req_text),
         ord: i, level: q.level || null, verdict: q.level ? LVLTXT[q.level] : null, evidence: clean(q.evidence),
+        analisis: clean(q.analisis), falta: clean(q.falta),
       }));
       res.json({ ok: true, id, semaforo: sem, identidad: estadoIdentidad(ctx) });
     } catch (e) {
@@ -1150,6 +1180,10 @@ ${!code ? `
         declara: b.declara || {},
         recomendacion: b.recomendacion || {},
         trayectoria: b.trayectoria || s0.trayectoria || [],
+        // Congelados como todo lo demás: el informe que se entregó hoy tiene que verse igual
+        // dentro de un año, aunque el perfil de la vacante se haya editado entretanto.
+        perfil: b.perfil || s0.perfil || [],
+        impacto: b.impacto || s0.impacto || [],
         ingles_nivel: (b.ingles && b.ingles.confirmado) || null,
         ingles_exigido: (b.ingles && b.ingles.nivel_exigido) || null,
         ingles_nota: (b.ingles && b.ingles.nota) || '',
@@ -1168,6 +1202,8 @@ ${!code ? `
                                     recomendacion=COALESCE($8::jsonb, recomendacion),
                                     trayectoria=COALESCE($9::jsonb, trayectoria),
                                     ingles=COALESCE($12::jsonb, ingles),
+                                    perfil=COALESCE($13::jsonb, perfil),
+                                    impacto=COALESCE($14::jsonb, impacto),
                                     snapshot=$10::jsonb, formato=$11,
                                     issued_at=NOW(), updated_at=NOW()
            WHERE id=$1 RETURNING id, report_code, issued_at, integrity_hash`,
@@ -1176,7 +1212,9 @@ ${!code ? `
            b.recomendacion ? JSON.stringify(b.recomendacion) : null,
            b.trayectoria ? JSON.stringify(b.trayectoria) : null,
            JSON.stringify(snapshot), FORMATO_ACTA,
-           b.ingles ? JSON.stringify(b.ingles) : null]
+           b.ingles ? JSON.stringify(b.ingles) : null,
+           b.perfil ? JSON.stringify(b.perfil) : null,
+           b.impacto ? JSON.stringify(b.impacto) : null]
         );
         if (!q.rows.length) return res.status(404).json({ error: 'not found' });
         return res.json({ ok: true, semaforo: sem, identidad, documento: doc, ...q.rows[0] });
@@ -1221,7 +1259,8 @@ ${!code ? `
       if (pool) {
         const s = await pool.query(`
           SELECT s.*, v.title AS vacancy_title, c.name AS company_name,
-                 v.ingles_requerido, v.ingles_nivel, v.ingles_uso, v.ingles_cita
+                 v.ingles_requerido, v.ingles_nivel, v.ingles_uso, v.ingles_cita,
+                 v.perfil AS vacancy_perfil
           FROM ${T.sessions} s LEFT JOIN ${T.vacancies} v ON v.id=s.vacancy_id
           LEFT JOIN ${T.companies} c ON c.id=v.company_id WHERE s.id=$1`, [id]);
         if (!s.rows.length) return res.status(404).json({ error: 'not found' });

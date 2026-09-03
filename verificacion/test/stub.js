@@ -8,7 +8,7 @@ const crypto = require('crypto');
 
 const PUB = path.join(__dirname, '..', 'public');
 const MOUNT = '/verificacion'; // igual que en el servidor real
-const { LVLTXT, semaforo, bloqueos, estadoIdentidad, tipoDocumento } = require('../rules'); // reglas reales del servidor
+const { LVLTXT, MAX_REQ, semaforo, bloqueos, estadoIdentidad, tipoDocumento } = require('../rules'); // reglas reales del servidor
 const A = require('../archivos'); // misma decisión de "qué es este archivo" que app.js
 
 // Lo que el stub devuelve al "leer" un .docx o .pdf, ya que no tiene mammoth ni pdf-parse.
@@ -19,7 +19,7 @@ const FAKE_TRANS = (
   'Reclutador: que transaccion usas para listas de materiales?\n' +
   'Candidato: CS01 para crear, CS02 para modificar.\n'
 ).repeat(8);
-const FORMATO_ACTA = 'v3-2026-08'; // igual que en app.js
+const FORMATO_ACTA = 'v4-2026-09'; // igual que en app.js
 const db = { companies:[], vacancies:[], requirements:[], sessions:[], ratings:[], seq:1 };
 const nid = () => db.seq++;
 const clean = s => (s==null?'':String(s)).trim();
@@ -52,6 +52,18 @@ const FAKE = {
   ],
   ingles:{requerido:true, nivel:'conversacional para reuniones con el cliente',
     uso:'daily con el equipo del cliente en EE.UU.', evidencia_cita:'tiene que poder estar en el daily en inglés'},
+  perfil_conducta:[
+    {rasgo:'Tolerancia a la ambigüedad', por_que:'El módulo quedó a medias tras el rollout y nadie documentó las decisiones.',
+     evidencia_cita:'aquí va a encontrar mucho sin documentar y tiene que poder avanzar igual',
+     pregunta:'Cuéntame de la última vez que te tocó avanzar en algo sin tener toda la información. ¿Qué hiciste?',
+     se_ve_asi:'Describe una situación concreta y qué criterio usó para decidir sin esperar.',
+     no_se_ve_asi:'Dice que siempre pide todo por escrito antes de empezar, o no encuentra el caso.'},
+    {rasgo:'Manejo del usuario molesto', por_que:'Manufactura llama cuando la planta está parada y el consultor es la cara.',
+     evidencia_cita:'el de producción llama gritando y hay que saberlo manejar',
+     pregunta:'Cuéntame de un usuario que se te puso muy bravo. ¿Cómo terminó eso?',
+     se_ve_asi:'Cuenta el episodio con nombre y contexto, y qué hizo para bajarlo sin ceder en lo técnico.',
+     no_se_ve_asi:'Habla de "manejar bien al cliente" en general, o culpa al usuario.'}
+  ],
   deseables:[{item:'Certificación SAP', evidencia_cita:'ojalá tenga la certificación'}],
   verificable_por_documento:[{item:'Certificación SAP', como_se_valida:'certificado oficial de SAP'}],
   descartes_previos:'Rechazaron dos candidatos que sabían la teoría pero nunca habían estado en un go-live.',
@@ -123,6 +135,7 @@ const server = http.createServer(async (req, res) => {
     if(!clean(emp.nombre)) return json(res,400,{error:'Falta el nombre de la empresa'});
     if(!clean(vac.titulo)) return json(res,400,{error:'Falta el título del cargo'});
     if(!reqs.length) return json(res,400,{error:'Se necesita al menos un requisito excluyente'});
+    if(reqs.length > MAX_REQ) return json(res,400,{error:`Máximo ${MAX_REQ} requisitos excluyentes por vacante.`});
     let c = db.companies.find(x=>x.name.toLowerCase()===clean(emp.nombre).toLowerCase());
     if(!c){ c={id:nid(), name:clean(emp.nombre), sector:clean(emp.sector), contact:clean(emp.contacto)}; db.companies.push(c); }
     const v={id:nid(), company_id:c.id, company_name:c.name, title:clean(vac.titulo), seniority:clean(vac.seniority),
@@ -130,6 +143,7 @@ const server = http.createServer(async (req, res) => {
       context:clean(vac.contexto), suggested_mode:clean(b.modalidad_sugerida), status:'activa',
       ingles_requerido: !!(b.ingles && b.ingles.requerido), ingles_nivel: clean(b.ingles && b.ingles.nivel),
       ingles_uso: clean(b.ingles && b.ingles.uso), ingles_cita: clean(b.ingles && b.ingles.evidencia_cita),
+      perfil: Array.isArray(b.perfil) ? b.perfil : [],
       created_at:new Date().toISOString()};
     db.vacancies.push(v);
     reqs.forEach((r,i)=>db.requirements.push({id:nid(), vacancy_id:v.id, ord:i, text:clean(r.requisito),
@@ -161,9 +175,13 @@ const server = http.createServer(async (req, res) => {
     if(b.title !== undefined && !clean(b.title)) return json(res,400,{error:'El título del cargo no puede quedar vacío.'});
     const reqs = Array.isArray(b.requirements) ? b.requirements.filter(x=>clean(x.text)) : null;
     if(reqs && !reqs.length) return json(res,400,{error:'La vacante necesita al menos un requisito excluyente.'});
+    if(reqs && reqs.length > MAX_REQ) return json(res,400,{error:`Máximo ${MAX_REQ} requisitos excluyentes por vacante.`});
 
-    for(const k of ['title','seniority','modality','city','salary_text','context','recruiter','status'])
+    for(const k of ['title','seniority','modality','city','salary_text','context','recruiter','status',
+                    'ingles_nivel','ingles_uso'])
       if(b[k] !== undefined) v[k] = clean(b[k]) || null;
+    if(b.ingles_requerido !== undefined) v.ingles_requerido = !!b.ingles_requerido;
+    if(Array.isArray(b.perfil)) v.perfil = b.perfil.filter(x=>x && clean(x.rasgo));
     if(clean(b.company_name)){
       let c = db.companies.find(x=>x.name.toLowerCase()===clean(b.company_name).toLowerCase());
       if(!c){ c={id:nid(), name:clean(b.company_name)}; db.companies.push(c); }
@@ -205,7 +223,7 @@ const server = http.createServer(async (req, res) => {
     const v = db.vacancies.find(x=>x.id===s.vacancy_id);
     return json(res,200,{...sinImagen, vacancy_title:v&&v.title, company_name:v&&v.company_name,
       ingles_requerido:v&&v.ingles_requerido, ingles_nivel:v&&v.ingles_nivel, ingles_uso:v&&v.ingles_uso,
-      ingles:s.ingles||null,
+      ingles:s.ingles||null, vacancy_perfil:(v&&v.perfil)||[],
       tiene_captura:!!shot, identidad:estadoIdentidad(ctx),
       documento:tipoDocumento(ctx), ratings:db.ratings.filter(r=>r.session_id===s.id)});
   }
@@ -242,6 +260,8 @@ const server = http.createServer(async (req, res) => {
                       declara:b.declara||{}, recomendacion:b.recomendacion||{},
                       ...(b.trayectoria ? {trayectoria:b.trayectoria} : {}),
                       ...(b.ingles ? {ingles:b.ingles} : {}),
+                      ...(b.perfil ? {perfil:b.perfil} : {}),
+                      ...(b.impacto ? {impacto:b.impacto} : {}),
                       ...(b.kind === 'cierre' ? {kind:'cierre'} : {})});
     db.ratings = db.ratings.filter(r=>r.session_id!==s.id);
     (b.ratings||[]).forEach((r,i)=>db.ratings.push({id:nid(), session_id:s.id, req_text:r.req_text,
@@ -271,6 +291,7 @@ const server = http.createServer(async (req, res) => {
       identity:b.identity||{}, signals:b.signals||{}, identidad,
       face_score:s.face_score??null, declara:b.declara||{}, recomendacion:b.recomendacion||{},
       trayectoria:b.trayectoria||s.trayectoria||[], semaforo:sem.color, integrity_hash:hash,
+      perfil:b.perfil||s.perfil||[], impacto:b.impacto||s.impacto||[],
       ingles_nivel:(b.ingles&&b.ingles.confirmado)||null,
       ingles_exigido:(b.ingles&&b.ingles.nivel_exigido)||null,
       ingles_nota:(b.ingles&&b.ingles.nota)||'',
@@ -282,6 +303,8 @@ const server = http.createServer(async (req, res) => {
       declara:b.declara||{}, recomendacion:b.recomendacion||{},
       ...(b.trayectoria ? {trayectoria:b.trayectoria} : {}),
       ...(b.ingles ? {ingles:b.ingles} : {}),
+      ...(b.perfil ? {perfil:b.perfil} : {}),
+      ...(b.impacto ? {impacto:b.impacto} : {}),
       issued_at:new Date().toISOString()});
     return json(res,200,{ok:true, semaforo:sem, identidad, documento:doc,
       id:s.id, report_code:s.report_code, issued_at:s.issued_at, integrity_hash:hash});
@@ -322,6 +345,18 @@ const server = http.createServer(async (req, res) => {
       })),
       // Sin `ingles`: el análisis de la transcripción ya no lo produce. El nivel de inglés
       // lo marca el evaluador en vivo, porque Meet transcribe en un solo idioma.
+      // El segundo rasgo queda sin abordar a propósito: hay que poder imprimir "no se abordó".
+      perfil: ((db.vacancies.find(x=>x.id===s.vacancy_id)||{}).perfil||[]).map((x,i)=>({
+        rasgo:x.rasgo,
+        presente: i === 1 ? null : true,
+        observado: i === 1 ? '' : 'Contó que en Alpina arrancó la parametrización con el maestro de materiales incompleto y fijó él mismo el criterio de qué campos bloqueaban y cuáles no, en vez de esperar la definición del cliente.',
+        cita: i === 1 ? '' : 'Nadie me iba a dar esa definición, entonces decidí que sin unidad de medida no arrancaba el material y el resto lo dejaba pasar.'
+      })),
+      impacto:[
+        {titulo:'6 años en SAP PP', sub:'Trayectoria sostenida', texto:'Nombró tres rollouts con empresa, año y su rol en cada uno.'},
+        {titulo:'Go-live de planta', sub:'Alcance manejado', texto:'Alpina 2023: llevó el arranque de producción y resolvió la caída del maestro de materiales.'},
+        {titulo:'CS01 / CS02', sub:'Transacciones de uso diario', texto:'Respondió sin dudar y describió la pantalla real, no la definición.'}
+      ],
       declara:{pretension:'Habló de 12 millones', disponibilidad:'Dos semanas', motivacion:'Busca autonomía en la decisión técnica', nogo:'Baja autonomía'},
       senales_generales:[],
       advertencias: t.includes('__CORTADA__') ? ['La transcripción parece cortada: termina a mitad de una frase.'] : [],

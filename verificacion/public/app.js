@@ -50,6 +50,15 @@ const ANCLA_CORTA = {
   1:'Ancla 1: no sostiene el tema — evasivas, incoherencias con el CV o detalles incorrectos.'
 };
 
+/* Tres requisitos, no cinco. La sesión dura 25 minutos y el tiempo no es lo único que se
+   reparte: la atención del reclutador también. Con cinco temas, cada uno recibe una pregunta
+   y ninguna repregunta — y la repregunta es lo que separa a quien lo hizo de quien lo leyó.
+   El inglés no cuenta contra este tope: no se pregunta, se escucha en un tramo aparte. */
+const MAX_REQ = 3;
+// Los rasgos de conducta van aparte y tampoco pueden ser muchos: cada uno cuesta una pregunta
+// y una repregunta dentro de los mismos 25 minutos.
+const MAX_PERFIL = 3;
+
 const SONDA = [
   {t:'Declaración', d:'“El cargo exige <em>[requisito]</em>. Cuéntame tu experiencia con eso.” Deja que hable un minuto sin interrumpir.'},
   {t:'Escena',      d:'Llévalo al último caso concreto: cuándo fue, en qué empresa, y qué hizo <em>él</em> — no el equipo, él. El impostor habla en general; el real aterriza en un día específico.'},
@@ -285,6 +294,9 @@ async function verSesion(id){
       idc: fuente.identity || {}, sig: fuente.signals || {},
       dec: fuente.declara || {}, rec: fuente.recomendacion || {riesgos:[]},
       cv: s.cv_analisis || null, tray: fuente.trayectoria || [],
+      pf: (s.vacancy_perfil || []).map(x => ({...x})),
+      perfil: fuente.perfil || s.perfil || [],
+      impacto: fuente.impacto || s.impacto || [],
       // Lo que decidió la SESIÓN manda sobre lo que diga la vacante hoy: el evaluador pudo
       // apagar el inglés para este candidato, y la vacante pudo editarse después.
       ing: (s.ingles && typeof s.ingles.requerido === 'boolean')
@@ -295,6 +307,8 @@ async function verSesion(id){
       ingNivel: (s.ingles && s.ingles.confirmado) || null,
       ingNota: (s.ingles && s.ingles.nota) || '',
       ingMin: (s.ingles && s.ingles.minuto) || '',
+      snapPerfil: (snap && Array.isArray(snap.perfil)) ? snap.perfil : null,
+      snapImpacto: (snap && Array.isArray(snap.impacto)) ? snap.impacto : null,
       snapIngles: (snap && snap.ingles_nivel) ? {
                     confirmado: snap.ingles_nivel, nivel_exigido: snap.ingles_exigido || null,
                     nota: snap.ingles_nota || '', minuto: snap.ingles_minuto || '',
@@ -496,8 +510,9 @@ function renderRevision(){
     <div class="card">
       <div class="cardhd">
         <h2>Requisitos excluyentes</h2>
-        <span class="cs">Estos son los que se van a verificar. Máximo 5.</span>
+        <span class="cs">Estos son los que se van a verificar. Máximo 3.</span>
       </div>
+      <div id="exSobra"></div>
       <div id="exList"></div>
       <button class="back" id="btnAddEx" type="button" style="color:var(--acc);margin:8px 0 0">+ Agregar requisito a mano</button>
     </div>
@@ -536,6 +551,18 @@ function renderRevision(){
       ${X.modalidad_por_que ? `<p class="hint">${esc(X.modalidad_por_que)}</p>` : ''}
     </div>
 
+    <div class="card">
+      <div class="cardhd">
+        <h2>Perfil de conducta</h2>
+        <span class="cs">Qué tipo de persona aguanta este cargo · máximo 3</span>
+      </div>
+      <p class="hint" style="margin:0 0 14px">Dos candidatos pueden cumplir los tres requisitos técnicos
+      y uno fracasar. Esto es lo que los separa, y se pregunta en la entrevista igual que lo demás.
+      No cuenta contra el tope de requisitos.</p>
+      <div id="pfList"></div>
+      <button class="back" id="btnAddPf" type="button" style="color:var(--acc);margin:8px 0 0">+ Agregar rasgo a mano</button>
+    </div>
+
     <div class="fset">
       <div class="fttl">Inglés</div>
       <p class="hint" style="margin:0 0 12px">No se verifica preguntando si lo habla: se pasa un tramo
@@ -561,17 +588,36 @@ function renderRevision(){
     $('#revStage').querySelectorAll('#revModes .mode').forEach(m => m.classList.toggle('sel', m===b));
   }));
   $('#btnAddEx').addEventListener('click', () => {
-    if(X.excluyentes.length >= 5) return toast('Cinco es el máximo para una sesión de 25 minutos.');
+    if(X.excluyentes.length >= MAX_REQ) return toast('Tres es el máximo: en 25 minutos no se sondea bien nada si el tiempo se reparte entre más temas.');
     X.excluyentes.push({requisito:'', detalles_verificables:[], senales_impostor:[]});
     drawEx();
   });
+  $('#btnAddPf').addEventListener('click', () => {
+    if(!Array.isArray(X.perfil_conducta)) X.perfil_conducta = [];
+    if(X.perfil_conducta.length >= MAX_PERFIL) return toast('Tres rasgos es el máximo: más no caben en la sesión.');
+    X.perfil_conducta.push({rasgo:'', por_que:'', pregunta:'', se_ve_asi:'', no_se_ve_asi:''});
+    drawPf();
+  });
   $('#btnGuardarVac').addEventListener('click', guardarVacante);
   drawEx();
+  drawPf();
   go('vRevision');
 }
 
 function drawEx(){
   const L = $('#exList');
+  // El tope de tres se avisa, no se aplica en silencio. Un texto puede traer cuatro cosas
+  // innegociables de verdad, y quien decide cuál sale es el reclutador que habló con el
+  // cliente — no el modelo, y tampoco esta pantalla borrando la cuarta por su cuenta.
+  const sobra = $('#exSobra');
+  if(sobra){
+    const n = X.excluyentes.length;
+    sobra.innerHTML = n > MAX_REQ ? `<div class="aviso">
+      <b>Hay ${n} requisitos y el máximo son ${MAX_REQ}.</b>
+      Quita ${n-MAX_REQ} antes de guardar. Los que saques no se pierden: menciónalos como deseables
+      con el cliente. En 25 minutos, tres requisitos alcanzan para escena, fricción y repregunta;
+      con más, cada tema recibe una sola pregunta y ninguna repregunta.</div>` : '';
+  }
   if(!X.excluyentes.length){
     L.innerHTML = `<div class="empty">No se identificó ningún requisito excluyente. Agrégalos a mano o revisa el texto que cargaste.</div>`;
     return;
@@ -580,7 +626,7 @@ function drawEx(){
     const dets = Array.isArray(r.detalles_verificables) ? r.detalles_verificables : [];
     const sen  = Array.isArray(r.senales_impostor) ? r.senales_impostor : [];
     return `
-    <div class="exq">
+    <div class="exq${i >= MAX_REQ ? ' sobra' : ''}">
       <div class="exqhd">
         <div class="num">${i+1}</div>
         <div class="fx"><input data-ei="${i}" data-k="requisito" value="${esc(r.requisito||'')}" placeholder="Requisito excluyente"></div>
@@ -612,7 +658,52 @@ function drawEx(){
   }));
 }
 
+/* Los rasgos de conducta que el cargo necesita. Se editan igual que los requisitos porque
+   salen del mismo sitio —lo que el cliente dijo— y se equivocan igual de fácil: el modelo
+   tiende a proponer "trabajo en equipo", que no distingue a nadie. */
+function drawPf(){
+  const L = $('#pfList');
+  if(!L) return;
+  const P = Array.isArray(X.perfil_conducta) ? X.perfil_conducta : (X.perfil_conducta = []);
+  if(!P.length){
+    L.innerHTML = `<div class="empty">El levantamiento no identificó ningún rasgo de conducta.
+      Puedes agregarlos a mano o dejarlo así: la sesión funciona igual, solo que el informe no
+      dirá nada sobre cómo se comporta la persona.</div>`;
+    return;
+  }
+  L.innerHTML = P.map((x,i) => `
+    <div class="exq${i >= MAX_PERFIL ? ' sobra' : ''}">
+      <div class="exqhd">
+        <div class="num">${i+1}</div>
+        <div class="fx"><input data-pi="${i}" data-k="rasgo" value="${esc(x.rasgo||'')}" placeholder="Tolerancia a la ambigüedad"></div>
+        <button class="del" data-delpf="${i}" type="button" aria-label="Quitar rasgo">×</button>
+      </div>
+      <div class="exqbd">
+        ${x.evidencia_cita ? `<div class="quote">“${esc(x.evidencia_cita)}”</div>` : ''}
+        <div class="mini">Por qué este cargo lo necesita</div>
+        <div class="f"><textarea data-pi="${i}" data-k="por_que" rows="2">${esc(x.por_que||'')}</textarea></div>
+        <div class="mini">La pregunta, tal como se va a leer</div>
+        <div class="f"><textarea data-pi="${i}" data-k="pregunta" rows="2" placeholder="Cuéntame de la última vez que…">${esc(x.pregunta||'')}</textarea></div>
+        <div class="frow">
+          <div class="f"><label>Está si…</label><input data-pi="${i}" data-k="se_ve_asi" value="${esc(x.se_ve_asi||'')}"></div>
+          <div class="f"><label>No está si…</label><input data-pi="${i}" data-k="no_se_ve_asi" value="${esc(x.no_se_ve_asi||'')}"></div>
+        </div>
+      </div>
+    </div>`).join('');
+  L.querySelectorAll('[data-pi]').forEach(el => el.addEventListener('input', e => {
+    P[+e.target.dataset.pi][e.target.dataset.k] = e.target.value;
+  }));
+  L.querySelectorAll('[data-delpf]').forEach(b => b.addEventListener('click', e => {
+    P.splice(+e.currentTarget.dataset.delpf, 1); drawPf();
+  }));
+}
+
 async function guardarVacante(){
+  const vivos = X.excluyentes.filter(r => (r.requisito||'').trim());
+  if(vivos.length > MAX_REQ){
+    toast(`Quita ${vivos.length-MAX_REQ} requisito${vivos.length-MAX_REQ>1?'s':''}: el máximo son ${MAX_REQ}.`);
+    return;
+  }
   const body = {
     empresa: {nombre:$('#rEmp').value, sector:$('#rSec').value, contacto:$('#rCon').value},
     vacante: {
@@ -621,7 +712,8 @@ async function guardarVacante(){
       urgencia:(X.vacante||{}).urgencia||'', moneda:(X.vacante||{}).moneda||'',
       salario_min:(X.vacante||{}).salario_min??null, salario_max:(X.vacante||{}).salario_max??null,
     },
-    excluyentes: X.excluyentes.filter(r => (r.requisito||'').trim()),
+    excluyentes: vivos,
+    perfil: (X.perfil_conducta || []).filter(x => (x.rasgo||'').trim()).slice(0, MAX_PERFIL),
     ingles: {
       requerido: !!$('#rIngOn').checked,
       nivel: $('#rIngNiv').value,
@@ -686,6 +778,21 @@ async function verVacante(id){
         }).join('')}
       </div>
 
+      ${(v.perfil||[]).length ? `<div class="card">
+        <div class="cardhd">
+          <h2>Perfil de conducta</h2>
+          <span class="cs">${v.perfil.length} rasgo${v.perfil.length===1?'':'s'} · no cuentan como requisitos</span>
+        </div>
+        ${v.perfil.map((x,i) => `<div class="exq">
+          <div class="exqhd"><div class="num">${i+1}</div>
+            <div class="fx" style="font-family:Archivo,'Helvetica Neue',Arial,sans-serif;font-size:14.5px;font-weight:700;padding-top:5px">${esc(x.rasgo||'')}</div></div>
+          <div class="exqbd">
+            ${x.por_que ? `<p style="font-size:13.5px;color:var(--ink2);line-height:1.5">${esc(x.por_que)}</p>` : ''}
+            ${x.pregunta ? `<div class="mini">La pregunta</div><div class="qs"><p>“${esc(x.pregunta)}”</p></div>` : ''}
+          </div>
+        </div>`).join('')}
+      </div>` : ''}
+
       <button class="cta" id="btnNuevaSesion">Verificar a un candidato</button>
       <p class="hint">Se abre una sesión guiada de 25 minutos con estos requisitos ya cargados.</p>
     `;
@@ -715,6 +822,15 @@ function editarVacante(v){
       modality: v.modality || '', city: v.city || '', salary_text: v.salary_text || '',
       recruiter: v.recruiter || '', context: v.context || '',
     },
+    // El inglés vive en la vacante, no en el requisito, y hasta ahora solo se podía definir
+    // en el levantamiento. Si el cliente lo pide después —o resulta que no lo necesitaba—
+    // había que rehacer la vacante entera.
+    ing: {
+      requerido: !!v.ingles_requerido,
+      nivel: v.ingles_nivel || '',
+      uso: v.ingles_uso || '',
+      cita: v.ingles_cita || '',
+    },
     reqs: (v.requirements || []).map(r => ({
       id: r.id, text: r.text || '', criterio: r.criterio || '',
       q_escena: r.q_escena || '', q_friccion: r.q_friccion || '', q_cruce: r.q_cruce || '',
@@ -722,6 +838,7 @@ function editarVacante(v){
       senales: Array.isArray(r.senales) ? r.senales.slice() : [],
       abierto: false,
     })),
+    perfil: (v.perfil || []).map(x => ({...x})),
     sesiones: v.session_count || 0,
     emitidas: v.issued_count || 0,
   };
@@ -758,11 +875,41 @@ function pintarEdicion(){
       </div>
 
       <div class="fset">
-        <div class="fttl">Lo que se verifica · ${e.reqs.length} requisito${e.reqs.length===1?'':'s'}</div>
+        <div class="fttl">Lo que se verifica · ${e.reqs.length} de ${MAX_REQ} requisito${MAX_REQ===1?'':'s'}</div>
         <p class="hint" style="margin:0 0 12px">Estos son los que se miden en la entrevista y los que
-        aparecen en el acta. Cámbiales el orden con las flechas.</p>
+        aparecen en el informe. Cámbiales el orden con las flechas — el primero es el que más
+        tiempo recibe en la sesión.</p>
+        ${e.reqs.length > MAX_REQ ? `<div class="aviso">
+          <b>Hay ${e.reqs.length} requisitos y el máximo son ${MAX_REQ}.</b>
+          Quita ${e.reqs.length-MAX_REQ} para poder guardar.</div>` : ''}
         <div id="reqEdit">${e.reqs.map((r,i) => filaRequisito(r,i,e.reqs.length)).join('')}</div>
-        <button class="tbtn" id="btnAddReq" type="button" style="margin-top:12px">+ Agregar requisito</button>
+        ${e.reqs.length >= MAX_REQ ? `<p class="hint" style="margin-top:12px">Ya están los ${MAX_REQ}.
+          Para cambiar uno, edítalo o quítalo primero.</p>`
+        : `<button class="tbtn" id="btnAddReq" type="button" style="margin-top:12px">+ Agregar requisito</button>`}
+      </div>
+
+      <div class="fset">
+        <div class="fttl">Perfil de conducta · ${e.perfil.length} de ${MAX_PERFIL}</div>
+        <p class="hint" style="margin:0 0 12px">Los rasgos que este cargo necesita más allá de lo
+        técnico. Se preguntan en la entrevista y salen en el informe del cliente.</p>
+        <div id="pfEdit">${e.perfil.map((x,i) => filaRasgo(x,i)).join('')}</div>
+        ${e.perfil.length >= MAX_PERFIL ? '' :
+          `<button class="tbtn" id="btnAddPf2" type="button" style="margin-top:12px">+ Agregar rasgo</button>`}
+      </div>
+
+      <div class="fset">
+        <div class="fttl">Inglés</div>
+        <p class="hint" style="margin:0 0 12px">No cuenta contra los ${MAX_REQ} requisitos, porque no se
+        verifica preguntando: se pasa un tramo de la entrevista a inglés y se mide lo que sostiene.</p>
+        <label class="chk2"><input type="checkbox" id="edIngOn" ${e.ing.requerido?'checked':''}>
+          <span>Este cargo exige inglés</span></label>
+        <div class="frow" style="margin-top:12px">
+          <div class="f"><label>Nivel que pide el cliente</label>
+            <input id="edIngNiv" value="${esc(e.ing.nivel)}" placeholder="Conversacional para reuniones con el cliente"></div>
+          <div class="f"><label>Para qué lo necesita</label>
+            <input id="edIngUso" value="${esc(e.ing.uso)}" placeholder="Daily con el equipo en EE.UU."></div>
+        </div>
+        ${e.ing.cita ? `<p class="hint">Lo dijo así: <i>“${esc(e.ing.cita)}”</i></p>` : ''}
       </div>
 
       <div class="tools">
@@ -777,13 +924,29 @@ function pintarEdicion(){
     b.addEventListener('click', () => verVacante(EDIT.id)));
   st.querySelectorAll('[data-c]').forEach(el =>
     el.addEventListener('input', () => { EDIT.campos[el.dataset.c] = el.value; }));
-  st.querySelector('#btnAddReq').addEventListener('click', () => {
+  const bAdd = st.querySelector('#btnAddReq');
+  if(bAdd) bAdd.addEventListener('click', () => {
+    if(EDIT.reqs.length >= MAX_REQ){ toast(`Tres es el máximo para una sesión de 25 minutos.`); return; }
     EDIT.reqs.push({ id:null, text:'', criterio:'', q_escena:'', q_friccion:'', q_cruce:'',
                      detalles:[], senales:[], abierto:true });
     pintarEdicion();
     const ult = $('#reqEdit').querySelector('.rq:last-child [data-r="text"]');
     if(ult) ult.focus();
   });
+  const bAddPf = st.querySelector('#btnAddPf2');
+  if(bAddPf) bAddPf.addEventListener('click', () => {
+    EDIT.perfil.push({rasgo:'', por_que:'', pregunta:'', se_ve_asi:'', no_se_ve_asi:''});
+    pintarEdicion();
+  });
+  st.querySelectorAll('[data-pf]').forEach(el => el.addEventListener('input', () => {
+    EDIT.perfil[+el.dataset.i][el.dataset.pf] = el.value;
+  }));
+  st.querySelectorAll('[data-delpf]').forEach(b => b.addEventListener('click', () => {
+    EDIT.perfil.splice(+b.dataset.delpf, 1); pintarEdicion();
+  }));
+  st.querySelector('#edIngOn').addEventListener('change', el => { EDIT.ing.requerido = el.target.checked; });
+  st.querySelector('#edIngNiv').addEventListener('input', el => { EDIT.ing.nivel = el.target.value; });
+  st.querySelector('#edIngUso').addEventListener('input', el => { EDIT.ing.uso = el.target.value; });
   st.querySelector('#btnGuardarEdit').addEventListener('click', guardarEdicion);
   montarRequisitos(st);
 }
@@ -830,6 +993,26 @@ function filaRequisito(r, i, total){
   </div>`;
 }
 
+function filaRasgo(x, i){
+  return `<div class="rq">
+    <div class="rqhd">
+      <div class="num">${i+1}</div>
+      <input class="rqt" data-pf="rasgo" data-i="${i}" value="${esc(x.rasgo||'')}" placeholder="Ej: tolerancia a la ambigüedad">
+      <div class="rqacc"><button class="ib del" data-delpf="${i}" type="button" title="Quitar">×</button></div>
+    </div>
+    <div class="rqbd">
+      <div class="frow one"><div class="f"><label>Por qué este cargo lo necesita</label>
+        <textarea data-pf="por_que" data-i="${i}" rows="2">${esc(x.por_que||'')}</textarea></div></div>
+      <div class="frow one"><div class="f"><label>La pregunta, tal como se lee en voz alta</label>
+        <textarea data-pf="pregunta" data-i="${i}" rows="2">${esc(x.pregunta||'')}</textarea></div></div>
+      <div class="frow">
+        <div class="f"><label>Está si…</label><input data-pf="se_ve_asi" data-i="${i}" value="${esc(x.se_ve_asi||'')}"></div>
+        <div class="f"><label>No está si…</label><input data-pf="no_se_ve_asi" data-i="${i}" value="${esc(x.no_se_ve_asi||'')}"></div>
+      </div>
+    </div>
+  </div>`;
+}
+
 function montarRequisitos(st){
   const R = EDIT.reqs;
   st.querySelectorAll('[data-r]').forEach(el => el.addEventListener('input', () => {
@@ -870,11 +1053,19 @@ async function guardarEdicion(){
   if(!e.campos.title.trim()){ toast('El título del cargo no puede quedar vacío.'); return; }
   const vacios = e.reqs.filter(r => !r.text.trim()).length;
   if(vacios){ toast(`Hay ${vacios} requisito${vacios>1?'s':''} sin texto.`); return; }
+  if(e.reqs.length > MAX_REQ){
+    toast(`Quita ${e.reqs.length-MAX_REQ} requisito${e.reqs.length-MAX_REQ>1?'s':''}: el máximo son ${MAX_REQ}.`);
+    return;
+  }
 
   overlay(true, 'Guardando…', 'Actualizando la vacante y sus requisitos.');
   try{
     await api('/api/vacancies/'+e.id, {method:'PATCH', body:{
       ...e.campos,
+      perfil: e.perfil.filter(x => (x.rasgo||'').trim()).slice(0, MAX_PERFIL),
+      ingles_requerido: !!e.ing.requerido,
+      ingles_nivel: e.ing.nivel,
+      ingles_uso: e.ing.uso,
       requirements: e.reqs.map(r => ({
         id: r.id, text: r.text, criterio: r.criterio,
         q_escena: r.q_escena, q_friccion: r.q_friccion, q_cruce: r.q_cruce,
@@ -1034,6 +1225,10 @@ function setupSesion(v){
         cli: v.company_name || '', eval: $('#sEval').value.trim(), mode, kind,
         mail: $('#sMail').value.trim(), ident: null,
         reqs: (v.requirements||[]).map(r => ({rid:r.id, n:r.text, lvl:0, ev:'', r})),
+        // Dos listas distintas: lo que el CARGO pide (viene de la vacante, no cambia) y lo
+        // que la SESIÓN observó (lo llena la transcripción y lo confirma el evaluador).
+        pf: (v.perfil || []).map(x => ({...x})),
+        perfil: [], impacto: [],
         // Lo que el cargo exige de inglés viene de la vacante: lo define el cliente.
         ing: ingOn ? {requerido:true, nivel:v.ingles_nivel, uso:v.ingles_uso, cita:v.ingles_cita} : null,
         ingNivel: null, ingNota: '', ingMin: '',
@@ -1073,6 +1268,7 @@ function fases(){
     const f = [{k:'id', t:'Apertura', min:4}];
     S.reqs.forEach((r,i) => f.push({k:'guia', i, t:r.n || ('Requisito '+(i+1)), min:6}));
     if(S.ing && S.ing.requerido) f.push({k:'ing', t:'Inglés', min:4});
+    if((S.pf || []).length) f.push({k:'perfil', t:'Conducta', min:4});
     // La trayectoria aparece en los dos momentos, y no es lo mismo: durante la llamada son
     // las preguntas que hay que hacer sobre cada tramo; después, marcar si los sostuvo.
     if((S.tray || []).length) f.push({k:'tray', t:'Trayectoria', min:4});
@@ -1082,6 +1278,7 @@ function fases(){
   const f = [];
   S.reqs.forEach((r,i) => f.push({k:'req', i, t:r.n || ('Requisito '+(i+1)), min:2}));
   if(S.ing && S.ing.requerido) f.push({k:'ing', t:'Inglés', min:2});
+  if((S.pf || []).length) f.push({k:'perfil', t:'Conducta', min:3});
   if((S.tray || []).length) f.push({k:'tray', t:'Trayectoria', min:3});
   f.push({k:'ctx', t:'Contexto', min:3});
   f.push({k:'cierre', t:'Cierre', min:3});
@@ -1112,6 +1309,7 @@ function cuerpoSesion(){
     // al recargar la sesión desde el tablero.
     kind: S.kind,
     declara: S.dec || {}, recomendacion: S.rec || {}, trayectoria: S.tray || null,
+    perfil: S.perfil || null, impacto: S.impacto || null,
     ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||'',
                                analisis:r.exp||'', falta:r.falta||''})),
     // El inglés se guarda entero en la sesión —si se evalúa, qué se marcó y de dónde salió—
@@ -1249,6 +1447,107 @@ function render(){
           <button class="pri" data-next type="button">${f.i===S.reqs.length-1?'Terminar la entrevista':'Siguiente requisito'}</button>
         </div>
       </div>`;
+  }
+
+  // --- CONDUCTA, durante la llamada: una pregunta por rasgo, leída tal cual. ---
+  else if(f.k === 'perfil' && enEntrevista()){
+    const P = S.pf || [];
+    st.innerHTML = `
+      <div class="card">
+        <h2>Perfil de conducta</h2>
+        <div class="cs" style="margin-bottom:16px">${P.length} rasgo${P.length===1?'':'s'} · unos 4 minutos · lo que separa a dos candidatos que cumplen lo mismo</div>
+
+        <div class="preg">
+          ${P.map((x,qi) => `<div class="pq">
+            <div class="pn">${qi+1}</div>
+            <div class="pb">
+              <div class="pt">${esc(x.rasgo||'Rasgo '+(qi+1))}</div>
+              <p class="px">“${esc(x.pregunta||'')}”</p>
+              ${(x.se_ve_asi||x.no_se_ve_asi) ? `<div class="pfver">
+                ${x.se_ve_asi ? `<span class="pfsi">Está si: ${esc(x.se_ve_asi)}</span>` : ''}
+                ${x.no_se_ve_asi ? `<span class="pfno">No está si: ${esc(x.no_se_ve_asi)}</span>` : ''}
+              </div>` : ''}
+            </div>
+          </div>`).join('')}
+        </div>
+        <p class="hint">Pide una <b>situación pasada</b>, no una opinión sobre sí mismo. Si contesta
+        con lo que haría en general, devuélvelo al caso: “dame la última vez que te pasó”.
+        Tampoco tomes notas: la lectura de esto sale de la transcripción, igual que la de los requisitos.</p>
+
+        <div class="nav">
+          <button data-prev type="button">Atrás</button>
+          <button class="pri" data-next type="button">Continuar</button>
+        </div>
+      </div>`;
+  }
+
+  // --- CONDUCTA, en la calificación: confirmar o corregir lo que leyó la transcripción. ---
+  else if(f.k === 'perfil'){
+    const P = S.pf || [];
+    // Si la transcripción no dejó nada, se arma la lista vacía para poder marcarla a mano.
+    if(!(S.perfil||[]).length){
+      S.perfil = P.map(x => ({rasgo:x.rasgo, presente:null, observado:'', cita:''}));
+    }
+    const EST = [[true,'ok','SE VIO'],[false,'no','NO SE VIO'],[null,'nv','NO SE ABORDÓ']];
+    st.innerHTML = `
+      <div class="card">
+        <h2>Perfil de conducta</h2>
+        <div class="cs" style="margin-bottom:16px">Confirma lo que salió de la transcripción · esto va al informe del cliente</div>
+        ${S.perfil.map((o,i) => {
+          const pide = P.find(x => (x.rasgo||'').trim().toLowerCase() === (o.rasgo||'').trim().toLowerCase()) || {};
+          return `<div class="rq" style="margin-bottom:14px">
+            <div class="trayhd" style="padding:0 0 8px">
+              <div><b>${esc(o.rasgo||'')}</b>${pide.por_que?`<span>${esc(pide.por_que)}</span>`:''}</div>
+              <div class="trayb">
+                ${EST.map(([v,c,tx]) => `<button class="tb ${o.presente===v?'sel '+c:''}" data-pfv="${i}" data-v="${v===null?'null':v}" type="button">${tx}</button>`).join('')}
+              </div>
+            </div>
+            ${o.cita ? `<div class="cita" style="margin:6px 0 8px"><div class="dt">Lo que dijo</div><blockquote>${esc(o.cita)}</blockquote></div>` : ''}
+            <div class="f"><label>Qué se observó — esto se imprime</label>
+              <textarea data-pfo="${i}" rows="3" placeholder="Cómo se comportó respecto a este rasgo durante la conversación.">${esc(o.observado||'')}</textarea></div>
+          </div>`;
+        }).join('')}
+        <p class="hint">“No se abordó” es una respuesta legítima y sale así en el informe. Rellenarlo
+        con una impresión general es exactamente lo que este documento promete no hacer.</p>
+
+        ${(S.impacto||[]).length ? `
+        <div class="fttl" style="margin-top:20px">Lo que demostró · tarjetas del informe</div>
+        <p class="hint" style="margin:0 0 10px">Salieron de la conversación, no del CV. Corrige o
+        borra las que no se sostengan: cada una se imprime como un hecho.</p>
+        <div id="impList">${S.impacto.map((x,i) => `<div class="rq" style="margin-bottom:10px">
+          <div class="rqhd">
+            <div class="num">${i+1}</div>
+            <input class="rqt" data-imp="titulo" data-i="${i}" value="${esc(x.titulo||'')}" placeholder="Power BI avanzado">
+            <div class="rqacc"><button class="ib del" data-delimp="${i}" type="button" title="Quitar">×</button></div>
+          </div>
+          <div class="rqbd">
+            <div class="frow one"><div class="f"><label>Etiqueta</label>
+              <input data-imp="sub" data-i="${i}" value="${esc(x.sub||'')}" placeholder="Análisis de datos"></div></div>
+            <div class="frow one"><div class="f"><label>Una frase, anclada en lo que contó</label>
+              <textarea data-imp="texto" data-i="${i}" rows="2">${esc(x.texto||'')}</textarea></div></div>
+          </div>
+        </div>`).join('')}</div>` : ''}
+
+        <div class="nav">
+          <button data-prev type="button">Atrás</button>
+          <button class="pri" data-next type="button">Continuar</button>
+        </div>
+      </div>`;
+
+    st.querySelectorAll('[data-pfv]').forEach(b => b.addEventListener('click', e => {
+      const i = +e.currentTarget.dataset.pfv, v = e.currentTarget.dataset.v;
+      S.perfil[i].presente = v === 'null' ? null : v === 'true';
+      touch(); render();
+    }));
+    st.querySelectorAll('[data-pfo]').forEach(el => el.addEventListener('input', () => {
+      S.perfil[+el.dataset.pfo].observado = el.value; touch();
+    }));
+    st.querySelectorAll('[data-imp]').forEach(el => el.addEventListener('input', () => {
+      S.impacto[+el.dataset.i][el.dataset.imp] = el.value; touch();
+    }));
+    st.querySelectorAll('[data-delimp]').forEach(b => b.addEventListener('click', () => {
+      S.impacto.splice(+b.dataset.delimp, 1); touch(); render();
+    }));
   }
 
   // --- CALIFICACIÓN: después, con la transcripción ya analizada. ---
@@ -1746,8 +2045,12 @@ function preguntasDe(r){
   if(delCv[0]) qs.push({t:'Escena', q:delCv[0], cv:true, donde:(cv && cv.donde) || ''});
   else if(meta.q_escena) qs.push({t:'Escena', q:meta.q_escena});
   if(meta.q_friccion) qs.push({t:'Fricción', q:meta.q_friccion});
+  else if(delCv[1]) qs.push({t:'Fricción', q:delCv[1], cv:true});
+  // La tercera NO se rellena. Antes, si la vacante no traía cruce, se metía aquí la segunda
+  // pregunta del CV solo para llegar a tres — y tres preguntas leídas de corrido dejan sin
+  // tiempo la repregunta, que es donde se cae un impostor. El cruce entra si existe; si no,
+  // el tramo son dos preguntas y seis minutos de seguimiento.
   if(meta.q_cruce) qs.push({t:'Cruce', q:meta.q_cruce});
-  else if(delCv[1]) qs.push({t:'Cruce', q:delCv[1], cv:true});
   return qs.slice(0, 3);
 }
 
@@ -2244,6 +2547,24 @@ function aplicarTranscripcion(an){
     if(prop.falta_por_verificar) r.falta = String(prop.falta_por_verificar);
     r.nivelProp = Number(prop.nivel) || null;
   });
+  // Conducta e impacto: propuestas también, como los niveles. Se precargan para que el
+  // evaluador las lea y las corrija; nada de esto se imprime sin que alguien lo haya mirado.
+  // Se cruzan contra los rasgos que pidió el cargo, no contra lo que el modelo quiera nombrar:
+  // si devuelve un rasgo que nadie pidió, se ignora.
+  if(Array.isArray(S.tran.perfil) && (S.pf||[]).length){
+    S.perfil = S.pf.map(rasgo => {
+      const p = S.tran.perfil.find(x =>
+        (x.rasgo||'').trim().toLowerCase() === (rasgo.rasgo||'').trim().toLowerCase()) || {};
+      return {rasgo: rasgo.rasgo, presente: p.presente ?? null,
+              observado: p.observado || '', cita: p.cita || ''};
+    });
+  }
+  if(Array.isArray(S.tran.impacto)){
+    S.impacto = S.tran.impacto
+      .filter(x => x && (x.titulo||'').trim())
+      .slice(0, 6)
+      .map(x => ({titulo:x.titulo||'', sub:x.sub||'', texto:x.texto||''}));
+  }
   // El inglés NO se toca aquí. La transcripción viene en un solo idioma y el tramo en
   // inglés sale escrito con fonética española: proponer un nivel desde ahí sería inventarlo.
   // Lo marca el evaluador en vivo, en la fase de inglés.
@@ -2278,6 +2599,7 @@ async function emitirActa(){
     const out = await api('/api/sessions/'+S.sid+'/issue', {method:'POST', body:{
       candidate: S.cand, identity: S.idc, signals: S.sig, data:{mode:S.mode},
       declara: S.dec || {}, recomendacion: S.rec || {}, trayectoria: S.tray || null,
+      perfil: S.perfil || null, impacto: S.impacto || null,
       ingles: S.ing ? {requerido:true, nivel_exigido:S.ing.nivel || null, uso:S.ing.uso || null,
                        confirmado:S.ingNivel||null, nota:S.ingNota||'', minuto:S.ingMin||'',
                        fuente:'evaluador_en_vivo'} : null,
@@ -2324,6 +2646,33 @@ function verActa(){
   const riesgos = (rec.riesgos||[]).filter(x => (x.r||'').trim());
   const VER = {si:['ok','Recomendado'], reserva:['par','Recomendado con una reserva'], no:['no','No recomendado']}[rec.veredicto] || null;
 
+  // Conducta e impacto salieron de la entrevista, así que se congelan con el resto. Un acta
+  // vieja no los tiene y el documento se dibuja igual: los bloques simplemente no aparecen.
+  const perfil = (S.snapPerfil || S.perfil || []).filter(o => o && (o.rasgo||'').trim());
+  const impacto = (S.snapImpacto || S.impacto || []).filter(x => x && (x.titulo||'').trim());
+
+  // La cinta de datos. Solo lo que de verdad se recogió: un chip con la etiqueta y nada
+  // detrás le dice al cliente que no preguntamos, que es peor que no mostrar el chip.
+  const chips = [
+    dec.ubicacion && ['Ubicación', dec.ubicacion],
+    dec.disponibilidad && ['Disponibilidad', dec.disponibilidad],
+    dec.pretension && ['Pretensión', dec.pretension],
+    (ingA && ingA.confirmado) && ['Inglés', ingA.confirmado],
+    dec.procesos && ['Otros procesos', dec.procesos],
+  ].filter(Boolean);
+
+  // La bajada del encabezado. No es una frase de venta: es el conteo. Cuántos de los
+  // requisitos que el cliente definió quedaron sostenidos con evidencia, dicho en una línea
+  // para que se lea antes de entrar al detalle.
+  const cumple = S.reqs.filter(r => r.lvl >= 4).length;
+  const parcial = S.reqs.filter(r => r.lvl === 3).length;
+  const nReq = S.reqs.length;
+  const resumenReq = nReq
+    ? `De los ${nReq} requisitos que definió ${S.cli ? esc(S.cli) : 'el cliente'}, ` +
+      `<b>${cumple} quedó${cumple===1?'':'ron'} sostenido${cumple===1?'':'s'}</b> con evidencia de la sesión` +
+      (parcial ? `, ${parcial} parcialmente` : '') + '.'
+    : '';
+
   // Sellos: solo lo que de verdad se midió en esta sesión.
   const sellos = [
     cierre ? [idOk, idOk ? 'Identidad verificada' : 'Identidad no certificada'] : null,
@@ -2348,6 +2697,7 @@ function verActa(){
           <h2>${esc(S.cand)}</h2>
           <div class="cert">${esc(doc.titulo)} · PeakU Verificado</div>
           <div class="rl2">${[esc(S.rol), S.cli && '<b>'+esc(S.cli)+'</b>'].filter(Boolean).join(' · ')}</div>
+          ${resumenReq ? `<p class="bajada">${resumenReq}</p>` : ''}
         </div>
         <div class="mt">
           Informe <b class="mono">${esc(S.id)}</b><br>
@@ -2361,49 +2711,125 @@ function verActa(){
         ${sellos.map(([ok,t]) => `<span class="sello ${ok?'ok':'nv'}">${ok?'✓':'○'} ${esc(t)}</span>`).join('')}
       </div>
 
-      ${(dec.ubicacion||dec.disponibilidad||dec.pretension) ? `<div class="datos">
-        ${dec.ubicacion ? `<div class="dato"><b>Ubicación</b> · ${esc(dec.ubicacion)}</div>` : ''}
-        ${dec.disponibilidad ? `<div class="dato"><b>Disponibilidad</b> · ${esc(dec.disponibilidad)}</div>` : ''}
-        ${dec.pretension ? `<div class="dato"><b>Pretensión</b> · ${esc(dec.pretension)}</div>` : ''}
+      <!-- La cinta de datos: lo que el cliente mira antes de decidir si sigue leyendo.
+           Solo aparece lo que de verdad se recogió; un chip vacío es peor que ninguno. -->
+      ${chips.length ? `<div class="chips">
+        ${chips.map(c => `<span class="chip"><b>${esc(c[0])}</b> ${esc(c[1])}</span>`).join('')}
       </div>` : ''}
 
-      <div class="zona"><span class="zn">Zona 1</span><h3>Lo que medimos</h3>
-        <span class="zs">Evidencia de la sesión · escala anclada 1-5</span></div>
-      <div class="zbox">
-        ${S.reqs.map((r, i) => {
-          const v = r.lvl>=4?'ok':(r.lvl===3?'par':'no');
-          // Antes aquí se pegaba r.ev — la cita cruda de la transcripción, a veces un
-          // párrafo entero. Eso es el rastro de auditoría, no el informe: quien lo lee no
-          // estuvo en la llamada y no tiene por qué interpretar un fragmento de diálogo.
-          // Ahora se imprime el juicio (por qué cumple o no) y lo que quedó sin comprobar.
-          const p = porQue(r, i);
-          // Cascada: explicación → cita archivada → ancla. La cita sigue siendo el cuerpo
-          // de las actas emitidas ANTES de este cambio: su snapshot guarda `evidence` y no
-          // `analisis`, y un documento ya entregado no se reescribe porque el software
-          // haya evolucionado. También cubre la sesión calificada a mano, donde lo único
-          // que hay es lo que el evaluador escribió.
-          const cuerpo = (!p.esAncla && p.texto) ? p.texto : (r.ev || p.texto);
-          const mostrarAncla = cuerpo !== ANCLA_CORTA[r.lvl];
-          return `<div class="req">
-            <div class="reqhd">
-              <div class="reqn">${esc(r.n)}</div>
-              <div class="reqv"><span class="rl">${r.lvl} / 5</span><span class="vd ${v}">${LVLTXT[r.lvl]}</span></div>
-            </div>
-            <div class="barra"><span class="fill ${v}" style="width:${r.lvl*20}%"></span></div>
-            ${cuerpo?`<div class="aex">${esc(cuerpo)}</div>`:''}
-            ${r.falta?`<div class="afalta"><b>Queda por verificar:</b> ${esc(r.falta)}</div>`:''}
-            ${mostrarAncla?`<div class="ancla">${ANCLA_CORTA[r.lvl]||''}</div>`:''}
-          </div>`;
-        }).join('')}
-      </div>
+      ${rec.texto ? `<div class="posic">
+        <div class="mini">Posicionamiento</div>
+        <p>${esc(rec.texto)}</p>
+      </div>` : ''}
 
-      <div class="zona"><span class="zn">Integridad</span><h3>Cómo se sostuvo la sesión</h3></div>
-      <div class="zbox">
-        ${cierre ? actaIdentidad() : ''}
-        <div class="res"><div class="rn">Señales de asistencia durante la sesión</div><span class="vd ${nSig?'par':'ok'}">${nSig?nSig+' REGISTRADA'+(nSig>1?'S':''):'NINGUNA'}</span></div>
-        <div class="res"><div class="rn">Grabación y bitácora</div><span class="vd ok">DISPONIBLES</span></div>
-        <div class="res"><div class="rn">Cita textual archivada por requisito<small>El fragmento literal de la conversación queda en el archivo de la sesión, disponible para auditoría</small></div><span class="vd ok">ARCHIVADA</span></div>
-        ${nSig?`<div class="aev">Señales: ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(s.t)).join(' · ')}. Se reportan como observación factual; no constituyen un juicio sobre el candidato.</div>`:''}
+      <div class="inf">
+        <!-- Columna ancha: el ajuste a los requisitos. Es la razón de ser del documento —
+             conecta a esta persona con lo que el cliente pidió, requisito por requisito. -->
+        <div class="infcol">
+          <div class="zona"><span class="zn">Ajuste al rol</span><h3>Requisito por requisito</h3>
+            <span class="zs">Escala anclada 1-5 · evidencia de la sesión</span></div>
+          <div class="zbox">
+            ${S.reqs.map((r, i) => {
+              const v = r.lvl>=4?'ok':(r.lvl===3?'par':'no');
+              // Antes aquí se pegaba r.ev — la cita cruda de la transcripción, a veces un
+              // párrafo entero. Eso es el rastro de auditoría, no el informe: quien lo lee no
+              // estuvo en la llamada y no tiene por qué interpretar un fragmento de diálogo.
+              // Ahora se imprime el juicio (por qué cumple o no) y lo que quedó sin comprobar.
+              const p = porQue(r, i);
+              // Cascada: explicación → cita archivada → ancla. La cita sigue siendo el cuerpo
+              // de las actas emitidas ANTES de este cambio: su snapshot guarda `evidence` y no
+              // `analisis`, y un documento ya entregado no se reescribe porque el software
+              // haya evolucionado. También cubre la sesión calificada a mano, donde lo único
+              // que hay es lo que el evaluador escribió.
+              const cuerpo = (!p.esAncla && p.texto) ? p.texto : (r.ev || p.texto);
+              const mostrarAncla = cuerpo !== ANCLA_CORTA[r.lvl];
+              return `<div class="req">
+                <div class="reqhd">
+                  <div class="reqn">${esc(r.n)}</div>
+                  <div class="reqv"><span class="rl">${r.lvl} / 5</span><span class="vd ${v}">${LVLTXT[r.lvl]}</span></div>
+                </div>
+                <div class="barra"><span class="fill ${v}" style="width:${r.lvl*20}%"></span></div>
+                ${cuerpo?`<div class="aex">${esc(cuerpo)}</div>`:''}
+                ${r.falta?`<div class="afalta"><b>Queda por verificar:</b> ${esc(r.falta)}</div>`:''}
+                ${mostrarAncla?`<div class="ancla">${ANCLA_CORTA[r.lvl]||''}</div>`:''}
+              </div>`;
+            }).join('')}
+          </div>
+
+          ${perfil.length ? `
+          <div class="zona"><span class="zn">Conducta</span><h3>Cómo se comportó en la sesión</h3>
+            <span class="zs">Observado, no inferido</span></div>
+          <div class="zbox">
+            ${perfil.map(o => {
+              const e = o.presente === true ? ['ok','SE VIO']
+                      : o.presente === false ? ['no','NO SE VIO'] : ['nv','NO SE ABORDÓ'];
+              return `<div class="req">
+                <div class="reqhd">
+                  <div class="reqn">${esc(o.rasgo||'')}</div>
+                  <div class="reqv"><span class="vd ${e[0]}">${e[1]}</span></div>
+                </div>
+                ${o.observado ? `<div class="aex">${esc(o.observado)}</div>` : ''}
+              </div>`;
+            }).join('')}
+            <p class="hint">Conducta observada durante 25 minutos de conversación grabada. No es un
+            perfil psicométrico ni pretende describir cómo es la persona fuera de esa sesión.</p>
+          </div>` : ''}
+
+          <!-- La integridad va en la columna ancha, no en la angosta: entre las tarjetas de
+               impacto y el bloque de inglés, la derecha ya corre larga, y dejar la izquierda
+               terminando media página antes abre un hueco que se lee como un error. -->
+          <div class="zona"><span class="zn">Integridad</span><h3>Cómo se sostuvo la sesión</h3></div>
+          <div class="zbox">
+            ${cierre ? actaIdentidad() : ''}
+            <div class="res"><div class="rn">Señales de asistencia</div><span class="vd ${nSig?'par':'ok'}">${nSig?nSig+' REGISTRADA'+(nSig>1?'S':''):'NINGUNA'}</span></div>
+            <div class="res"><div class="rn">Grabación y bitácora</div><span class="vd ok">DISPONIBLES</span></div>
+            <div class="res"><div class="rn">Cita textual por requisito<small>El fragmento literal de la conversación queda archivado para auditoría</small></div><span class="vd ok">ARCHIVADA</span></div>
+            ${nSig?`<div class="aev">Señales: ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(s.t)).join(' · ')}. Se reportan como observación factual; no constituyen un juicio sobre el candidato.</div>`:''}
+          </div>
+        </div>
+
+        <!-- Columna angosta: lo que se lee de un vistazo. -->
+        <div class="infcol dos">
+          ${impacto.length ? `
+          <div class="zona"><span class="zn">Lo que demostró</span><h3>En la conversación</h3></div>
+          <div class="imps">
+            ${impacto.map(x => `<div class="imp">
+              <b>${esc(x.titulo||'')}</b>
+              ${x.sub?`<span class="isub">${esc(x.sub)}</span>`:''}
+              ${x.texto?`<p>${esc(x.texto)}</p>`:''}
+            </div>`).join('')}
+          </div>
+          <p class="hint">Sale de lo que sostuvo en la entrevista, no de lo que escribió en su
+          hoja de vida.</p>` : ''}
+
+          ${ingA ? `
+          <div class="zona"><span class="zn">Inglés</span><h3>Lo que se oyó</h3></div>
+          <div class="zbox">
+            ${!ingA.confirmado ? `
+              <p class="dtx"><b>No evaluado en esta sesión.</b> No se midió el inglés en la
+              conversación, así que este informe no dice nada sobre su inglés — ni a favor ni en contra.</p>
+            ` : `
+              <div class="ingfila">
+                <div class="ingniv">${esc(ingA.confirmado)}</div>
+                <div class="ingtx">
+                  ${ingA.nivel_exigido ? `<span class="ingpide">El cargo pide: ${esc(ingA.nivel_exigido)}</span>` : ''}
+                  <b>${esc(ANCLA_ING[ingA.confirmado] || '')}</b>
+                  ${ingA.nota ? `<p class="dtx" style="margin-top:6px">${esc(ingA.nota)}</p>` : ''}
+                </div>
+              </div>
+              <!-- El resto del acta se sostiene en cita textual de la transcripción. Esto no, y
+                   callarlo sería darle al lector una confianza que este dato no tiene. Meet
+                   transcribe en un solo idioma por archivo, así que el tramo en inglés no queda
+                   en texto utilizable: lo califica el evaluador escuchando, en vivo. -->
+              <div class="aev" style="margin-top:10px"><b>Cómo se midió:</b> a diferencia del resto
+                de este informe, el inglés no proviene de la transcripción, que queda en un solo
+                idioma. Este nivel lo marcó ${esc(S.eval || 'el evaluador')} escuchando en vivo,
+                contra la escala de conducta${ingA.minuto ? `, con el minuto <b>${esc(ingA.minuto)}</b> de la grabación anotado para poder comprobarlo` : ''}.
+                Es un juicio del evaluador, no una medición instrumentada.</div>
+            `}
+          </div>` : ''}
+
+        </div>
       </div>
 
       ${tray.length ? `
@@ -2419,60 +2845,33 @@ function verActa(){
         <p class="hint">Confirmada significa que el candidato narró ese trabajo con escena y detalle propios durante la sesión, no que aparezca en su hoja de vida.</p>
       </div>` : ''}
 
-      ${(dec.motivacion || nogo.length || dec.procesos) ? `
-      ${ingA ? `
-      <div class="zona"><span class="zn">Inglés</span><h3>Lo que se oyó en inglés</h3>
-        <span class="zs">${ingA.nivel_exigido ? 'El cargo pide: ' + esc(ingA.nivel_exigido) : 'Medido en la sesión'}</span></div>
-      <div class="zbox">
-        ${!ingA.confirmado ? `
-          <p class="dtx"><b>No evaluado en esta sesión.</b> No se midió el inglés en la
-          conversación, así que este informe no dice nada sobre su inglés — ni a favor ni en contra.</p>
-        ` : `
-          <div class="ingfila">
-            <div class="ingniv">${esc(ingA.confirmado)}</div>
-            <div class="ingtx">
-              <b>${esc(ANCLA_ING[ingA.confirmado] || '')}</b>
-              ${ingA.nota ? `<p class="dtx" style="margin-top:6px">${esc(ingA.nota)}</p>` : ''}
-            </div>
-          </div>
-          <!-- El resto del acta se sostiene en cita textual de la transcripción. Esto no, y
-               callarlo sería darle al lector una confianza que este dato no tiene. Meet
-               transcribe en un solo idioma por archivo, así que el tramo en inglés no queda
-               en texto utilizable: lo califica el evaluador escuchando, en vivo. -->
-          <div class="aev" style="margin-top:10px"><b>Cómo se midió:</b> a diferencia del resto
-            de este informe, el inglés no proviene de la transcripción. La transcripción de la
-            llamada queda en un solo idioma y no recoge el tramo en inglés de forma utilizable.
-            Este nivel lo marcó ${esc(S.eval || 'el evaluador')} escuchando en vivo, contra la
-            escala de conducta${ingA.minuto ? `, y quedó anotado el minuto <b>${esc(ingA.minuto)}</b> de la grabación para poder comprobarlo` : ''}.</div>
-          <p class="hint">Medido por conducta en un tramo de la entrevista, no por certificado.
-          Es un juicio del evaluador, no una medición instrumentada: si el cliente necesita
-          certeza sobre el idioma, una prueba estandarizada sigue siendo el camino.</p>
-        `}
-      </div>` : ''}
-
-      <div class="zona"><span class="zn">Zona 2</span><h3>Lo que ${esc(S.cand.split(' ')[0])} declara</h3>
-        <span class="zs">Sus palabras, no nuestra medición</span></div>
+      <!-- Factores de cierre: lo que el cliente necesita para mover la oferta. Va al final
+           porque es lo último que se decide, y en dos columnas porque son dos lecturas
+           distintas — lo que lo atrae y lo que puede salir mal. -->
+      ${(dec.motivacion || nogo.length || dec.procesos || VER || rec.texto || riesgos.length) ? `
+      <div class="zona"><span class="zn">Factores de cierre</span><h3>Qué mueve a ${esc((S.cand||'').split(' ')[0])} y qué puede fallar</h3>
+        <span class="zs">Sus palabras · nuestra lectura</span></div>
       <div class="zbox dos">
-        ${dec.motivacion ? `<div><div class="mini">Qué busca</div><p class="dtx">${esc(dec.motivacion)}</p>
-          ${nogo.length ? `<div class="mini" style="margin-top:12px">No negociables</div>
-            <ul class="lst">${nogo.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>` : ''}</div>` : '<div></div>'}
         <div>
-          <div class="mini">Condiciones declaradas</div>
-          ${dec.pretension ? `<div class="res"><div class="rn">Pretensión</div><span class="rl">${esc(dec.pretension)}</span></div>` : ''}
-          ${dec.disponibilidad ? `<div class="res"><div class="rn">Disponibilidad</div><span class="rl">${esc(dec.disponibilidad)}</span></div>` : ''}
-          ${dec.procesos ? `<div class="res"><div class="rn">Otros procesos activos</div><span class="rl">${esc(dec.procesos)}</span></div>` : ''}
-          <p class="hint" style="margin-top:8px">No verificado contra desprendibles ni contra terceros.</p>
+          ${dec.motivacion ? `<div class="mini">Por qué está buscando</div>
+            <p class="dtx">${esc(dec.motivacion)}</p>` : ''}
+          ${nogo.length ? `<div class="mini" style="margin-top:12px">No negociables</div>
+            <ul class="lst">${nogo.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+          ${(dec.pretension||dec.disponibilidad||dec.procesos) ? `<div class="mini" style="margin-top:12px">Condiciones declaradas</div>
+            ${dec.pretension ? `<div class="res"><div class="rn">Pretensión</div><span class="rl">${esc(dec.pretension)}</span></div>` : ''}
+            ${dec.disponibilidad ? `<div class="res"><div class="rn">Disponibilidad</div><span class="rl">${esc(dec.disponibilidad)}</span></div>` : ''}
+            ${dec.procesos ? `<div class="res"><div class="rn">Otros procesos activos</div><span class="rl">${esc(dec.procesos)}</span></div>` : ''}
+            <p class="hint">No verificado contra desprendibles ni contra terceros.</p>` : ''}
         </div>
-      </div>` : ''}
-
-      ${(VER || rec.texto || riesgos.length) ? `
-      <div class="zona"><span class="zn">Zona 3</span><h3>Nuestra recomendación</h3>
-        <span class="zs">Opinión del evaluador · lo único que no es medición</span></div>
-      <div class="zbox rec">
-        ${VER ? `<div class="recver"><span class="vd ${VER[0]}">${esc(VER[1].toUpperCase())}</span></div>` : ''}
-        ${rec.texto ? `<p class="dtx" style="margin-top:${VER?'10px':'0'}">${esc(rec.texto)}</p>` : ''}
-        ${riesgos.length ? `<div class="mini" style="margin-top:14px">Riesgos</div>
-          ${riesgos.map(x=>`<div class="riesgo"><b>${esc(x.r)}</b>${x.m?`<span>Mitigación: ${esc(x.m)}</span>`:''}</div>`).join('')}` : ''}
+        <div>
+          ${VER ? `<div class="mini">Nuestra recomendación</div>
+            <div class="recver"><span class="vd ${VER[0]}">${esc(VER[1].toUpperCase())}</span></div>` : ''}
+          ${riesgos.length ? `<div class="mini" style="margin-top:${VER?'14px':'0'}">Riesgos y mitigación</div>
+            ${riesgos.map(x=>`<div class="riesgo"><b>${esc(x.r)}</b>${x.m?`<span>Mitigación: ${esc(x.m)}</span>`:''}</div>`).join('')}` : ''}
+          ${(!VER && !riesgos.length) ? '<p class="hint" style="margin-top:0">Sin recomendación registrada.</p>' : ''}
+          <p class="hint">La recomendación es opinión del evaluador — lo único de este informe que
+          no es medición.</p>
+        </div>
       </div>` : ''}
 
       <div class="aback">

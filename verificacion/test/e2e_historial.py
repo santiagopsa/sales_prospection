@@ -72,7 +72,10 @@ with sync_playwright() as pw:
     # la emitida abre el acta completa
     pg.click('[data-ses]:has-text("Jorge Restrepo")'); pg.wait_for_timeout(1200)
     acta = pg.inner_text("#actaStage")
-    for must in ["Jorge Restrepo", "Lo que medimos", "CUMPLE", "PARCIAL", "Nuestra recomendación", "Firma de integridad"]:
+    # Los rótulos cambiaron con el formato v4 del informe; lo que esta prueba cuida es que un
+    # acta abierta desde el historial traiga su contenido completo, no cómo se llaman las zonas.
+    for must in ["Jorge Restrepo", "Requisito por requisito", "CUMPLE", "PARCIAL",
+                 "Nuestra recomendación", "Firma de integridad"]:
         if must.lower() not in acta.lower(): errs.append(f"el acta histórica no muestra: {must}")
     if "3.500.000" not in acta: errs.append("el acta histórica perdió lo que el candidato declaró")
     if "Volver a la lista" not in pg.inner_text("#actaStage"): errs.append("no ofrece volver a la lista")

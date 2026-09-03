@@ -154,6 +154,14 @@ async function initSchema(pool) {
     // Lo observado en la sesión, que es lo que va al acta.
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS ingles JSONB`,
     `ALTER TABLE ${T.vacancies} ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ`,
+    // El perfil de conducta: qué rasgos necesita ESTE cargo (en la vacante) y qué mostró
+    // el candidato respecto a ellos (en la sesión). Dos candidatos pueden cumplir los mismos
+    // tres requisitos y uno fracasar; lo que los separa es esto, y hasta ahora no se medía.
+    // `impacto` son las tarjetas de capacidad que salen de la conversación, no del CV: el
+    // CV lo escribió el candidato, la conversación la sostuvo delante de un evaluador.
+    `ALTER TABLE ${T.vacancies} ADD COLUMN IF NOT EXISTS perfil JSONB`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS perfil JSONB`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS impacto JSONB`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
 

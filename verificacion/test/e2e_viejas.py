@@ -111,7 +111,10 @@ with sync_playwright() as pw:
         errs.append("el informe viejo no avisa que se emitió con otro formato")
     if "informe de verificación" not in bajo:
         errs.append("el informe viejo perdió su título")
-    for debe in ["lo que medimos", "sesión supervisada", "sap pp en producción", "rollout en alpina"]:
+    # El encabezado de la sección cambió de nombre con el formato v4 ("Lo que medimos" pasó a
+    # "Requisito por requisito"). Lo que esta prueba cuida no es el rótulo sino el CONTENIDO:
+    # el requisito, la evidencia y los sellos de un informe ya entregado tienen que seguir ahí.
+    for debe in ["requisito por requisito", "sesión supervisada", "sap pp en producción", "rollout en alpina"]:
         if debe not in bajo:
             errs.append(f"el informe viejo perdió una parte del acta: {debe}")
     if "2 requisitos medidos" not in bajo:
