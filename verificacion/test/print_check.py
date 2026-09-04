@@ -278,6 +278,47 @@ for nombre, ruta, fondo in casos:
 
 
 print("=" * 74)
+# ---- las bandas de sección tienen que imprimirse SIEMPRE ----
+# El rótulo de cada sección va en blanco sobre una banda oscura. Si Chrome no pintara el
+# fondo —la casilla "Gráficos de fondo" viene desmarcada de fábrica— el informe saldría con
+# los títulos invisibles y nadie se daría cuenta hasta que el cliente abriera el PDF. Lo que
+# lo sostiene es print-color-adjust:exact, y esto lo comprueba sobre el PDF sin fondos.
+def banda_pintada(ruta):
+    base = os.path.join(SALIDA, "banda")
+    for f in os.listdir(SALIDA):
+        if f.startswith("banda-"):
+            os.remove(os.path.join(SALIDA, f))
+    subprocess.run(["pdftoppm", "-png", "-r", "60", "-f", "1", "-l", "1", ruta, base],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    cands = [f for f in os.listdir(SALIDA) if f.startswith("banda-")]
+    if not cands:
+        return "no se pudo rasterizar la primera página"
+    im = Image.open(os.path.join(SALIDA, cands[0])).convert("RGB")
+    w, h = im.size
+    # Se busca cualquier fila con una racha larga de píxeles oscuros: eso solo puede ser una
+    # banda de sección, no un texto ni una línea divisoria.
+    for y in range(int(h * .2), int(h * .95)):
+        racha = mejor = 0
+        for x in range(int(w * .08), int(w * .92)):
+            r, g, b = im.getpixel((x, y))
+            if r < 90 and g < 110 and b < 130:
+                racha += 1; mejor = max(mejor, racha)
+            else:
+                racha = 0
+        if mejor > w * .5:
+            return None
+    return "las bandas de sección no se pintaron: los títulos saldrían en blanco sobre blanco"
+
+
+for nombre, ruta, fondo in casos:
+    if fondo:
+        continue
+    mal = banda_pintada(ruta)
+    if mal:
+        errs.append(f"[{nombre}] {mal}")
+    else:
+        print(f"{'bandas de sección':22} pintadas también sin gráficos de fondo ✓")
+
 # ---- el QR ----
 if caja:
     from PIL import Image as _I

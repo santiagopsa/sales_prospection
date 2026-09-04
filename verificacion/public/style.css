@@ -11,6 +11,7 @@
   --crit:#9E2318; --crit-soft:#FAE9E7;
   --on-acc:#FFFFFF;
   --iso-a:#00C3FF; --iso-b:#3E9DBD;
+  --bar:#123243; --bar-tx:#FFFFFF; --bar-sub:#9EC6D8;
   --shadow:0 1px 2px rgba(20,40,50,.05),0 4px 14px rgba(20,40,50,.06);
 }
 @media (prefers-color-scheme:dark){
@@ -39,6 +40,7 @@
   --crit:#F19286; --crit-soft:#26120F;
   --on-acc:#15191C;
   --iso-a:#00C3FF; --iso-b:#4FA9C7;
+  --bar:#0D2431; --bar-tx:#EAF7FD; --bar-sub:#7FA9BC;
   --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.3);
 }
 
@@ -491,21 +493,45 @@ input,textarea,select{font:inherit;color:inherit}
 .dato{flex:1;min-width:170px;background:var(--sunk);border-radius:8px;padding:8px 12px;font-size:12.5px;color:var(--ink2)}
 .dato b{color:var(--ink);font-weight:600}
 
-.zona{display:flex;align-items:baseline;gap:10px;margin:22px 0 9px;flex-wrap:wrap}
-.zona .zn{font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:9.5px;font-weight:800;
-  letter-spacing:.09em;text-transform:uppercase;background:var(--acc-soft);color:var(--acc-ink);
-  padding:3px 8px;border-radius:5px;border:1px solid var(--acc)}
-.zona h3{font-size:16px;font-weight:750;letter-spacing:-.015em}
-.zona .zs{font-size:11.5px;color:var(--ink3);margin-left:auto}
+/* La barra de sección: una banda llena, de lado a lado, con el rótulo en blanco. Es el único
+   elemento que se repite en todo el documento y por eso es el que le da estructura — con un
+   rótulo suelto sobre fondo blanco, el informe se lee como una lista de párrafos.
+   El texto va SIEMPRE sobre la banda, así que la banda tiene que imprimirse aunque el
+   reclutador no marque "Gráficos de fondo": de eso se encarga print-color-adjust:exact, y
+   print_check.py lo comprueba generando el PDF también sin fondos. */
+.zona{display:flex;align-items:baseline;gap:8px;margin:20px 0 8px;flex-wrap:wrap;
+  background:var(--bar);border-radius:4px;padding:6px 11px}
+.zona .zn{font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:10px;font-weight:800;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--bar-tx)}
+.zona h3{font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:10px;font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--bar-tx);opacity:.86}
+.zona h3::before{content:"— ";opacity:.6}
+.zona .zs{font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--bar-sub);margin-left:auto}
+@media (max-width:560px){ .zona .zs{margin-left:0;width:100%} }
 .zbox{border:1px solid var(--line);border-radius:11px;padding:15px 17px}
 .zbox.dos{display:grid;grid-template-columns:1.25fr 1fr;gap:20px}
 .zbox.rec{border-left:3px solid var(--acc)}
 
-.req{padding:11px 0;border-bottom:1px solid var(--line)}
+/* Un requisito es una FILA de tres columnas —qué se pidió, cómo salió, qué se vio— y no una
+   tarjeta apilada. En tarjeta, el nombre y la nota quedaban en un renglón y el párrafo debajo,
+   así que para comparar tres requisitos había que leerlos enteros. En fila, la columna del
+   medio se escanea de un vistazo y el párrafo está al lado para quien quiera el detalle. */
+.req{display:grid;grid-template-columns:minmax(0,.85fr) 88px minmax(0,2.5fr);gap:12px;
+  align-items:start;padding:9px 0;border-bottom:1px solid var(--line)}
 .req:last-child{border-bottom:none}
-.reqhd{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
-.reqn{font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:14.5px;font-weight:700;flex:1}
-.reqv{display:flex;align-items:center;gap:9px;flex:none}
+.reqn{grid-column:1;font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:13.5px;
+  font-weight:700;line-height:1.35}
+.reqv{grid-column:2;display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center}
+.reqv .vd{font-size:9.5px;letter-spacing:.05em;padding:3px 7px;line-height:1.25}
+.reqv .rl{font-size:15px;font-weight:800;color:var(--ink);line-height:1.1}
+.req .aex{grid-column:3;grid-row:1 / span 2;margin-top:0}
+.req .afalta{grid-column:3;margin-top:8px}
+@media (max-width:620px){
+  .req{grid-template-columns:1fr auto;gap:6px}
+  .reqv{flex-direction:row;align-items:baseline}
+  .req .aex,.req .afalta{grid-column:1 / -1;grid-row:auto}
+  .req .aex{margin-top:6px}
+}
 .barra{height:5px;border-radius:3px;background:var(--sunk);margin:7px 0 8px;overflow:hidden}
 .barra .fill{display:block;height:100%;border-radius:3px}
 .barra .fill.ok{background:var(--good)} .barra .fill.par{background:var(--warn)} .barra .fill.no{background:var(--crit)}
@@ -559,6 +585,7 @@ input,textarea,select{font:inherit;color:inherit}
     --warn:#7A4900; --warn-soft:#FCF4E6;
     --crit:#8C1F15; --crit-soft:#FBEEEC;
     --on-acc:#FFFFFF; --iso-a:#0090BE; --iso-b:#2E7E99;
+    --bar:#123243; --bar-tx:#FFFFFF; --bar-sub:#9EC6D8;
     --shadow:none;
   }
   html, body{background:#FFFFFF!important;color:var(--ink)}
@@ -706,11 +733,16 @@ input,textarea,select{font:inherit;color:inherit}
 .ahd .bajada{font-size:13px;color:var(--ink2);line-height:1.5;margin-top:8px;max-width:52ch}
 .ahd .bajada b{color:var(--ink);font-weight:700}
 
-.chips{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0 0}
-.chip{font-size:12px;color:var(--ink2);background:var(--sunk);border:1px solid var(--line);
-  border-radius:7px;padding:6px 11px;line-height:1.35}
-.chip b{color:var(--ink3);font-weight:700;font-size:10px;letter-spacing:.07em;
-  text-transform:uppercase;margin-right:5px}
+/* La cintilla de datos va en rejilla, no en línea corrida: en línea, los chips quedaban de
+   anchos distintos según el largo del valor y la fila se leía como una lista desordenada. */
+.chips{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:12px 0 0}
+.chip{font-size:12px;color:var(--ink);background:var(--panel);border:1px solid var(--line2);
+  border-radius:6px;padding:6px 10px;line-height:1.3;display:flex;align-items:baseline;gap:6px}
+.chip .ci{flex:none;font-size:11px;line-height:1}
+.chip b{color:var(--ink2);font-weight:700;font-size:10.5px;flex:none}
+.chip span{color:var(--ink2);min-width:0;overflow-wrap:anywhere}
+@media (max-width:700px){ .chips{grid-template-columns:repeat(2,1fr)} }
+@media (max-width:460px){ .chips{grid-template-columns:1fr} }
 
 .posic{margin-top:16px;border-left:3px solid var(--acc);background:var(--acc-soft);
   border-radius:0 9px 9px 0;padding:12px 16px}
@@ -739,7 +771,9 @@ input,textarea,select{font:inherit;color:inherit}
 
 /* Tarjetas de impacto: lo que demostró en la conversación. Van en la columna angosta y
    apiladas, no en rejilla, porque una rejilla de dos con tres tarjetas deja un hueco. */
-.imps{display:flex;flex-direction:column;gap:9px}
+/* En cinta horizontal, no apiladas: son titulares de un vistazo, no párrafos que se leen
+   uno tras otro. Se acomodan solas al ancho que haya. */
+.imps{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
 .imp{border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:0 9px 9px 0;
   padding:11px 14px}
 .imp b{display:block;font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-size:15px;
@@ -837,3 +871,7 @@ input,textarea,select{font:inherit;color:inherit}
 .cierrepie{margin-top:20px}
 .cierrepie .aback{margin-top:0}
 .hint.alcance{margin-top:12px}
+
+/* La nota de la escala cierra el recuadro de requisitos: separada por la línea, para que se
+   lea como pie de la sección y no como un requisito más. */
+.hint.escala{border-top:1px solid var(--line);padding-top:8px;margin-top:10px}

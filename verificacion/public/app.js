@@ -2728,11 +2728,11 @@ function verActa(){
   // La cinta de datos. Solo lo que de verdad se recogió: un chip con la etiqueta y nada
   // detrás le dice al cliente que no preguntamos, que es peor que no mostrar el chip.
   const chips = [
-    dec.ubicacion && ['Ubicación', dec.ubicacion],
-    dec.disponibilidad && ['Disponibilidad', dec.disponibilidad],
-    dec.pretension && ['Pretensión', dec.pretension],
-    (ingA && ingA.confirmado) && ['Inglés', ingA.confirmado],
-    dec.procesos && ['Otros procesos', dec.procesos],
+    dec.ubicacion && ['📍', 'Ubicación', dec.ubicacion],
+    dec.disponibilidad && ['🗓', 'Disponibilidad', dec.disponibilidad],
+    dec.pretension && ['💰', 'Aspiración', dec.pretension],
+    (ingA && ingA.confirmado) && ['🗣', 'Inglés', ingA.confirmado],
+    dec.procesos && ['⏳', 'Otros procesos', dec.procesos],
   ].filter(Boolean);
 
   // La bajada del encabezado. No es una frase de venta: es el conteo. Cuántos de los
@@ -2791,7 +2791,7 @@ function verActa(){
       <!-- La cinta de datos: lo que el cliente mira antes de decidir si sigue leyendo.
            Solo aparece lo que de verdad se recogió; un chip vacío es peor que ninguno. -->
       ${chips.length ? `<div class="chips">
-        ${chips.map(c => `<span class="chip"><b>${esc(c[0])}</b> ${esc(c[1])}</span>`).join('')}
+        ${chips.map(c => `<span class="chip"><span class="ci">${c[0]}</span><b>${esc(c[1])}:</b><span>${esc(c[2])}</span></span>`).join('')}
       </div>` : ''}
 
       ${rec.texto ? `<div class="posic">
@@ -2804,10 +2804,10 @@ function verActa(){
            que siguen van a ancho completo: una columna angosta de media página estrangula el
            texto y deja las dos columnas terminando a alturas muy distintas, que en papel se
            lee como un hueco. -->
-      <div class="${impacto.length ? 'inf' : ''}">
+      <div>
         <div class="infcol">
           <div class="zona"><span class="zn">Ajuste al rol</span><h3>Requisito por requisito</h3>
-            <span class="zs">Escala anclada 1-5 · evidencia de la sesión</span></div>
+            <span class="zs">Lo que definió el cliente, contrastado en la entrevista</span></div>
           <div class="zbox">
             ${S.reqs.map((r, i) => {
               const v = r.lvl>=4?'ok':(r.lvl===3?'par':'no');
@@ -2826,37 +2826,34 @@ function verActa(){
               const cuerpo = (!p.esAncla && p.texto) ? p.texto
                            : ((r.ev || '').trim() || NIVEL_CLIENTE[r.lvl] || '');
               return `<div class="req">
-                <div class="reqhd">
-                  <div class="reqn">${esc(r.n)}</div>
-                  <div class="reqv"><span class="rl">${r.lvl} / 5</span><span class="vd ${v}">${LVLTXT[r.lvl]}</span></div>
-                </div>
-                <div class="barra"><span class="fill ${v}" style="width:${r.lvl*20}%"></span></div>
+                <div class="reqn">${esc(r.n)}</div>
+                <div class="reqv"><span class="rl">${r.lvl} / 5</span><span class="vd ${v}">${LVLTXT[r.lvl]}</span></div>
                 ${cuerpo?`<div class="aex">${esc(cuerpo)}</div>`:''}
                 ${r.falta?`<div class="afalta"><b>Por confirmar:</b> ${esc(r.falta)}</div>`:''}
               </div>`;
             }).join('')}
+            <!-- La nota de la escala va DENTRO del recuadro. Suelta debajo, se quedaba
+                 huérfana al principio de la página siguiente, lejos de los números que
+                 explica. -->
+            <p class="hint escala">Escala de 1 a 5 sobre evidencia de la sesión: <b>4 y 5</b> exigen
+            un caso propio narrado con alcance y resultado; <b>3</b> es experiencia real con alcance
+            parcial; <b>1 y 2</b>, conocimiento que no llega a sostenerse con un caso propio.</p>
           </div>
           <!-- El ancla dejó de imprimirse debajo de cada requisito. "Ancla 4: escena y rol
                claros + 2/3 detalles verificables + cruce correcto" es el criterio con el que
                trabajamos por dentro; al cliente no le dice nada y delata el guion. La escala
                se explica una vez, en su idioma, para que el número siga teniendo respaldo. -->
-          <p class="hint">Escala de 1 a 5 sobre evidencia de la sesión: <b>4 y 5</b> exigen un caso
-          propio narrado con alcance y resultado; <b>3</b> es experiencia real con alcance parcial;
-          <b>1 y 2</b>, conocimiento que no llega a sostenerse con un caso propio.</p>
         </div>
-        <div class="infcol dos"${impacto.length ? '' : ' hidden'}>
-          ${impacto.length ? `
-          <div class="zona"><span class="zn">Lo que demostró</span><h3>En la conversación</h3></div>
-          <div class="imps">
-            ${impacto.map(x => `<div class="imp">
-              <b>${esc(x.titulo||'')}</b>
-              ${x.sub?`<span class="isub">${esc(x.sub)}</span>`:''}
-              ${x.texto?`<p>${esc(x.texto)}</p>`:''}
-            </div>`).join('')}
-          </div>
-          <p class="hint">Sale de lo que sostuvo en la entrevista, no de lo que escribió en su
-          hoja de vida.</p>` : ''}
-        </div>
+        ${impacto.length ? `
+        <div class="zona"><span class="zn">Lo que demostró</span><h3>En la entrevista</h3>
+          <span class="zs">Sostenido en la conversación, no tomado de la hoja de vida</span></div>
+        <div class="imps">
+          ${impacto.map(x => `<div class="imp">
+            <b>${esc(x.titulo||'')}</b>
+            ${x.sub?`<span class="isub">${esc(x.sub)}</span>`:''}
+            ${x.texto?`<p>${esc(x.texto)}</p>`:''}
+          </div>`).join('')}
+        </div>` : ''}
       </div>
 
       <!-- BANDA 2 · conducta, a ancho completo: son párrafos, y un párrafo en media columna
@@ -2869,10 +2866,8 @@ function verActa(){
             const e = o.presente === true ? ['ok','SE EVIDENCIÓ']
                     : o.presente === false ? ['no','NO SE EVIDENCIÓ'] : ['nv','SIN EVIDENCIA'];
             return `<div class="req">
-              <div class="reqhd">
-                <div class="reqn">${esc(o.rasgo||'')}</div>
-                <div class="reqv"><span class="vd ${e[0]}">${e[1]}</span></div>
-              </div>
+              <div class="reqn">${esc(o.rasgo||'')}</div>
+              <div class="reqv"><span class="vd ${e[0]}">${e[1]}</span></div>
               ${o.observado ? `<div class="aex">${esc(o.observado)}</div>` : ''}
             </div>`;
           }).join('')}
