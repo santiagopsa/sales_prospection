@@ -448,7 +448,10 @@ input,textarea,select{font:inherit;color:inherit}
 /* En pantalla va grande porque una cámara necesita módulos gruesos. En papel se puede
    achicar sin riesgo: una impresora trabaja a 300ppp o más, así que cada módulo sigue
    teniendo una docena de puntos aunque el cuadro mida menos. */
-@media print{ .abqr{border-color:#bbb} .aback{break-inside:avoid} .abqr svg{width:160px;height:160px} }
+/* En papel el QR se achica: una impresora trabaja a 300ppp, así que a 130px cada módulo
+   sigue teniendo una docena de puntos — y esos 30px de menos son los que dejan que el
+   bloque de cierre quepa en la página en vez de irse solo a la siguiente. */
+@media print{ .abqr{border-color:#bbb} .aback{break-inside:avoid} .abqr svg{width:130px;height:130px} }
 @media (max-width:620px){ .aback{flex-direction:column-reverse;align-items:center} }
 .aback h4{font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:13.5px;font-weight:750;margin-bottom:3px}
 .aback p{font-size:12px;color:var(--ink2);line-height:1.5}
@@ -716,13 +719,23 @@ input,textarea,select{font:inherit;color:inherit}
 /* La columna angosta no baja de ~300px: por debajo de eso las tarjetas de impacto parten
    los títulos en tres renglones y el bloque de inglés deja de leerse. */
 .inf{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(300px,1fr);gap:24px;align-items:start}
+/* Dentro de las bandas el encabezado es SIEMPRE de dos renglones —rótulo y título arriba,
+   subtítulo debajo— para que las dos columnas empiecen a la misma altura. Con el subtítulo
+   flotando a la derecha, una columna lo acomodaba en la misma línea y la otra no, y las
+   tarjetas arrancaban desalineadas. */
+.inf .zona{display:block;margin-bottom:8px}
+.inf .zona .zn{display:inline-block;vertical-align:middle}
+.inf .zona h3{display:inline;margin-left:8px;vertical-align:middle}
+.inf .zona .zs{display:block;margin:5px 0 0;min-height:1em}
+/* La banda de abajo son dos bloques cortos del mismo peso, así que van a mitades iguales. */
+.inf.par{grid-template-columns:1fr 1fr}
 .inf .infcol{min-width:0}
 .inf .zona{margin-top:20px}
 .inf .infcol > .zona:first-child{margin-top:22px}
 /* El colapso a una columna es para PANTALLAS angostas, no para el papel: una hoja Carta
    con márgenes mide ~700px CSS y disparaba este breakpoint, así que el informe se imprimía
    en una sola columna y pasaba de dos páginas a cuatro. */
-@media screen and (max-width:900px){ .inf{grid-template-columns:1fr;gap:0} }
+@media screen and (max-width:900px){ .inf,.inf.par{grid-template-columns:1fr;gap:0} }
 
 /* Tarjetas de impacto: lo que demostró en la conversación. Van en la columna angosta y
    apiladas, no en rejilla, porque una rejilla de dos con tres tarjetas deja un hueco. */
@@ -744,6 +757,7 @@ input,textarea,select{font:inherit;color:inherit}
   /* Dos columnas en papel también, y un punto más apretado: es lo que hace que el informe
      quepa en dos páginas en vez de cuatro, y dos páginas es lo que un cliente lee. */
   .inf{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:14px}
+  .inf.par{grid-template-columns:1fr 1fr}
   .inf .zona{margin-top:14px}
   .inf .infcol > .zona:first-child{margin-top:14px}
   .inf .zbox{padding:11px 13px}
@@ -766,11 +780,60 @@ input,textarea,select{font:inherit;color:inherit}
      break-inside:avoid —que es lo correcto en el resto del documento— un recuadro que no
      cabía se iba entero a la página siguiente y dejaba media hoja en blanco. Lo que no se
      puede partir es la unidad de lectura: un requisito, una tarjeta, una fila. */
-  .inf .zbox{break-inside:auto}
-  .inf .req,.inf .imp,.inf .res,.inf .ingfila{break-inside:avoid}
+  /* El respaldo, el QR y la nota de alcance son el cierre del documento: viajan juntos.
+     Sueltos, la nota se iba sola a una última página con dos renglones. */
+  /* El cierre viaja entero, así que tiene que ser lo bastante compacto para caber en el
+     hueco que le quede. Veinte píxeles de más lo mandaban solo a una segunda página en el
+     informe corto —un sondeo de un requisito— y dejaban media hoja en blanco. */
+  /* El bloque de cierre —respaldo, QR y alcance— viaja entero, así que tiene que caber en
+     el hueco que le quede. Cada píxel de más lo manda solo a una página siguiente: en un
+     informe corto eso deja una hoja con un solo recuadro, que se lee como un error de
+     impresión. A 104px y 33 módulos el QR queda a 0.84 mm por módulo, muy por encima del
+     medio milímetro que necesita un celular para leerlo del papel. */
+  .cierrepie{break-inside:avoid;page-break-inside:avoid;margin-top:10px}
+  .acta .hint.alcance{margin-top:8px;font-size:9.5px}
+  .abqr{padding:6px 6px 4px}
+  .abqr svg{width:104px;height:104px}
+  .abqr span{font-size:7.5px;margin-top:3px}
+  .aback h4{font-size:12.5px}
+  .aback .sig{font-size:9.5px;margin-top:5px}
+  /* En papel, la columna del ajuste deja de ser un panel con marco y pasa a ser una tarjeta
+     por requisito. Un panel único partido por el borde de la hoja queda abierto por abajo,
+     como si la impresora hubiera cortado la caja; en tarjetas, el corte cae limpio entre dos
+     requisitos y cada uno conserva su marco. */
+  .inf:not(.par) .infcol > .zbox{border:none;padding:0}
+  .inf:not(.par) .infcol > .zbox > .req{border:1px solid var(--line);border-radius:9px;
+    padding:10px 13px;margin-bottom:8px;break-inside:avoid}
+  .inf:not(.par) .infcol > .zbox > .req:last-child{margin-bottom:0}
+  .inf .imp,.inf .res,.inf .ingfila{break-inside:avoid}
+  /* Y el resto del documento fluye: forzar cada recuadro entero manda a la página siguiente
+     bloques que sí cabían y deja el pie de la anterior en blanco. Lo que no se parte es la
+     unidad de lectura — una fila, un riesgo, un tramo de trayectoria. */
+  .zbox{break-inside:auto}
+  .zbox > .res,.zbox > .riesgo,.zbox li,.tray{break-inside:avoid}
+  /* Los dos bloques cortos de la última banda no se parten: media explicación del idioma
+     al pie de una página y la otra media arriba de la siguiente no se lee, se adivina. */
+  .inf.par .zbox{break-inside:avoid}
+  /* Un punto más apretado en todo el documento: son ~15 mm que evitan una cuarta página. */
+  .zona{margin:14px 0 7px}
+  .zbox{padding:12px 14px}
+  .acta .hint{font-size:10px;margin-top:7px}
+  .aev{font-size:10.5px;line-height:1.45}
+  .sello{font-size:10.5px;padding:4px 9px}
+  .chip{font-size:11px;padding:5px 9px}
+  .aback{padding:12px 15px;gap:14px}
+  .aback p{font-size:11px}
+  .res{padding:8px 0}
+  .res .rn{font-size:13px}
   /* Y lo mismo para los factores de cierre, que es el otro bloque a dos columnas: si se
      niega a partirse, se va entero a la página siguiente y deja media hoja vacía justo
      donde termina la rejilla de arriba. */
   .zbox.dos{break-inside:auto}
   .zbox.dos .res,.zbox.dos .riesgo,.zbox.dos li{break-inside:avoid}
 }
+
+
+/* El cierre del documento —respaldo, QR y alcance— es una sola unidad de lectura. */
+.cierrepie{margin-top:20px}
+.cierrepie .aback{margin-top:0}
+.hint.alcance{margin-top:12px}

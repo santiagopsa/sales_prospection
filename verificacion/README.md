@@ -123,6 +123,7 @@ python3 verificacion/test/e2e_intake_error.py # que un análisis fallido diga qu
 python3 verificacion/test/e2e_transcripcion.py # entrevistar sin escribir, calificar con la transcripción
 python3 verificacion/test/e2e_ingles.py    # el inglés se mide escuchando, no preguntando
 python3 verificacion/test/e2e_perfil.py    # tope de 3 requisitos, dos preguntas y el perfil de conducta
+python3 verificacion/test/print_check.py   # el PDF que recibe el cliente, en los 4 casos reales
 ```
 
 Y una herramienta que no afirma nada, solo deja mirar el resultado — capturas de cada pantalla y el PDF del informe:
@@ -163,6 +164,23 @@ Va a dos columnas, formato `v4-2026-09`:
 El contexto y la recomendación se llenan en la fase **Contexto**; la conducta y las tarjetas, en la fase **Conducta**, después de leer la transcripción.
 
 **Ojo con el formato.** El snapshot congela los *datos* de un informe emitido, que es lo que promete la firma de integridad. La maqueta no: un informe emitido bajo `v3-2026-08` se vuelve a dibujar con la de `v4`, con su mismo contenido. Si mañana hace falta que un informe viejo se vea exactamente como el día que se entregó, hay que guardar también el HTML, no solo los datos.
+
+### El PDF, que es lo que de verdad recibe el cliente
+
+El informe se lee en papel o en un PDF adjunto a un correo, no en la consola. Y el reclutador no va a configurar nada: le da a *Imprimir* y guarda. Así que el documento tiene que salir bien **sin que nadie acierte con los ajustes**. `test/print_check.py` genera el PDF por los cuatro caminos que ocurren de verdad —Carta y A4, con y sin *Gráficos de fondo*— usando los márgenes que declara `@page`, y revisa página por página:
+
+- **ninguna página intermedia casi vacía.** Se mide la tinta de cada hoja: por debajo del 12% es un salto mal puesto, y en un documento de cliente se lee como un error de impresión.
+- **el texto completo en el PDF**, no solo en la pantalla. (El extractor ve el kerning de Chrome metido dentro de las palabras — `r equisitos` — así que compara sin espacios.)
+- **el QR decodificado desde los píxeles**, con el CSS de papel puesto: 33 módulos a 104px son 0.83 mm por módulo, muy por encima del medio milímetro que necesita un celular contra el papel. Decodificar la matriz del codificador no sirve: ya pasó una vez que salía perfecta y el cuadro impreso no escaneaba.
+- **el caso pelado**: un sondeo de un requisito, sin inglés ni conducta ni trayectoria, tiene que caber en **una** hoja. Es donde las bandas de dos columnas se quedan con un hijo vacío y el documento se rompe.
+
+Tres decisiones de maquetación que existen por lo que se vio en esas pruebas:
+
+- **Dos columnas también en papel.** El colapso a una columna está detrás de `@media screen`: una hoja Carta con márgenes mide ~700px CSS y disparaba el breakpoint, así que el informe se imprimía en una sola columna y pasaba de tres páginas a cuatro.
+- **La columna del ajuste se vuelve una tarjeta por requisito.** Un panel único partido por el borde de la hoja queda abierto por abajo, como si la impresora hubiera cortado la caja.
+- **El cierre —respaldo, QR y alcance— viaja entero y va apretado.** Veinte píxeles de más lo mandaban solo a una página siguiente, y en el informe corto eso dejaba una hoja con un solo recuadro.
+
+**Lo que no se puede hacer: numerar las páginas.** Chrome no implementa las cajas de margen de `@page` (`@bottom-center{content:counter(page)}`), y un elemento `position:fixed` se repite pero **no reserva espacio**: se monta sobre el texto y, probado, duplica contenido y descuadra el documento entero. Hacerlo bien exige rearmar el informe como tabla con `thead`/`tfoot`, que es un cambio de estructura. Lo que sí se hace es poner el código del informe en el encabezado de la primera página y otra vez en el bloque de respaldo, y renombrar el `<title>` al imprimir (`Informe PKV-… · Nombre · PeakU`), que es lo que Chrome imprime arriba si el reclutador deja activada la casilla de encabezados.
 
 Lo que **no** trae, porque no sale de la sesión: inglés por sub-habilidad, percentil contra la población evaluada y trayectoria confirmada vs. declarada. Eso vive en la base de datos de PeakU y en la verificación de referencias; conectarlo es un trabajo aparte.
 

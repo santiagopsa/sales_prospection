@@ -2584,6 +2584,15 @@ function aplicarTranscripcion(an){
 // Ctrl+P sin tocar el botón.
 function prepararImpresion(){
   const doc = S && S.doc ? S.doc : null;
+  /* Si el reclutador deja activada la casilla "Encabezados y pies de página" del diálogo de
+     Chrome, lo que se imprime arriba de cada hoja es el <title> del documento. Sin esto sale
+     "Consola de Verificación" en el PDF que recibe el cliente. No se puede numerar las
+     páginas desde CSS —Chrome no implementa las cajas de margen de @page, y un elemento
+     fijo no reserva espacio y se monta sobre el texto—, así que esto es lo que hay. */
+  if(S && S.id){
+    try{ document.title = `${(doc && doc.titulo) || 'Informe de verificación'} ${S.id}` +
+      (S.cand ? ` · ${S.cand}` : '') + ' · PeakU'; }catch(e){}
+  }
   $('#phLeft').innerHTML = `<b>${esc((doc && doc.titulo) || 'Informe de verificación')}</b> · PeakU Verificado`;
   $('#phRight').textContent = S ? (S.id || '') : '';
   $('#pfLeft').textContent = S ? [S.cand, S.rol, S.cli].filter(Boolean).join(' · ') : '';
@@ -2591,6 +2600,8 @@ function prepararImpresion(){
 }
 // Ctrl+P y el menú del navegador no pasan por el botón: se engancha el evento del sistema.
 window.addEventListener('beforeprint', () => { try{ prepararImpresion(); }catch(e){} });
+const TITULO_CONSOLA = document.title;
+window.addEventListener('afterprint', () => { try{ document.title = TITULO_CONSOLA; }catch(e){} });
 
 /* ===================== acta ===================== */
 async function emitirActa(){
@@ -2667,11 +2678,14 @@ function verActa(){
   const cumple = S.reqs.filter(r => r.lvl >= 4).length;
   const parcial = S.reqs.filter(r => r.lvl === 3).length;
   const nReq = S.reqs.length;
-  const resumenReq = nReq
-    ? `De los ${nReq} requisitos que definió ${S.cli ? esc(S.cli) : 'el cliente'}, ` +
-      `<b>${cumple} quedó${cumple===1?'':'ron'} sostenido${cumple===1?'':'s'}</b> con evidencia de la sesión` +
-      (parcial ? `, ${parcial} parcialmente` : '') + '.'
-    : '';
+  const quien = S.cli ? esc(S.cli) : 'el cliente';
+  const resumenReq = !nReq ? ''
+    : nReq === 1
+      ? `El único requisito que definió ${quien} <b>${cumple ? 'quedó sostenido' : (parcial ? 'quedó sostenido parcialmente' : 'no quedó sostenido')}</b>` +
+        (cumple || parcial ? ' con evidencia de la sesión.' : ' con evidencia de la sesión.')
+      : `De los ${nReq} requisitos que definió ${quien}, ` +
+        `<b>${cumple} quedó${cumple===1?'':'ron'} sostenido${cumple===1?'':'s'}</b> con evidencia de la sesión` +
+        (parcial ? `, ${parcial} parcialmente` : '') + '.';
 
   // Sellos: solo lo que de verdad se midió en esta sesión.
   const sellos = [
@@ -2722,9 +2736,12 @@ function verActa(){
         <p>${esc(rec.texto)}</p>
       </div>` : ''}
 
-      <div class="inf">
-        <!-- Columna ancha: el ajuste a los requisitos. Es la razón de ser del documento —
-             conecta a esta persona con lo que el cliente pidió, requisito por requisito. -->
+      <!-- BANDA 1 · dos columnas: el ajuste a los requisitos, que es la razón de ser del
+           documento, con lo que demostró al lado para que se lea de un vistazo. Las bandas
+           que siguen van a ancho completo: una columna angosta de media página estrangula el
+           texto y deja las dos columnas terminando a alturas muy distintas, que en papel se
+           lee como un hueco. -->
+      <div class="${impacto.length ? 'inf' : ''}">
         <div class="infcol">
           <div class="zona"><span class="zn">Ajuste al rol</span><h3>Requisito por requisito</h3>
             <span class="zs">Escala anclada 1-5 · evidencia de la sesión</span></div>
@@ -2755,41 +2772,8 @@ function verActa(){
               </div>`;
             }).join('')}
           </div>
-
-          ${perfil.length ? `
-          <div class="zona"><span class="zn">Conducta</span><h3>Cómo se comportó en la sesión</h3>
-            <span class="zs">Observado, no inferido</span></div>
-          <div class="zbox">
-            ${perfil.map(o => {
-              const e = o.presente === true ? ['ok','SE VIO']
-                      : o.presente === false ? ['no','NO SE VIO'] : ['nv','NO SE ABORDÓ'];
-              return `<div class="req">
-                <div class="reqhd">
-                  <div class="reqn">${esc(o.rasgo||'')}</div>
-                  <div class="reqv"><span class="vd ${e[0]}">${e[1]}</span></div>
-                </div>
-                ${o.observado ? `<div class="aex">${esc(o.observado)}</div>` : ''}
-              </div>`;
-            }).join('')}
-            <p class="hint">Conducta observada durante 25 minutos de conversación grabada. No es un
-            perfil psicométrico ni pretende describir cómo es la persona fuera de esa sesión.</p>
-          </div>` : ''}
-
-          <!-- La integridad va en la columna ancha, no en la angosta: entre las tarjetas de
-               impacto y el bloque de inglés, la derecha ya corre larga, y dejar la izquierda
-               terminando media página antes abre un hueco que se lee como un error. -->
-          <div class="zona"><span class="zn">Integridad</span><h3>Cómo se sostuvo la sesión</h3></div>
-          <div class="zbox">
-            ${cierre ? actaIdentidad() : ''}
-            <div class="res"><div class="rn">Señales de asistencia</div><span class="vd ${nSig?'par':'ok'}">${nSig?nSig+' REGISTRADA'+(nSig>1?'S':''):'NINGUNA'}</span></div>
-            <div class="res"><div class="rn">Grabación y bitácora</div><span class="vd ok">DISPONIBLES</span></div>
-            <div class="res"><div class="rn">Cita textual por requisito<small>El fragmento literal de la conversación queda archivado para auditoría</small></div><span class="vd ok">ARCHIVADA</span></div>
-            ${nSig?`<div class="aev">Señales: ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(s.t)).join(' · ')}. Se reportan como observación factual; no constituyen un juicio sobre el candidato.</div>`:''}
-          </div>
         </div>
-
-        <!-- Columna angosta: lo que se lee de un vistazo. -->
-        <div class="infcol dos">
+        <div class="infcol dos"${impacto.length ? '' : ' hidden'}>
           ${impacto.length ? `
           <div class="zona"><span class="zn">Lo que demostró</span><h3>En la conversación</h3></div>
           <div class="imps">
@@ -2801,7 +2785,34 @@ function verActa(){
           </div>
           <p class="hint">Sale de lo que sostuvo en la entrevista, no de lo que escribió en su
           hoja de vida.</p>` : ''}
+        </div>
+      </div>
 
+      <!-- BANDA 2 · conducta, a ancho completo: son párrafos, y un párrafo en media columna
+           se parte en renglones de cuatro palabras. -->
+        ${perfil.length ? `
+        <div class="zona"><span class="zn">Conducta</span><h3>Cómo se comportó en la sesión</h3>
+          <span class="zs">Observado, no inferido</span></div>
+        <div class="zbox">
+          ${perfil.map(o => {
+            const e = o.presente === true ? ['ok','SE VIO']
+                    : o.presente === false ? ['no','NO SE VIO'] : ['nv','NO SE ABORDÓ'];
+            return `<div class="req">
+              <div class="reqhd">
+                <div class="reqn">${esc(o.rasgo||'')}</div>
+                <div class="reqv"><span class="vd ${e[0]}">${e[1]}</span></div>
+              </div>
+              ${o.observado ? `<div class="aex">${esc(o.observado)}</div>` : ''}
+            </div>`;
+          }).join('')}
+          <p class="hint">Conducta observada durante 25 minutos de conversación grabada. No es un
+          perfil psicométrico ni pretende describir cómo es la persona fuera de esa sesión.</p>
+        </div>` : ''}
+
+      <!-- BANDA 3 · dos bloques cortos que se acompañan bien: cómo se midió el idioma y
+           cómo se sostuvo la sesión. -->
+      <div class="${ingA ? 'inf par' : ''}">
+        <div class="infcol">
           ${ingA ? `
           <div class="zona"><span class="zn">Inglés</span><h3>Lo que se oyó</h3></div>
           <div class="zbox">
@@ -2828,7 +2839,16 @@ function verActa(){
                 Es un juicio del evaluador, no una medición instrumentada.</div>
             `}
           </div>` : ''}
-
+        </div>
+        <div class="infcol">
+          <div class="zona"><span class="zn">Integridad</span><h3>Cómo se sostuvo la sesión</h3></div>
+          <div class="zbox">
+            ${cierre ? actaIdentidad() : ''}
+            <div class="res"><div class="rn">Señales de asistencia</div><span class="vd ${nSig?'par':'ok'}">${nSig?nSig+' REGISTRADA'+(nSig>1?'S':''):'NINGUNA'}</span></div>
+            <div class="res"><div class="rn">Grabación y bitácora</div><span class="vd ok">DISPONIBLES</span></div>
+            <div class="res"><div class="rn">Cita textual por requisito<small>El fragmento literal de la conversación queda archivado para auditoría</small></div><span class="vd ok">ARCHIVADA</span></div>
+            ${nSig?`<div class="aev">Señales: ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(s.t)).join(' · ')}. Se reportan como observación factual; no constituyen un juicio sobre el candidato.</div>`:''}
+          </div>
         </div>
       </div>
 
@@ -2874,6 +2894,7 @@ function verActa(){
         </div>
       </div>` : ''}
 
+      <div class="cierrepie">
       <div class="aback">
         <div class="abtx">
           <h4>PeakU responde por este informe.</h4>
@@ -2887,8 +2908,9 @@ function verActa(){
           <span>Escanee para verificar</span>
         </button>` : ''}
       </div>
-      <p class="hint" style="margin-top:14px">${esc(doc.alcance || '')} Metodología: entrevista estructurada con escalas ancladas (1-5) sobre los requisitos definidos por el cliente${
-        (doc.tipo === 'acta') ? '; identidad verificada por proveedor externo y cotejada contra el rostro de la sesión' : ''}; sesión grabada y archivada.</p>
+        <p class="hint alcance">${esc(doc.alcance || '')} Metodología: entrevista estructurada con escalas ancladas (1-5) sobre los requisitos definidos por el cliente${
+          (doc.tipo === 'acta') ? '; identidad verificada por proveedor externo y cotejada contra el rostro de la sesión' : ''}; sesión grabada y archivada.</p>
+      </div>
     </div>
     <div class="tools" style="margin-top:14px">
       <button data-back type="button">${S.soloLectura ? 'Volver a la lista' : 'Volver al cierre'}</button>
