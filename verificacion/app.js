@@ -620,7 +620,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       const id = Number(req.params.id);
       const { transcript } = req.body || {};
       if (!transcript || transcript.trim().length < 400) {
-        return res.status(400).json({ error: 'La transcripción está vacía o es demasiado corta. Una entrevista de 25 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.' });
+        return res.status(400).json({ error: 'La transcripción está vacía o es demasiado corta. Una entrevista de 30 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.' });
       }
 
       let cargo = '', candidato = '', modo = 'B', excluyentes = [], perfil = [];
@@ -1080,14 +1080,16 @@ ${!code ? `
                                       trayectoria=COALESCE($8::jsonb, trayectoria),
                                       ingles=COALESCE($9::jsonb, ingles),
                                       perfil=COALESCE($10::jsonb, perfil),
-                                      impacto=COALESCE($11::jsonb, impacto), updated_at=NOW()
+                                      impacto=COALESCE($11::jsonb, impacto),
+                                      experiencia=COALESCE($12::jsonb, experiencia), updated_at=NOW()
              WHERE id=$1 RETURNING id`,
             [id, JSON.stringify(identity), JSON.stringify(signals), JSON.stringify(b.data || {}), sem.color,
              JSON.stringify(b.declara || {}), JSON.stringify(b.recomendacion || {}),
              b.trayectoria ? JSON.stringify(b.trayectoria) : null,
              b.ingles ? JSON.stringify(b.ingles) : null,
              b.perfil ? JSON.stringify(b.perfil) : null,
-             b.impacto ? JSON.stringify(b.impacto) : null]
+             b.impacto ? JSON.stringify(b.impacto) : null,
+             b.experiencia ? JSON.stringify(b.experiencia) : null]
           );
           if (!up.rows.length) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'not found' }); }
           // Solo se asciende: un sondeo pasa a cierre cuando el candidato avanza y hay que
@@ -1122,6 +1124,7 @@ ${!code ? `
                          ...(b.ingles ? { ingles: b.ingles } : {}),
                          ...(b.perfil ? { perfil: b.perfil } : {}),
                          ...(b.impacto ? { impacto: b.impacto } : {}),
+                         ...(b.experiencia ? { experiencia: b.experiencia } : {}),
                          ...(b.kind === 'cierre' ? { kind: 'cierre' } : {}) });
       mem.ratings = mem.ratings.filter(x => x.session_id !== id);
       // `analisis` y `falta` son lo que se imprime en el informe; sin guardarlos aquí, una
@@ -1184,6 +1187,7 @@ ${!code ? `
         // dentro de un año, aunque el perfil de la vacante se haya editado entretanto.
         perfil: b.perfil || s0.perfil || [],
         impacto: b.impacto || s0.impacto || [],
+        experiencia: b.experiencia || s0.experiencia || null,
         ingles_nivel: (b.ingles && b.ingles.confirmado) || null,
         ingles_exigido: (b.ingles && b.ingles.nivel_exigido) || null,
         ingles_nota: (b.ingles && b.ingles.nota) || '',
@@ -1204,6 +1208,7 @@ ${!code ? `
                                     ingles=COALESCE($12::jsonb, ingles),
                                     perfil=COALESCE($13::jsonb, perfil),
                                     impacto=COALESCE($14::jsonb, impacto),
+                                    experiencia=COALESCE($15::jsonb, experiencia),
                                     snapshot=$10::jsonb, formato=$11,
                                     issued_at=NOW(), updated_at=NOW()
            WHERE id=$1 RETURNING id, report_code, issued_at, integrity_hash`,
@@ -1214,7 +1219,8 @@ ${!code ? `
            JSON.stringify(snapshot), FORMATO_ACTA,
            b.ingles ? JSON.stringify(b.ingles) : null,
            b.perfil ? JSON.stringify(b.perfil) : null,
-           b.impacto ? JSON.stringify(b.impacto) : null]
+           b.impacto ? JSON.stringify(b.impacto) : null,
+           b.experiencia ? JSON.stringify(b.experiencia) : null]
         );
         if (!q.rows.length) return res.status(404).json({ error: 'not found' });
         return res.json({ ok: true, semaforo: sem, identidad, documento: doc, ...q.rows[0] });

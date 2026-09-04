@@ -151,12 +151,17 @@ with sync_playwright() as pw:
         acta = pg4.inner_text("#actaStage")
         if CITA in acta:
             errs.append("REGRESIÓN: el acta sigue pegando la cita cruda de la transcripción")
-        if "rollout completo en Alpina" not in acta:
+        if "rollout de producción completo" not in acta:
             errs.append("el acta no trae la explicación del veredicto")
-        if "Queda por verificar" not in acta:
-            errs.append("el acta no dice qué quedó sin verificar")
-        if "cuántos usuarios" not in acta:
+        if "Por confirmar" not in acta:
+            errs.append("el acta no dice qué queda por confirmar")
+        if "volumen exacto de la operación" not in acta:
             errs.append("no imprime el pendiente concreto que devolvió el análisis")
+        # Y lo que no puede aparecer nunca: el guion con el que trabajamos por dentro.
+        for delator in ["Ancla 1", "Ancla 2", "Ancla 3", "Ancla 4", "Ancla 5",
+                        "no se preguntó", "no se abordó", "no se contrastó"]:
+            if delator.lower() in acta.lower():
+                errs.append(f"el acta le muestra al cliente algo interno: {delator}")
         if "REGISTRADA" in acta and "Evidencia textual en cada requisito" in acta:
             errs.append("el sello sigue prometiendo evidencia textual que ya no se imprime")
         pg4.screenshot(path="/tmp/pk/pq_04_acta.png", full_page=True)

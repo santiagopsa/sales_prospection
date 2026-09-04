@@ -159,8 +159,8 @@ with sync_playwright() as pw:
             bajo_c = txt.lower()
             if "tolerancia a la ambigüedad" not in bajo_c:
                 errs.append("la calificación de conducta no trae el rasgo del cargo")
-            if "no se abordó" not in bajo_c:
-                errs.append("un rasgo que no se tocó debería salir como NO SE ABORDÓ, no rellenado")
+            if "sin evidencia" not in bajo_c:
+                errs.append("un rasgo sin evidencia debería salir así, no rellenado con una impresión")
             if "lo que demostró" not in bajo_c:
                 errs.append("no aparecen las tarjetas de lo que demostró")
             # Las tarjetas son campos editables: su contenido está en el value, no en el texto.
@@ -194,7 +194,7 @@ with sync_playwright() as pw:
     for debe, porque in [
         ("requisito por requisito", "el informe no muestra el ajuste requisito por requisito"),
         ("requisitos que definió", "el informe no dice cuántos de los requisitos del cliente quedaron sostenidos"),
-        ("cómo se comportó en la sesión", "el informe no trae la conducta observada"),
+        ("cómo se comportó en la sesión", "el informe no trae la conducta evidenciada"),
         ("tolerancia a la ambigüedad", "el informe perdió el rasgo de conducta"),
         ("lo que demostró", "el informe no trae las tarjetas de lo demostrado"),
         ("6 años en sap pp", "las tarjetas del informe perdieron su contenido"),
@@ -207,8 +207,13 @@ with sync_playwright() as pw:
     # y lo que NO puede decir: que la conducta es un perfil psicométrico
     if "psicométrico" not in bajo:
         errs.append("el informe no acota el alcance de la conducta observada")
-    if "no se abordó" not in bajo:
-        errs.append("el informe esconde el rasgo que no se alcanzó a medir")
+    # El informe dice "sin evidencia" y NO explica por qué: explicar el hueco es delatar el
+    # guion. Lo que no puede hacer es esconderlo ni rellenarlo con una impresión general.
+    if "sin evidencia" not in bajo:
+        errs.append("el informe esconde el rasgo del que no hubo evidencia")
+    for delator in ["no se preguntó", "no se abordó", "no se alcanzó", "por tiempo"]:
+        if delator in bajo:
+            errs.append(f"el informe se pone en evidencia ante el cliente: {delator}")
     pg.screenshot(path="/tmp/pk/pf_01_acta.png", full_page=True)
 
     br.close()

@@ -42,6 +42,17 @@ const LVLTXT = {5:'CUMPLE',4:'CUMPLE',3:'PARCIAL',2:'NO CUMPLE',1:'NO CUMPLE'};
 
 // Versión corta del ancla, para citar en el acta qué significó ese nivel.
 // Sin esto, un "4/5" es un número sin criterio detrás.
+/* Lo que el informe dice de un nivel cuando no hay un párrafo de analista detrás —una sesión
+   calificada a mano, sin transcripción—. Dice lo mismo que el ancla pero mirando al candidato
+   en vez de al método: el cliente no tiene por qué leer con qué lista de chequeo trabajamos. */
+const NIVEL_CLIENTE = {
+  5:'Demostrado con un caso propio, narrado con su alcance, sus decisiones y su resultado.',
+  4:'Demostrado con un caso propio; el alcance quedó claro y el detalle técnico resultó consistente.',
+  3:'Experiencia real en el tema, con alcance parcial frente a lo que el cargo exige.',
+  2:'Conocimiento del tema que no llegó a sostenerse con un caso propio.',
+  1:'No quedó sostenido con evidencia durante la entrevista.'
+};
+
 const ANCLA_CORTA = {
   5:'Ancla 5: escena específica + rol individual + fricción real narrada + 3/3 detalles verificables + criterio propio en el cruce.',
   4:'Ancla 4: escena y rol claros + fricción real + 2/3 detalles verificables; cruce correcto aunque superficial.',
@@ -50,13 +61,13 @@ const ANCLA_CORTA = {
   1:'Ancla 1: no sostiene el tema — evasivas, incoherencias con el CV o detalles incorrectos.'
 };
 
-/* Tres requisitos, no cinco. La sesión dura 25 minutos y el tiempo no es lo único que se
+/* Tres requisitos, no cinco. La sesión dura 30 minutos y el tiempo no es lo único que se
    reparte: la atención del reclutador también. Con cinco temas, cada uno recibe una pregunta
    y ninguna repregunta — y la repregunta es lo que separa a quien lo hizo de quien lo leyó.
    El inglés no cuenta contra este tope: no se pregunta, se escucha en un tramo aparte. */
 const MAX_REQ = 3;
 // Los rasgos de conducta van aparte y tampoco pueden ser muchos: cada uno cuesta una pregunta
-// y una repregunta dentro de los mismos 25 minutos.
+// y una repregunta dentro de los mismos 30 minutos.
 const MAX_PERFIL = 3;
 
 const SONDA = [
@@ -297,6 +308,7 @@ async function verSesion(id){
       pf: (s.vacancy_perfil || []).map(x => ({...x})),
       perfil: fuente.perfil || s.perfil || [],
       impacto: fuente.impacto || s.impacto || [],
+      exp: s.experiencia || null,
       // Lo que decidió la SESIÓN manda sobre lo que diga la vacante hoy: el evaluador pudo
       // apagar el inglés para este candidato, y la vacante pudo editarse después.
       ing: (s.ingles && typeof s.ingles.requerido === 'boolean')
@@ -307,6 +319,7 @@ async function verSesion(id){
       ingNivel: (s.ingles && s.ingles.confirmado) || null,
       ingNota: (s.ingles && s.ingles.nota) || '',
       ingMin: (s.ingles && s.ingles.minuto) || '',
+      snapExp: (snap && snap.experiencia) ? snap.experiencia : null,
       snapPerfil: (snap && Array.isArray(snap.perfil)) ? snap.perfil : null,
       snapImpacto: (snap && Array.isArray(snap.impacto)) ? snap.impacto : null,
       snapIngles: (snap && snap.ingles_nivel) ? {
@@ -588,7 +601,7 @@ function renderRevision(){
     $('#revStage').querySelectorAll('#revModes .mode').forEach(m => m.classList.toggle('sel', m===b));
   }));
   $('#btnAddEx').addEventListener('click', () => {
-    if(X.excluyentes.length >= MAX_REQ) return toast('Tres es el máximo: en 25 minutos no se sondea bien nada si el tiempo se reparte entre más temas.');
+    if(X.excluyentes.length >= MAX_REQ) return toast('Tres es el máximo: en 30 minutos no se sondea bien nada si el tiempo se reparte entre más temas.');
     X.excluyentes.push({requisito:'', detalles_verificables:[], senales_impostor:[]});
     drawEx();
   });
@@ -615,7 +628,7 @@ function drawEx(){
     sobra.innerHTML = n > MAX_REQ ? `<div class="aviso">
       <b>Hay ${n} requisitos y el máximo son ${MAX_REQ}.</b>
       Quita ${n-MAX_REQ} antes de guardar. Los que saques no se pierden: menciónalos como deseables
-      con el cliente. En 25 minutos, tres requisitos alcanzan para escena, fricción y repregunta;
+      con el cliente. En 30 minutos, tres requisitos alcanzan para escena, fricción y repregunta;
       con más, cada tema recibe una sola pregunta y ninguna repregunta.</div>` : '';
   }
   if(!X.excluyentes.length){
@@ -794,7 +807,7 @@ async function verVacante(id){
       </div>` : ''}
 
       <button class="cta" id="btnNuevaSesion">Verificar a un candidato</button>
-      <p class="hint">Se abre una sesión guiada de 25 minutos con estos requisitos ya cargados.</p>
+      <p class="hint">Se abre una sesión guiada de 30 minutos con estos requisitos ya cargados.</p>
     `;
     $('#vacStage').querySelector('[data-home]').addEventListener('click', loadTablero);
     $('#btnNuevaSesion').addEventListener('click', () => setupSesion(v));
@@ -926,7 +939,7 @@ function pintarEdicion(){
     el.addEventListener('input', () => { EDIT.campos[el.dataset.c] = el.value; }));
   const bAdd = st.querySelector('#btnAddReq');
   if(bAdd) bAdd.addEventListener('click', () => {
-    if(EDIT.reqs.length >= MAX_REQ){ toast(`Tres es el máximo para una sesión de 25 minutos.`); return; }
+    if(EDIT.reqs.length >= MAX_REQ){ toast(`Tres es el máximo para una sesión de 30 minutos.`); return; }
     EDIT.reqs.push({ id:null, text:'', criterio:'', q_escena:'', q_friccion:'', q_cruce:'',
                      detalles:[], senales:[], abierto:true });
     pintarEdicion();
@@ -1228,7 +1241,7 @@ function setupSesion(v){
         // Dos listas distintas: lo que el CARGO pide (viene de la vacante, no cambia) y lo
         // que la SESIÓN observó (lo llena la transcripción y lo confirma el evaluador).
         pf: (v.perfil || []).map(x => ({...x})),
-        perfil: [], impacto: [],
+        perfil: [], impacto: [], exp: null,
         // Lo que el cargo exige de inglés viene de la vacante: lo define el cliente.
         ing: ingOn ? {requerido:true, nivel:v.ingles_nivel, uso:v.ingles_uso, cita:v.ingles_cita} : null,
         ingNivel: null, ingNota: '', ingMin: '',
@@ -1309,7 +1322,7 @@ function cuerpoSesion(){
     // al recargar la sesión desde el tablero.
     kind: S.kind,
     declara: S.dec || {}, recomendacion: S.rec || {}, trayectoria: S.tray || null,
-    perfil: S.perfil || null, impacto: S.impacto || null,
+    perfil: S.perfil || null, impacto: S.impacto || null, experiencia: S.exp || null,
     ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||'',
                                analisis:r.exp||'', falta:r.falta||''})),
     // El inglés se guarda entero en la sesión —si se evalúa, qué se marcó y de dónde salió—
@@ -1488,7 +1501,7 @@ function render(){
     if(!(S.perfil||[]).length){
       S.perfil = P.map(x => ({rasgo:x.rasgo, presente:null, observado:'', cita:''}));
     }
-    const EST = [[true,'ok','SE VIO'],[false,'no','NO SE VIO'],[null,'nv','NO SE ABORDÓ']];
+    const EST = [[true,'ok','SE EVIDENCIÓ'],[false,'no','NO SE EVIDENCIÓ'],[null,'nv','SIN EVIDENCIA']];
     st.innerHTML = `
       <div class="card">
         <h2>Perfil de conducta</h2>
@@ -1507,8 +1520,9 @@ function render(){
               <textarea data-pfo="${i}" rows="3" placeholder="Cómo se comportó respecto a este rasgo durante la conversación.">${esc(o.observado||'')}</textarea></div>
           </div>`;
         }).join('')}
-        <p class="hint">“No se abordó” es una respuesta legítima y sale así en el informe. Rellenarlo
-        con una impresión general es exactamente lo que este documento promete no hacer.</p>
+        <p class="hint"><b>Sin evidencia</b> es una respuesta legítima y sale así en el informe, sin
+        explicación ni excusa. Rellenarlo con una impresión general es exactamente lo que este
+        documento promete no hacer.</p>
 
         ${(S.impacto||[]).length ? `
         <div class="fttl" style="margin-top:20px">Lo que demostró · tarjetas del informe</div>
@@ -1591,7 +1605,7 @@ function render(){
           ${[1,2,3,4,5].map(v => `<button class="lv ${r.lvl===v?'sel':''}" data-lv="${v}" data-v="${v}" type="button"><div class="n">${v}</div><div class="t">${LVLTXT[v]}</div></button>`).join('')}
         </div>
         <div class="anchor" id="anchorBox">${r.lvl?ANCHORS[r.lvl]:'Pasa el cursor sobre un nivel para ver su ancla, o marca el que corresponda.'}</div>
-        <textarea class="notes" data-notes placeholder="Evidencia textual: la escena que contó, la fricción que narró, los detalles que cuadraron o no. Esto va al acta.">${esc(r.ev||'')}</textarea>
+        <textarea class="notes" data-notes placeholder="La escena que contó, la fricción que narró, los detalles que cuadraron o no. Normalmente queda como rastro interno; si la sesión se califica sin transcripción, esto es lo que lee el cliente.">${esc(r.ev||'')}</textarea>
         <div class="evnote" id="evNote"></div>
         <div class="nav">
           <button data-prev type="button">Atrás</button>
@@ -1700,7 +1714,11 @@ function render(){
             `<button class="mode ${rc.veredicto===k?'sel':''}" data-rec="${k}" type="button"><b>${t}</b><span>${s2}</span></button>`).join('')}
         </div>
         <div class="frow one" style="margin-top:12px">
-          <div class="f"><label>En dos o tres frases</label><textarea data-r="texto" placeholder="Qué quedó medido y sostenido con evidencia, y cuál es la reserva si la hay.">${esc(rc.texto||'')}</textarea></div>
+          <div class="f"><label>En dos o tres frases — se imprime tal cual en el informe del cliente</label><textarea data-r="texto" placeholder="Qué demostró el candidato y con qué caso lo sostuvo. Si hay una reserva, dila mirando hacia adelante: qué conviene confirmar y cómo.">${esc(rc.texto||'')}</textarea></div>
+          <p class="hint"><b>Escríbelo como si el cliente y el candidato lo fueran a leer juntos</b>,
+          porque puede pasar. El sujeto es el candidato, nunca la entrevista: “conviene confirmar X con
+          una prueba corta” dice lo mismo que “no alcanzamos a preguntar X”, y solo una de las dos nos
+          deja bien parados.</p>
         </div>
         <div class="fttl" style="margin:16px 0 9px">Riesgos y cómo mitigarlos</div>
         <div id="riesgos"></div>
@@ -1970,6 +1988,22 @@ function render(){
         </div>
       </div>` : '')}
 
+      ${(S.exp && !S.exp.verificada) ? `
+      <div class="card">
+        <div class="aviso">
+          <b>La experiencia más reciente quedó sin verificar.</b>
+          ${esc([S.exp.cargo, S.exp.empresa].filter(Boolean).join(' en ') || 'El último empleo del candidato')}${S.exp.periodo ? ' (' + esc(S.exp.periodo) + ')' : ''}
+          no quedó narrado con alcance y resultado propios en la conversación.
+          Si emites así, en el informe aparece como <b>no verificada</b> — que es una lectura
+          válida y honesta, pero conviene que sea tu decisión y no una sorpresa.
+        </div>
+        <div class="tools" style="margin-top:12px">
+          <button class="pri" id="btnMarcarExp" type="button">Sí quedó verificada, márcala</button>
+        </div>
+        <p class="hint">Márcala solo si el candidato de verdad narró ese trabajo con su propio
+        alcance y su propio resultado. En 30 minutos se verifica un empleo, y es este.</p>
+      </div>` : ''}
+
       <div class="card">
         <div class="fttl" style="margin-bottom:11px">Sin carpeta completa no hay acta</div>
         ${gate(idOk, 'Identidad verificada y grabación activa',
@@ -2008,6 +2042,12 @@ function render(){
       // contra la captura que ya está guardada del día de la llamada.
       S.kind = 'cierre'; S.idc = {...S.idc}; touch(); render();
       toast('Ahora puedes generar el link — se cotejará contra la captura de la entrevista');
+    });
+    const bme = st.querySelector('#btnMarcarExp');
+    if(bme) bme.addEventListener('click', () => {
+      S.exp = {...S.exp, verificada:true};
+      touch(); render();
+      toast('Marcada como verificada — va así al informe');
     });
     st.querySelector('#btnActa').addEventListener('click', emitirActa);
     st.querySelector('#btnJson').addEventListener('click', copiarJSON);
@@ -2544,7 +2584,8 @@ function aplicarTranscripcion(an){
     // Lo que de verdad se lee en el informe: la explicación del analista y lo que quedó
     // sin comprobar. La cita se queda como rastro, no como cuerpo del documento.
     if(prop.por_que_ese_nivel) r.exp = String(prop.por_que_ese_nivel);
-    if(prop.falta_por_verificar) r.falta = String(prop.falta_por_verificar);
+    if(prop.por_confirmar || prop.falta_por_verificar)
+      r.falta = String(prop.por_confirmar || prop.falta_por_verificar);
     r.nivelProp = Number(prop.nivel) || null;
   });
   // Conducta e impacto: propuestas también, como los niveles. Se precargan para que el
@@ -2558,6 +2599,17 @@ function aplicarTranscripcion(an){
       return {rasgo: rasgo.rasgo, presente: p.presente ?? null,
               observado: p.observado || '', cita: p.cita || ''};
     });
+  }
+  // La experiencia más reciente, tal como la narró en la conversación. Si no la narró, queda
+  // marcada como no verificada y el reclutador lo ve en el cierre antes de emitir.
+  const ex = S.tran.experiencia_reciente;
+  if(ex && (ex.empresa || ex.cargo)){
+    S.exp = {empresa:ex.empresa||'', cargo:ex.cargo||'', periodo:ex.periodo||'',
+             resumen:ex.resumen||'', verificada: ex.verificada === true};
+  } else if((S.tray||[]).length){
+    const t0 = S.tray[0];
+    S.exp = {empresa:t0.empresa||'', cargo:t0.cargo||'', periodo:t0.periodo||'',
+             resumen:'', verificada:false};
   }
   if(Array.isArray(S.tran.impacto)){
     S.impacto = S.tran.impacto
@@ -2610,7 +2662,7 @@ async function emitirActa(){
     const out = await api('/api/sessions/'+S.sid+'/issue', {method:'POST', body:{
       candidate: S.cand, identity: S.idc, signals: S.sig, data:{mode:S.mode},
       declara: S.dec || {}, recomendacion: S.rec || {}, trayectoria: S.tray || null,
-      perfil: S.perfil || null, impacto: S.impacto || null,
+      perfil: S.perfil || null, impacto: S.impacto || null, experiencia: S.exp || null,
       ingles: S.ing ? {requerido:true, nivel_exigido:S.ing.nivel || null, uso:S.ing.uso || null,
                        confirmado:S.ingNivel||null, nota:S.ingNota||'', minuto:S.ingMin||'',
                        fuente:'evaluador_en_vivo'} : null,
@@ -2653,7 +2705,18 @@ function verActa(){
     return {confirmado: S.ingNivel || null, nivel_exigido: S.ing.nivel || null,
             nota: S.ingNota || '', minuto: S.ingMin || '', fuente: 'evaluador_en_vivo'};
   })();
+  // La experiencia que se verifica es UNA: la más reciente. Puede venir del análisis de la
+  // transcripción (que es quien la narra), del snapshot de un informe ya emitido, o —para las
+  // sesiones anteriores a este cambio— del primer tramo de la trayectoria del CV.
   const tray = (S.tray || []).filter(t => t.empresa || t.cargo);
+  const ultima = (() => {
+    const x = S.snapExp || S.exp;
+    if(x && (x.empresa || x.cargo)) return {...x, ok: !!x.verificada};
+    const t0 = tray[0];
+    if(!t0) return null;
+    return {empresa:t0.empresa, cargo:t0.cargo, periodo:t0.periodo, resumen:'',
+            ok: t0.estado === 'confirmado'};
+  })();
   const riesgos = (rec.riesgos||[]).filter(x => (x.r||'').trim());
   const VER = {si:['ok','Recomendado'], reserva:['par','Recomendado con una reserva'], no:['no','No recomendado']}[rec.veredicto] || null;
 
@@ -2693,8 +2756,8 @@ function verActa(){
     [true, 'Sesión supervisada en vivo'],
     [nSig === 0, nSig === 0 ? 'Sin señales de asistencia' : `${nSig} señal${nSig>1?'es':''} registrada${nSig>1?'s':''}`],
     [true, `${S.reqs.length} requisito${S.reqs.length>1?'s':''} medido${S.reqs.length>1?'s':''}`],
-    tray.length ? [tray.every(t => t.estado === 'confirmado'), tray.every(t => t.estado === 'confirmado')
-        ? 'Trayectoria confirmada' : 'Trayectoria contrastada con el CV'] : null,
+    ultima ? [ultima.ok, ultima.ok ? 'Experiencia reciente verificada'
+                                   : 'Experiencia reciente no verificada'] : null,
   ].filter(Boolean);
 
   $('#actaStage').innerHTML = `
@@ -2758,8 +2821,10 @@ function verActa(){
               // `analisis`, y un documento ya entregado no se reescribe porque el software
               // haya evolucionado. También cubre la sesión calificada a mano, donde lo único
               // que hay es lo que el evaluador escribió.
-              const cuerpo = (!p.esAncla && p.texto) ? p.texto : (r.ev || p.texto);
-              const mostrarAncla = cuerpo !== ANCLA_CORTA[r.lvl];
+              // Explicación del analista → lo que escribió el evaluador → la frase del nivel.
+              // El ancla de la rúbrica ya no entra en esta cascada: es criterio interno.
+              const cuerpo = (!p.esAncla && p.texto) ? p.texto
+                           : ((r.ev || '').trim() || NIVEL_CLIENTE[r.lvl] || '');
               return `<div class="req">
                 <div class="reqhd">
                   <div class="reqn">${esc(r.n)}</div>
@@ -2767,11 +2832,17 @@ function verActa(){
                 </div>
                 <div class="barra"><span class="fill ${v}" style="width:${r.lvl*20}%"></span></div>
                 ${cuerpo?`<div class="aex">${esc(cuerpo)}</div>`:''}
-                ${r.falta?`<div class="afalta"><b>Queda por verificar:</b> ${esc(r.falta)}</div>`:''}
-                ${mostrarAncla?`<div class="ancla">${ANCLA_CORTA[r.lvl]||''}</div>`:''}
+                ${r.falta?`<div class="afalta"><b>Por confirmar:</b> ${esc(r.falta)}</div>`:''}
               </div>`;
             }).join('')}
           </div>
+          <!-- El ancla dejó de imprimirse debajo de cada requisito. "Ancla 4: escena y rol
+               claros + 2/3 detalles verificables + cruce correcto" es el criterio con el que
+               trabajamos por dentro; al cliente no le dice nada y delata el guion. La escala
+               se explica una vez, en su idioma, para que el número siga teniendo respaldo. -->
+          <p class="hint">Escala de 1 a 5 sobre evidencia de la sesión: <b>4 y 5</b> exigen un caso
+          propio narrado con alcance y resultado; <b>3</b> es experiencia real con alcance parcial;
+          <b>1 y 2</b>, conocimiento que no llega a sostenerse con un caso propio.</p>
         </div>
         <div class="infcol dos"${impacto.length ? '' : ' hidden'}>
           ${impacto.length ? `
@@ -2792,11 +2863,11 @@ function verActa(){
            se parte en renglones de cuatro palabras. -->
         ${perfil.length ? `
         <div class="zona"><span class="zn">Conducta</span><h3>Cómo se comportó en la sesión</h3>
-          <span class="zs">Observado, no inferido</span></div>
+          <span class="zs">Evidenciado en la entrevista</span></div>
         <div class="zbox">
           ${perfil.map(o => {
-            const e = o.presente === true ? ['ok','SE VIO']
-                    : o.presente === false ? ['no','NO SE VIO'] : ['nv','NO SE ABORDÓ'];
+            const e = o.presente === true ? ['ok','SE EVIDENCIÓ']
+                    : o.presente === false ? ['no','NO SE EVIDENCIÓ'] : ['nv','SIN EVIDENCIA'];
             return `<div class="req">
               <div class="reqhd">
                 <div class="reqn">${esc(o.rasgo||'')}</div>
@@ -2805,8 +2876,8 @@ function verActa(){
               ${o.observado ? `<div class="aex">${esc(o.observado)}</div>` : ''}
             </div>`;
           }).join('')}
-          <p class="hint">Conducta observada durante 25 minutos de conversación grabada. No es un
-          perfil psicométrico ni pretende describir cómo es la persona fuera de esa sesión.</p>
+          <p class="hint">Conducta evidenciada durante la sesión grabada. No es un perfil psicométrico
+          ni describe a la persona fuera de ese contexto.</p>
         </div>` : ''}
 
       <!-- BANDA 3 · dos bloques cortos que se acompañan bien: cómo se midió el idioma y
@@ -2832,11 +2903,11 @@ function verActa(){
                    callarlo sería darle al lector una confianza que este dato no tiene. Meet
                    transcribe en un solo idioma por archivo, así que el tramo en inglés no queda
                    en texto utilizable: lo califica el evaluador escuchando, en vivo. -->
-              <div class="aev" style="margin-top:10px"><b>Cómo se midió:</b> a diferencia del resto
-                de este informe, el inglés no proviene de la transcripción, que queda en un solo
-                idioma. Este nivel lo marcó ${esc(S.eval || 'el evaluador')} escuchando en vivo,
-                contra la escala de conducta${ingA.minuto ? `, con el minuto <b>${esc(ingA.minuto)}</b> de la grabación anotado para poder comprobarlo` : ''}.
-                Es un juicio del evaluador, no una medición instrumentada.</div>
+              <div class="aev" style="margin-top:10px"><b>Cómo se midió:</b> un tramo de la entrevista
+                se condujo en inglés y ${esc(S.eval || 'el evaluador')} calificó el desempeño en vivo
+                contra la escala de conducta${ingA.minuto ? `, dejando anotado el minuto <b>${esc(ingA.minuto)}</b> de la grabación para su comprobación` : ''}.
+                Es una valoración de desempeño conversacional; una certificación estandarizada mide
+                otras dimensiones del idioma.</div>
             `}
           </div>` : ''}
         </div>
@@ -2844,25 +2915,27 @@ function verActa(){
           <div class="zona"><span class="zn">Integridad</span><h3>Cómo se sostuvo la sesión</h3></div>
           <div class="zbox">
             ${cierre ? actaIdentidad() : ''}
-            <div class="res"><div class="rn">Señales de asistencia</div><span class="vd ${nSig?'par':'ok'}">${nSig?nSig+' REGISTRADA'+(nSig>1?'S':''):'NINGUNA'}</span></div>
-            <div class="res"><div class="rn">Grabación y bitácora</div><span class="vd ok">DISPONIBLES</span></div>
-            <div class="res"><div class="rn">Cita textual por requisito<small>El fragmento literal de la conversación queda archivado para auditoría</small></div><span class="vd ok">ARCHIVADA</span></div>
+            <div class="res"><div class="rn">Señales de asistencia por IA o fuente externa<small>Observadas en vivo durante la sesión</small></div><span class="vd ${nSig?'par':'ok'}">${nSig?nSig+' REGISTRADA'+(nSig>1?'S':''):'NINGUNA'}</span></div>
+            <div class="res"><div class="rn">Bitácora de la sesión<small>La transcripción de la entrevista queda archivada</small></div><span class="vd ok">DISPONIBLE</span></div>
             ${nSig?`<div class="aev">Señales: ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(s.t)).join(' · ')}. Se reportan como observación factual; no constituyen un juicio sobre el candidato.</div>`:''}
           </div>
         </div>
       </div>
 
-      ${tray.length ? `
-      <div class="zona"><span class="zn">Trayectoria</span><h3>Confirmada frente a declarada</h3>
-        <span class="zs">Declarada en el CV · confirmada en la sesión</span></div>
+      <!-- UNA experiencia, la más reciente. La sesión dura 30 minutos y se verifica el empleo
+           que de verdad predice cómo va a trabajar mañana; listar los anteriores con un sello
+           de "no se abordó" al lado convierte una decisión de método en una lista de faltantes,
+           y además es el tramo que el candidato peor recuerda. -->
+      ${ultima ? `
+      <div class="zona"><span class="zn">Experiencia</span><h3>${ultima.ok ? 'Verificada en la sesión' : 'Experiencia más reciente'}</h3>
+        <span class="zs">Declarada en la hoja de vida · contrastada en la entrevista</span></div>
       <div class="zbox">
-        ${tray.map(t => {
-          const e = {confirmado:['ok','CONFIRMADA'], sin_sostener:['par','SIN SOSTENER'],
-                     contradice:['no','CONTRADICE'], sin_confirmar:['nv','NO SE ABORDÓ']}[t.estado||'sin_confirmar'];
-          return `<div class="res"><div class="rn">${esc(t.cargo||'—')}<small>${esc(t.empresa||'')}${t.periodo?' · '+esc(t.periodo):''}</small></div>
-                  <span class="vd ${e[0]}">${e[1]}</span></div>`;
-        }).join('')}
-        <p class="hint">Confirmada significa que el candidato narró ese trabajo con escena y detalle propios durante la sesión, no que aparezca en su hoja de vida.</p>
+        <div class="res"><div class="rn">${esc(ultima.cargo||'—')}<small>${esc(ultima.empresa||'')}${ultima.periodo?' · '+esc(ultima.periodo):''}</small></div>
+          <span class="vd ${ultima.ok?'ok':'nv'}">${ultima.ok?'VERIFICADA':'NO VERIFICADA'}</span></div>
+        ${ultima.resumen ? `<p class="dtx" style="margin-top:10px">${esc(ultima.resumen)}</p>` : ''}
+        <p class="hint">${ultima.ok
+          ? 'Verificada significa que el candidato narró este trabajo con alcance y resultado propios durante la entrevista, no que aparezca en su hoja de vida.'
+          : 'La verificación se concentra en la experiencia más reciente. Esta quedó declarada en la hoja de vida y no verificada en esta sesión.'}</p>
       </div>` : ''}
 
       <!-- Factores de cierre: lo que el cliente necesita para mover la oferta. Va al final

@@ -93,6 +93,10 @@ verificacion.ratings       id · session_id → sessions · requirement_id → r
 
 Aparte a propósito: son la parte que no puede fallar y la única con pruebas propias.
 
+- **La regla del sujeto.** En todo lo que se imprime, el sujeto de la frase es el candidato o la evidencia — nunca la entrevista, el evaluador ni el tiempo disponible. "No se preguntó por las relaciones del modelo" y "su soltura con el modelado conviene validarla con una prueba corta" dicen el mismo hecho; la primera le cuenta al cliente que quien entrevistó no hizo su trabajo y le quita crédito a todo lo demás. El prompt de la transcripción trae la lista de frases prohibidas y `test/print_check.py` la verifica sobre el PDF: si una se cuela, la prueba falla.
+- **Se verifica UN empleo: el más reciente.** La sesión dura 30 minutos. Listar los anteriores con un sello de "no verificada" al lado convierte una decisión de método en una lista de faltantes, y además es el tramo que el candidato peor recuerda. Si ese empleo no quedó narrado con alcance y resultado propios, el reclutador lo ve advertido en la pantalla de cierre —con la opción de marcarlo si de verdad se verificó— y el informe lo dice como *no verificada*, sin explicar por qué.
+- **La conducta solo tiene dos resultados**: se evidenció o no se evidenció. No se explica el hueco: explicarlo es enseñar el guion.
+- **El ancla de la rúbrica no se imprime.** "Ancla 4: escena y rol claros + 2/3 detalles verificables" es el criterio con el que trabajamos por dentro. El informe explica la escala una vez, en el idioma del cliente, y cuando no hay párrafo de analista cae a una frase por nivel (`NIVEL_CLIENTE`), nunca al ancla.
 - **Máximo 3 requisitos excluyentes** (`MAX_REQ`). No es una preferencia de pantalla: la sesión dura 25 minutos y lo que se reparte entre los temas no es solo el tiempo sino la repregunta, que es donde se cae quien no hizo el trabajo. El levantamiento propone hasta 3, la revisión y la edición no dejan pasar de ahí, y el servidor devuelve `400` si alguien manda más por API. El **inglés no cuenta** contra el tope: no se pregunta, se escucha en un tramo aparte.
 - **Dos preguntas por requisito, tres como máximo.** Escena y fricción son obligatorias; el cruce solo se escribe cuando hay un hecho duro que separe a quien lo hizo de quien lo leyó. Si la vacante no trae cruce, la pantalla **no rellena** con una tercera: prefiere dos preguntas y seis minutos de seguimiento.
 - **Semáforo.** Verde: cero señales. Amarillo: 1-2 señales, o un cotejo de rostro dudoso. Rojo: 3 o más señales, o —solo en un cierre— que el rostro verificado no corresponda al de la entrevista.
@@ -154,12 +158,13 @@ Va a dos columnas, formato `v4-2026-09`:
 - **Encabezado** con el nombre, el cargo, el cliente y una bajada que es un conteo, no un adjetivo: *de los 3 requisitos que definió el cliente, 2 quedaron sostenidos con evidencia de la sesión*.
 - **Sellos** y **cinta de datos** — identidad, supervisión, señales y requisitos medidos; después ubicación, disponibilidad, pretensión e inglés. Un chip solo aparece si el dato se recogió: un rótulo con nada detrás le dice al cliente que no preguntamos.
 - **Posicionamiento** — el párrafo del evaluador, arriba, donde se lee primero.
-- **Columna ancha · Ajuste al rol** — cada requisito con su barra, la explicación de por qué ese nivel, **lo que quedó por verificar** y el ancla citada debajo. Sin el ancla, un "4/5" es un número sin criterio detrás.
-- **Columna ancha · Conducta** — los rasgos que el cargo pedía y qué se observó de cada uno. Un rasgo que no se abordó sale como *no se abordó*.
-- **Columna ancha · Integridad** — identidad con el puntaje de cotejo, señales, grabación, evidencia archivada.
+- **Columna ancha · Ajuste al rol** — cada requisito con su barra, **un párrafo** con lo que el candidato demostró y, si aplica, una línea de *Por confirmar* mirando hacia adelante: qué conviene validar y con qué. La escala se explica una sola vez al pie de la sección.
+- **Conducta** — los rasgos que el cargo pedía y qué se evidenció de cada uno. Un rasgo sin evidencia sale como *sin evidencia*, sin explicación.
+- **Integridad** — identidad con el puntaje de cotejo, *señales de asistencia por IA o fuente externa*, y la bitácora de la sesión (la transcripción archivada).
 - **Columna angosta · Lo que demostró** — tarjetas con lo que sostuvo en la conversación. Salen de la transcripción, **no del CV**: el CV lo escribió el candidato, la conversación la sostuvo delante de un evaluador.
 - **Columna angosta · Inglés** — el nivel, la conducta que lo define y de dónde salió el dato.
-- **Factores de cierre** — qué lo mueve, sus no negociables, las condiciones declaradas, y al lado la recomendación con sus riesgos y mitigación. Lo único del informe que es opinión, y va firmado.
+- **Experiencia** — el empleo más reciente, con su veredicto y un párrafo de lo que el candidato narró.
+- **Factores de cierre** — qué lo mueve, sus no negociables, las condiciones declaradas, y al lado la recomendación con sus riesgos y mitigación. Lo único del informe que es opinión, y va firmado. El texto lo escribe el evaluador a mano, así que la pantalla le recuerda ahí mismo la regla del sujeto.
 
 El contexto y la recomendación se llenan en la fase **Contexto**; la conducta y las tarjetas, en la fase **Conducta**, después de leer la transcripción.
 

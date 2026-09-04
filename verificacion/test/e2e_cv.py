@@ -100,8 +100,15 @@ with sync_playwright() as pw:
     pg.click("#btnActa"); pg.wait_for_selector("#vActa.on", timeout=9000); pg.wait_for_timeout(500)
 
     acta = pg.inner_text("#actaStage")
-    for must in ["Confirmada frente a declarada", "Alpina", "CONFIRMADA", "SIN SOSTENER", "Trayectoria contrastada"]:
+    # El informe ya no lista la trayectoria entera: en 30 minutos se verifica UN empleo, el
+    # más reciente, y las anteriores no se mencionan. Lo que tiene que estar es ese empleo,
+    # con su veredicto, y el resumen de lo que el candidato narró.
+    for must in ["Alpina", "Experiencia"]:
         if must.lower() not in acta.lower(): errs.append(f"el acta no trae: {must}")
+    if "verificada" not in acta.lower():
+        errs.append("el acta no dice si la experiencia reciente quedó verificada")
+    if "quala" in acta.lower():
+        errs.append("el acta menciona una experiencia anterior: solo se reporta la más reciente")
     pg.screenshot(path="/tmp/pk/cv_04_acta.png", full_page=True)
 
     br.close()

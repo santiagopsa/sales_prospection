@@ -162,6 +162,10 @@ async function initSchema(pool) {
     `ALTER TABLE ${T.vacancies} ADD COLUMN IF NOT EXISTS perfil JSONB`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS perfil JSONB`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS impacto JSONB`,
+    // La sesión dura 30 minutos, así que se verifica UN empleo: el más reciente. Vive aparte
+    // de `trayectoria` —que es lo que el CV declara— porque son dos cosas distintas: una la
+    // escribió el candidato y la otra la sostuvo delante de un evaluador.
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS experiencia JSONB`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
 

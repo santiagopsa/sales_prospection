@@ -88,8 +88,8 @@ with sync_playwright() as pw:
       S.reqs.forEach((r,i) => {
         if(!r.lvl) r.lvl = i === 1 ? 2 : 4;
         if((r.ev||'').length < 20) r.ev = 'Evidencia textual registrada durante la sesión para este requisito.';
-        if(!r.exp) r.exp = 'Sostuvo el tema con una escena propia y fechada, y describió la fricción real del arranque sin que hubiera que pedírsela dos veces.';
-        if(!r.falta) r.falta = 'No se contrastó el tamaño de la operación: no dijo cuántos usuarios ni cuántas plantas cubría.';
+        if(!r.exp) r.exp = 'Sostuvo el tema con un caso propio y fechado, y describió la fricción real del arranque con el detalle de quien la vivió.';
+        if(!r.falta) r.falta = 'El volumen exacto de la operación que manejó conviene precisarlo con una referencia del cliente anterior.';
       });
       S.tray = [
         {empresa:'Alpina', cargo:'Consultor SAP PP', periodo:'2022 - 2024', estado:'confirmado'},
@@ -161,7 +161,7 @@ with sync_playwright() as pw:
            reqs:(vv.requirements||[]).map(r => ({rid:r.id, n:r.text, lvl:4,
              ev:'Evidencia textual registrada durante la sesión.',
              exp:'Narró dos incidentes propios con fecha y describió cómo escaló el segundo.',
-             falta:'No se contrastó el volumen de tickets que manejaba.', r})),
+             falta:'El volumen de tickets que manejó conviene precisarlo con una referencia.', r})),
            pf:[], perfil:[], impacto:[], tray:[], ing:null, ingNivel:null,
            dec:{}, rec:{riesgos:[]}, idc:{grab:true, cam:true}, sig:{},
            fase:0, t0:Date.now(), tFase:Date.now(), fin:false, fecha:null, hash:null};
@@ -189,8 +189,16 @@ from PIL import Image
 
 DEBE = ["Dayana Maussá", "PeakU", "requisitos que definió", "Requisito por requisito",
         "Cómo se comportó en la sesión", "Cómo se sostuvo la sesión", "Factores de cierre",
-        "Firma de integridad", "Queda por verificar", "Tolerancia a la ambigüedad",
-        "PeakU responde por este informe", "Trayectoria"]
+        "Firma de integridad", "Por confirmar", "Tolerancia a la ambigüedad",
+        "PeakU responde por este informe", "Experiencia",
+        "Señales de asistencia por IA o fuente externa", "Bitácora de la sesión"]
+
+# Lo que el informe del cliente NO puede decir nunca: frases cuyo sujeto sea la entrevista o
+# el evaluador. Delatan el guion y convierten un dato del candidato en una falla nuestra.
+PROHIBIDO = ["no se preguntó", "no se le pidió", "no se alcanzó", "no se profundizó",
+             "no se abordó", "no se contrastó", "faltó indagar", "por tiempo",
+             "la sesión no cubrió", "no se midió el inglés", "ancla 1", "ancla 2",
+             "ancla 3", "ancla 4", "ancla 5", "queda por verificar"]
 
 # El QR es lo único que fallaría en silencio: se ve impecable y no escanea. Se decodifica
 # desde los PÍXELES que pinta el navegador CON EL CSS DE IMPRESIÓN aplicado —que es donde
@@ -258,6 +266,9 @@ for nombre, ruta, fondo in casos:
     print(f"{nombre:22} {n} pág · {kb} KB · tinta por página: {tinta}")
     if faltan:
         errs.append(f"[{nombre}] al PDF le falta texto: {faltan}")
+    dichos = [d for d in PROHIBIDO if "".join(d.split()).lower() in txt]
+    if dichos:
+        errs.append(f"[{nombre}] el informe se pone en evidencia ante el cliente: {dichos}")
     # Una última página corta es normal (ahí termina el documento). Una intermedia no.
     for i, t in enumerate(tinta[:-1]):
         if t is not None and t < 12:
@@ -305,7 +316,7 @@ for d in ["Andrés Peláez", "Requisito por requisito", "Cómo se sostuvo la ses
 # Y lo que NO puede afirmar: es un sondeo, no certifica identidad.
 if "nocertificalaidentidad" not in tmin:
     errs.append("[mínimo] el informe de sondeo no aclara que no certifica identidad")
-for prohibido in ["Lo que se oyó", "Cómo se comportó en la sesión", "Confirmada frente a declarada"]:
+for prohibido in ["Lo que se oyó", "Cómo se comportó en la sesión", "Experiencia más reciente"]:
     if "".join(prohibido.split()).lower() in tmin:
         errs.append(f"[mínimo] aparece una sección sin datos: {prohibido}")
 
@@ -313,6 +324,9 @@ pantalla = "".join(texto_pantalla.split()).lower()
 for d in DEBE:
     if "".join(d.split()).lower() not in pantalla:
         errs.append(f"la pantalla ya no muestra: {d}")
+for d in PROHIBIDO:
+    if "".join(d.split()).lower() in pantalla:
+        errs.append(f"la pantalla del informe dice algo que delata el proceso: {d}")
 
 print("ERRORES:", "; ".join(errs) if errs else "ninguno")
 print("PDFs en:", SALIDA)

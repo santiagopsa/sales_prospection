@@ -6,7 +6,7 @@
 // Entrada: la transcripción de la reunión de levantamiento con el cliente,
 // o el job description que el cliente envió.
 // Salida: empresa + vacante + los requisitos EXCLUYENTES, cada uno ya listo
-// para verificarse en una sesión de 25 minutos.
+// para verificarse en una sesión de 30 minutos.
 // ---------------------------------------------------------------------------
 function buildIntakePrompt(sourceText, ctx = {}) {
   const tipo = ctx.sourceType === 'jd'
@@ -25,7 +25,7 @@ function buildIntakePrompt(sourceText, ctx = {}) {
   // dónde termina: es contenido para analizar, no instrucciones para obedecer.
   const texto = String(sourceText == null ? '' : sourceText).trim();
 
-  return `Eres un analista senior de selección de PeakU (empresa colombiana de reclutamiento tech). Tu trabajo es leer ${tipo} y convertirlo en una FICHA DE VERIFICACIÓN: la lista corta de requisitos innegociables que un evaluador NO TÉCNICO podrá verificar en una sesión grabada de 25 minutos con el finalista.
+  return `Eres un analista senior de selección de PeakU (empresa colombiana de reclutamiento tech). Tu trabajo es leer ${tipo} y convertirlo en una FICHA DE VERIFICACIÓN: la lista corta de requisitos innegociables que un evaluador NO TÉCNICO podrá verificar en una sesión grabada de 30 minutos con el finalista.
 
 ${pista ? 'CONTEXTO APORTADO:\n' + pista + '\n' : ''}
 ═══════════════════════════════════════════════════════════
@@ -50,7 +50,7 @@ QUÉ ES UN REQUISITO EXCLUYENTE (y qué no):
 - NO es excluyente: lo que el cliente menciona como "ideal", "ojalá", "suma", "plus", "nos gustaría". Eso va en "deseables".
 - NO es excluyente lo que se verifica solo con un documento (título, certificación, visa) — eso lo valida el área administrativa, no esta sesión. Márcalo en "verificable_por_documento".
 - EL INGLÉS NO VA EN LA LISTA DE EXCLUYENTES: tiene su propio campo "ingles". No se verifica igual que los demás requisitos —no se pregunta, se pasa un tramo de la entrevista a inglés y se escucha—, así que se saca aparte. En "uso" describe para qué lo necesita en el día a día, que es lo que define el nivel de verdad: no es lo mismo leer documentación que discutir una decisión con el cliente.
-- MÁXIMO 3 EXCLUYENTES. No es un techo flexible: son tres. Si el texto sugiere más, quédate con los 3 que de verdad deciden el rechazo —los que el cliente repitió, los que explican descartes anteriores— y manda el resto a "deseables". Tres requisitos bien verificados valen más que seis mencionados: en 25 minutos no se sondea nada a fondo si hay que repartir el tiempo entre cinco temas.
+- MÁXIMO 3 EXCLUYENTES. No es un techo flexible: son tres. Si el texto sugiere más, quédate con los 3 que de verdad deciden el rechazo —los que el cliente repitió, los que explican descartes anteriores— y manda el resto a "deseables". Tres requisitos bien verificados valen más que seis mencionados: en 30 minutos no se sondea nada a fondo si hay que repartir el tiempo entre cinco temas.
 
 PARA CADA EXCLUYENTE, construye el material de verificación. Esta es la parte más importante:
 - "criterio_cumple": qué debería poder narrar, con detalle, alguien que SÍ tiene esa experiencia real. Escríbelo concreto y en términos de conducta observable, no de conocimiento abstracto.
@@ -171,7 +171,7 @@ function buildCvPrompt(cvText, { cargo, empresa, excluyentes = [], candidato } =
     return `  ${i + 1}. ${r.text}${r.criterio ? `\n     Qué debe poder narrar: ${r.criterio}` : ''}${dets ? '\n     Detalles verificables:\n' + dets : ''}`;
   }).join('\n');
 
-  return `Eres un analista senior de selección de PeakU. Vas a leer el CV de un finalista y prepararle a un evaluador NO TÉCNICO la munición para una sesión de verificación de 25 minutos.
+  return `Eres un analista senior de selección de PeakU. Vas a leer el CV de un finalista y prepararle a un evaluador NO TÉCNICO la munición para una sesión de verificación de 30 minutos.
 
 CARGO: ${cargo || 'no especificado'}${empresa ? ` · Cliente: ${empresa}` : ''}
 ${candidato ? `CANDIDATO: ${candidato}` : ''}
@@ -206,8 +206,13 @@ QUÉ BUSCAR:
    nada relacionado con ese requisito, dilo: eso es lo más importante que puedes reportar, porque significa
    que el evaluador va a tener que sondear a ciegas.
 
+   **Ancla las preguntas en el EMPLEO MÁS RECIENTE siempre que ahí aparezca el requisito.** La sesión
+   dura 30 minutos y se verifica un empleo, no la carrera entera: preguntar por algo que hizo hace seis
+   años gasta el tiempo en el tramo que menos predice cómo va a trabajar mañana, y además es el tramo
+   que peor recuerda. Solo baja a un empleo anterior si el requisito no aparece en absoluto en el último.
+
 2. **La trayectoria declarada**: cada empleo con empresa, cargo y periodo, en orden del más reciente al
-   más antiguo. Es lo que el evaluador va a ir confirmando durante la sesión.
+   más antiguo. Le sirve al evaluador para ubicarse; en la sesión solo se verifica el primero de la lista.
 
 3. **Puntos que no cuadran** — y aquí sé riguroso, porque una acusación infundada es peor que no decir nada:
    · Vacíos de tiempo sin explicar entre un empleo y otro.
@@ -271,7 +276,7 @@ ${x.pregunta ? `      Se le preguntó: “${x.pregunta}”\n` : ''}${x.se_ve_asi
 ${r.criterio ? `      Qué debía poder narrar: ${r.criterio}\n` : ''}${dets ? `      Detalles verificables:\n${dets}\n` : ''}${sen ? `      Señales de impostor a vigilar:\n${sen}\n` : ''}`;
   }).join('\n');
 
-  return `Eres un analista senior de selección de PeakU. Acabas de recibir la transcripción de una entrevista de verificación de 25 minutos. Tu trabajo es extraer, para cada requisito, LA EVIDENCIA que quedó en la conversación y proponer un nivel según una rúbrica anclada.
+  return `Eres un analista senior de selección de PeakU. Acabas de recibir la transcripción de una entrevista de verificación de 30 minutos. Tu trabajo es extraer, para cada requisito, LA EVIDENCIA que quedó en la conversación y proponer un nivel según una rúbrica anclada.
 
 CARGO: ${cargo || 'no especificado'}
 ${candidato ? `CANDIDATO: ${candidato}` : ''}
@@ -289,9 +294,48 @@ FIN_DE_LA_TRANSCRIPCION>>>
 ═══════════════════════════════════════════════════════════
 
 QUÉ SE IMPRIME Y QUÉ NO — importa para saber cómo escribir cada campo:
-- "por_que_ese_nivel" y "falta_por_verificar" VAN AL INFORME que lee el cliente. Se escriben en tu voz de analista, completos, para alguien que no estuvo en la llamada. Antes ese informe pegaba la cita cruda y el lector tenía que interpretarla solo; ahora lee tu explicación.
+- "por_que_ese_nivel" y "por_confirmar" VAN AL INFORME que lee el cliente. Se escriben en tu voz de analista, completos, para alguien que no estuvo en la llamada.
 - "evidencia" NO va al informe: queda como rastro de auditoría para quien revise la sesión. Por eso sí es cita literal.
-- Un requisito sin "falta_por_verificar" está afirmando que quedó cubierto por completo. No lo dejes vacío por comodidad: casi siempre hay algo que no se alcanzó a contrastar, y decirlo es lo que hace creíble al resto.
+
+═══════════════════════════════════════════════════════════
+REGLA DEL SUJETO — la más importante de este prompt, léela dos veces:
+
+En todo lo que se imprime, el sujeto de la frase es EL CANDIDATO o LA EVIDENCIA.
+NUNCA la entrevista, ni el evaluador, ni PeakU, ni el tiempo disponible.
+
+El cliente contrató un informe de verificación. Cuando el informe dice "no se preguntó por
+las relaciones del modelo", el cliente no lee un dato sobre el candidato: lee que quien
+entrevistó no hizo su trabajo, y deja de confiar en todo lo demás. El mismo hecho, dicho
+con el sujeto correcto, es información útil y profesional.
+
+PROHIBIDO ESCRIBIR — ni estas frases ni ninguna parecida:
+  ✗ "No se preguntó…"            ✗ "No se le pidió…"
+  ✗ "No se alcanzó a…"           ✗ "No se profundizó en…"
+  ✗ "No se abordó en la conversación"   ✗ "Quedó fuera por tiempo"
+  ✗ "La sesión no cubrió…"       ✗ "No se contrastó…"
+  ✗ "Faltó indagar…"             ✗ "El evaluador no…"
+Cualquier frase que describa lo que la entrevista hizo o dejó de hacer está prohibida,
+por más cierta que sea. Eso vive en el rastro interno, no en el informe.
+
+CÓMO SE DICE, ENTONCES:
+  ✗ "No se preguntó la diferencia entre WHERE y HAVING."
+  ✓ "Su manejo de agregaciones quedó demostrado en el caso que narró. El detalle fino de
+     filtros post-agregación conviene confirmarlo con una prueba técnica corta."
+  ✗ "No se contrastó el tamaño del rollout: no dijo cuántos usuarios cubría."
+  ✓ "Narró el rollout con fechas y alcance funcional. El volumen exacto de la operación
+     que manejó es el dato que conviene precisar antes de la oferta."
+  ✗ "No nombró DAX espontáneamente (llegó a SUM con pistas)."
+  ✓ "Construyó y explicó el tablero de punta a punta. Su soltura con DAX se ubica en el
+     nivel funcional; para un rol que exija modelado avanzado conviene validarla aparte."
+
+En corto: se afirma lo que SÍ quedó demostrado, y lo pendiente se enuncia mirando hacia
+adelante —qué conviene confirmar y cómo—, nunca hacia atrás señalando un hueco.
+═══════════════════════════════════════════════════════════
+
+TONO: profesional, afirmativo y sobrio. Sin adjetivos de vendedor ("excelente", "brillante")
+y sin condescendencia. Frases completas, bien puntuadas, en tercera persona. Nada de
+abreviaturas, ni de paréntesis con acotaciones sueltas, ni de signos de admiración. Si una
+frase no la firmarías delante del cliente y del candidato a la vez, está mal escrita.
 
 REGLA DE ORO — LA EVIDENCIA ES CITA, NO RESUMEN:
 - El campo "evidencia" debe ser lo que dijo el CANDIDATO, en sus palabras, copiado de la transcripción. Puedes recortar con "…" pero NO parafrasear ni pulir.
@@ -305,14 +349,22 @@ LOS DOS BLOQUES QUE VAN AL INFORME DEL CLIENTE — se sacan de ESTA conversació
 
 **"perfil"** — un objeto por rasgo de los listados arriba, en el mismo orden. El cliente lee esto para
 decidir si la persona encaja en su equipo, no solo si sabe hacer el trabajo.
-- "observado": 2 o 3 frases tuyas describiendo cómo se comportó respecto a ese rasgo EN LA
-  CONVERSACIÓN. Vale tanto lo que contó como cómo lo contó: si se le preguntó por un conflicto y
-  respondió culpando al equipo entero, eso es el dato.
-- "cita": lo que dijo, textual, que sostiene esa lectura. Sin cita, el rasgo no se reporta.
-- "presente": true, false o null. Va en null cuando el rasgo no se abordó — que es un resultado
-  válido y hay que decirlo, no rellenarlo. En ese caso: "presente": null, "cita": "", "observado": "".
+- Aquí solo existen dos resultados: **se evidenció** o **no se evidenció**. Nada más. No se explica
+  por qué un rasgo no se evidenció, ni se menciona qué se preguntó o dejó de preguntarse: eso es
+  proceso interno y en el informe se lee como una disculpa.
+- "observado": 2 o 3 frases sobre la conducta que el rasgo mostró en la conversación, con el hecho
+  concreto que la sostiene. Si el rasgo NO se evidenció, una sola frase neutra en la misma clave:
+  "No se evidenció en esta sesión", sin explicación ni excusa.
+- "cita": lo que dijo, textual, que sostiene la lectura. Sin cita, el rasgo no se reporta como visto.
+- "presente": true cuando se evidenció, false cuando la conversación mostró lo contrario, null
+  cuando no hubo evidencia en ningún sentido. En el caso null: "observado": "", "cita": "".
 - NO psicoanalices. No hables de personalidad, de tipos, ni de lo que la persona "es". Reportas
-  conducta observada en 25 minutos de conversación grabada, y ese es todo el alcance que tiene.
+  conducta evidenciada en una conversación grabada, y ese es todo el alcance que tiene.
+
+**"experiencia_reciente"** — la sesión dura 30 minutos, así que se verifica UN empleo: el más
+reciente. No reportes los anteriores ni los compares; el informe no habla de ellos. Si el candidato
+narró ese empleo con escena, alcance y resultado propios, "verificada" va en true. Si la
+conversación no llegó a ese terreno, va en false y el resumen vacío — sin explicar por qué.
 
 **"impacto"** — de 3 a 6 tarjetas con lo que este candidato DEMOSTRÓ en la conversación. Son lo
 primero que mira el cliente, así que cada una tiene que ganarse el espacio.
@@ -343,8 +395,8 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL NI BLOQUES DE CÓDIGO:
       "cubierto": true,
       "nivel": 4,
       "evidencia": "cita textual de lo que dijo el candidato, recortada con … si hace falta. USO INTERNO: es el rastro de auditoría, no se imprime en el informe",
-      "por_que_ese_nivel": "2 o 3 frases TUYAS, de analista, explicando el veredicto: qué demostró concretamente y qué no. Esto SÍ se imprime en el informe del cliente, así que escríbelo para que lo lea alguien que no estuvo en la llamada y no va a leer la transcripción. No cites textualmente aquí: resume lo que sostuvo",
-      "falta_por_verificar": "qué quedó sin comprobar sobre ESTE requisito: el detalle que no se alcanzó a preguntar, la parte del criterio que no se tocó, la afirmación que no se pudo contrastar. Vacío solo si de verdad quedó cubierto por completo",
+      "por_que_ese_nivel": "UN PÁRRAFO, de 3 a 5 frases, que es lo único que el cliente lee de este requisito. Empieza por lo que el candidato demostró, con el caso concreto que lo respalda, y cierra con el alcance real de ese dominio. Tu voz de analista, no cita textual. Sujeto: el candidato",
+      "por_confirmar": "UNA frase, opcional, sobre lo que conviene confirmar de ESTE requisito antes de decidir, y con qué se confirmaría (una prueba técnica corta, una referencia, media hora con el líder del área). Mira hacia adelante y habla del perfil del candidato, jamás de lo que la entrevista hizo o dejó de hacer. Déjala vacía si el requisito quedó demostrado sin reservas: una reserva inventada es tan mala como esconder una real",
       "detalles": [{"detalle": "el detalle verificable", "respondio": "lo que contestó, citado", "correcto": true}],
       "senales": ["señal de impostor observada en este tema, con la cita que la sostiene"],
       "nota": "solo si algo de la transcripción es dudoso o está mal transcrito, vacío si no"
@@ -354,13 +406,20 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL NI BLOQUES DE CÓDIGO:
     {
       "rasgo": "el rasgo tal como se lo pasaron",
       "presente": true,
-      "observado": "2 o 3 frases tuyas sobre cómo se comportó respecto a este rasgo en la conversación. Esto SÍ se imprime",
-      "cita": "lo que dijo, textual, que sostiene la lectura. Vacío si no se abordó"
+      "observado": "2 o 3 frases sobre la conducta evidenciada, con el hecho que la sostiene. Vacío si presente es null. Esto SÍ se imprime",
+      "cita": "lo que dijo, textual, que sostiene la lectura. Vacío si no hubo evidencia"
     }
   ],
   "impacto": [
     {"titulo": "Power BI avanzado", "sub": "Análisis de datos", "texto": "una frase anclada en lo que contó"}
   ],
+  "experiencia_reciente": {
+    "empresa": "la empresa del empleo MÁS RECIENTE que se abordó en la conversación, vacío si no se tocó",
+    "cargo": "el cargo en ese empleo",
+    "periodo": "el periodo tal como lo dijo",
+    "verificada": true,
+    "resumen": "UN PÁRRAFO de 2 o 3 frases sobre lo que el candidato narró de ese empleo: qué hizo, con qué alcance y con qué resultado. Solo lo que sostuvo en la conversación. Si no la narró, deja verificada en false y el resumen vacío"
+  },
   "declara": {
     "pretension": "lo que dijo sobre expectativa salarial, vacío si no se habló",
     "disponibilidad": "cuándo podría empezar, vacío si no se habló",

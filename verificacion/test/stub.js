@@ -224,6 +224,7 @@ const server = http.createServer(async (req, res) => {
     return json(res,200,{...sinImagen, vacancy_title:v&&v.title, company_name:v&&v.company_name,
       ingles_requerido:v&&v.ingles_requerido, ingles_nivel:v&&v.ingles_nivel, ingles_uso:v&&v.ingles_uso,
       ingles:s.ingles||null, vacancy_perfil:(v&&v.perfil)||[],
+      experiencia:s.experiencia||null,
       tiene_captura:!!shot, identidad:estadoIdentidad(ctx),
       documento:tipoDocumento(ctx), ratings:db.ratings.filter(r=>r.session_id===s.id)});
   }
@@ -262,6 +263,7 @@ const server = http.createServer(async (req, res) => {
                       ...(b.ingles ? {ingles:b.ingles} : {}),
                       ...(b.perfil ? {perfil:b.perfil} : {}),
                       ...(b.impacto ? {impacto:b.impacto} : {}),
+                      ...(b.experiencia ? {experiencia:b.experiencia} : {}),
                       ...(b.kind === 'cierre' ? {kind:'cierre'} : {})});
     db.ratings = db.ratings.filter(r=>r.session_id!==s.id);
     (b.ratings||[]).forEach((r,i)=>db.ratings.push({id:nid(), session_id:s.id, req_text:r.req_text,
@@ -292,6 +294,7 @@ const server = http.createServer(async (req, res) => {
       face_score:s.face_score??null, declara:b.declara||{}, recomendacion:b.recomendacion||{},
       trayectoria:b.trayectoria||s.trayectoria||[], semaforo:sem.color, integrity_hash:hash,
       perfil:b.perfil||s.perfil||[], impacto:b.impacto||s.impacto||[],
+      experiencia:b.experiencia||s.experiencia||null,
       ingles_nivel:(b.ingles&&b.ingles.confirmado)||null,
       ingles_exigido:(b.ingles&&b.ingles.nivel_exigido)||null,
       ingles_nota:(b.ingles&&b.ingles.nota)||'',
@@ -305,6 +308,7 @@ const server = http.createServer(async (req, res) => {
       ...(b.ingles ? {ingles:b.ingles} : {}),
       ...(b.perfil ? {perfil:b.perfil} : {}),
       ...(b.impacto ? {impacto:b.impacto} : {}),
+      ...(b.experiencia ? {experiencia:b.experiencia} : {}),
       issued_at:new Date().toISOString()});
     return json(res,200,{ok:true, semaforo:sem, identidad, documento:doc,
       id:s.id, report_code:s.report_code, issued_at:s.issued_at, integrity_hash:hash});
@@ -325,7 +329,7 @@ const server = http.createServer(async (req, res) => {
     const s = db.sessions.find(x=>x.id===+mm[1]);
     if(!s) return json(res,404,{error:'not found'});
     const t = clean(b.transcript);
-    if(t.length < 400) return json(res,400,{error:'La transcripción está vacía o es demasiado corta. Una entrevista de 25 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.'});
+    if(t.length < 400) return json(res,400,{error:'La transcripción está vacía o es demasiado corta. Una entrevista de 30 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.'});
     if(t.includes('__ILEGIBLE__')) return json(res,502,{
       error:'Claude no devolvió un JSON que se pueda leer. Vuelve a intentarlo; si se repite, revisa que el texto sea el levantamiento o el job description y no otra cosa.',
       motivo:'ilegible', raw:'No encuentro una entrevista en este texto.'});
@@ -337,19 +341,23 @@ const server = http.createServer(async (req, res) => {
         cubierto: i !== 1,
         nivel: i === 1 ? null : (i === 0 ? 5 : 4),
         evidencia: i === 1 ? '' : 'En Alpina, entre marzo y noviembre de 2023, yo llevé el rollout de PP… lo que se nos cayó fue el maestro de materiales la primera semana.',
-        por_que_ese_nivel: i === 1 ? '' : 'Narró un rollout completo en Alpina con fechas, alcance y su rol individual, y describió la falla del maestro de materiales en el go-live y cómo la resolvió. Respondió las transacciones de listas de materiales sin dudar.',
-        falta_por_verificar: i === 1 ? 'No se abordó en la conversación.' : 'No se contrastó el tamaño del rollout: no dijo cuántos usuarios ni cuántas plantas cubría.',
+        por_que_ese_nivel: i === 1
+          ? ''
+          : 'Lleva un rollout de producción completo, del que da fechas, alcance y su rol individual. Describió con detalle la caída del maestro de materiales en el arranque y el criterio con el que la resolvió, y maneja las transacciones de listas de materiales con soltura de uso diario.',
+        por_confirmar: i === 1
+          ? 'Conviene validar el manejo de la integración entre módulos con media hora técnica junto al líder de calidad antes de la oferta.'
+          : 'El volumen exacto de la operación que manejó —usuarios y plantas cubiertas— es el dato que conviene precisar con una referencia del cliente anterior.',
         detalles: i === 1 ? [] : [{detalle:'¿Qué transacción usa para listas de materiales?', respondio:'CS01, y CS02 para modificar', correcto:true}],
         senales: [],
         nota: ''
       })),
       // Sin `ingles`: el análisis de la transcripción ya no lo produce. El nivel de inglés
       // lo marca el evaluador en vivo, porque Meet transcribe en un solo idioma.
-      // El segundo rasgo queda sin abordar a propósito: hay que poder imprimir "no se abordó".
+      // El segundo rasgo queda sin evidencia a propósito: hay que poder imprimir "sin evidencia".
       perfil: ((db.vacancies.find(x=>x.id===s.vacancy_id)||{}).perfil||[]).map((x,i)=>({
         rasgo:x.rasgo,
         presente: i === 1 ? null : true,
-        observado: i === 1 ? '' : 'Contó que en Alpina arrancó la parametrización con el maestro de materiales incompleto y fijó él mismo el criterio de qué campos bloqueaban y cuáles no, en vez de esperar la definición del cliente.',
+        observado: i === 1 ? '' : 'Arrancó la parametrización con el maestro de materiales incompleto y fijó él mismo el criterio de qué campos bloqueaban el arranque, en lugar de esperar la definición del cliente. Sostuvo ese criterio cuando se le cuestionó.',
         cita: i === 1 ? '' : 'Nadie me iba a dar esa definición, entonces decidí que sin unidad de medida no arrancaba el material y el resto lo dejaba pasar.'
       })),
       impacto:[
@@ -357,6 +365,8 @@ const server = http.createServer(async (req, res) => {
         {titulo:'Go-live de planta', sub:'Alcance manejado', texto:'Alpina 2023: llevó el arranque de producción y resolvió la caída del maestro de materiales.'},
         {titulo:'CS01 / CS02', sub:'Transacciones de uso diario', texto:'Respondió sin dudar y describió la pantalla real, no la definición.'}
       ],
+      experiencia_reciente:{empresa:'Alpina', cargo:'Consultor SAP PP', periodo:'2022 - 2024', verificada:true,
+        resumen:'Llevó el rollout del módulo de producción entre marzo y noviembre de 2023, con responsabilidad directa sobre la parametrización y el arranque. Resolvió la caída del maestro de materiales en la primera semana fijando él mismo el criterio de qué campos bloqueaban el arranque.'},
       declara:{pretension:'Habló de 12 millones', disponibilidad:'Dos semanas', motivacion:'Busca autonomía en la decisión técnica', nogo:'Baja autonomía'},
       senales_generales:[],
       advertencias: t.includes('__CORTADA__') ? ['La transcripción parece cortada: termina a mitad de una frase.'] : [],

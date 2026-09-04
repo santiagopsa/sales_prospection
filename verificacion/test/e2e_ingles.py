@@ -160,8 +160,20 @@ with sync_playwright() as pw:
             acta = pg.inner_text("#actaStage")
             if "B2" not in acta:
                 errs.append("el acta no dice el nivel observado")
-            if "no proviene de la transcripción" not in acta:
-                errs.append("REGRESIÓN: el acta no declara que el inglés no sale de la transcripción")
+            # El acta ya no dice "no proviene de la transcripción" —enunciado así el cliente
+            # lee una limitación nuestra— pero SÍ tiene que seguir declarando de dónde sale
+            # el dato: quién lo midió, en vivo, con el minuto anotado, y que no es un
+            # certificado. Sin eso el informe estaría afirmando más de lo que sostiene.
+            bajo_a = acta.lower()
+            if "en vivo" not in bajo_a:
+                errs.append("REGRESIÓN: el acta no declara que el inglés se calificó en vivo")
+            if "weimar" not in bajo_a and "evaluador" not in bajo_a:
+                errs.append("REGRESIÓN: el acta no dice quién calificó el inglés")
+            if "certificación estandarizada" not in bajo_a:
+                errs.append("REGRESIÓN: el acta no acota el alcance frente a un certificado")
+            for delator in ["no proviene", "no se midió", "un solo idioma"]:
+                if delator in bajo_a:
+                    errs.append(f"el acta se disculpa ante el cliente: {delator}")
             if "Weimar" not in acta:
                 errs.append("el acta no dice quién marcó el nivel")
             if "18:40" not in acta:

@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const LVLTXT = { 5:'CUMPLE', 4:'CUMPLE', 3:'PARCIAL', 2:'NO CUMPLE', 1:'NO CUMPLE' };
 
 // Cuántos requisitos excluyentes admite una vacante. Es una regla del método, no un detalle
-// de pantalla: la sesión dura 25 minutos y lo que se reparte entre los temas no es solo el
+// de pantalla: la sesión dura 30 minutos y lo que se reparte entre los temas no es solo el
 // tiempo sino la repregunta, que es donde se cae quien no hizo el trabajo. El inglés NO
 // cuenta contra este tope — no se pregunta, se escucha en un tramo aparte.
 const MAX_REQ = 3;
