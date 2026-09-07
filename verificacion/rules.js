@@ -115,7 +115,26 @@ function reportCode(year) {
   return `PKV-${y}-${crypto.randomInt(100000, 999999)}`;
 }
 
+// Estado del análisis de la transcripción, con la lectura de un proceso que murió a mitad.
+// Si el servidor se reinició (Render lo hace al desplegar) con un análisis en curso, la
+// sesión queda en 'procesando' para siempre y nadie la va a completar: pasados unos minutos
+// se reporta como interrumpida y se ofrece reintentar. Seis minutos es holgado: un análisis
+// tarda 30-40 segundos.
+const TRANSCRIPCION_STALE_MS = 6 * 60 * 1000;
+function estadoTranscripcion(s, ahora = Date.now()) {
+  const est = s && s.transcript_status;
+  if (!est) return { estado: s && s.transcript_analisis ? 'lista' : null, error: null };
+  if (est === 'procesando') {
+    const t0 = s.transcript_started_at ? new Date(s.transcript_started_at).getTime() : 0;
+    if (t0 && ahora - t0 > TRANSCRIPCION_STALE_MS) {
+      return { estado: 'error', error: { error: 'El análisis se interrumpió antes de terminar. Vuelve a pegar la transcripción.', motivo: 'interrumpido' } };
+    }
+    return { estado: 'procesando', error: null };
+  }
+  return { estado: est, error: s.transcript_error || null };
+}
+
 module.exports = {
-  LVLTXT, MAX_REQ, ID_ITEMS, itemsDe, KINDS, esCierre, clean,
+  LVLTXT, MAX_REQ, ID_ITEMS, itemsDe, KINDS, esCierre, clean, estadoTranscripcion, TRANSCRIPCION_STALE_MS,
   semaforo, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode,
 };

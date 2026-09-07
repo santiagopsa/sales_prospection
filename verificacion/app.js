@@ -11,7 +11,7 @@
 const express = require('express');
 const path = require('path');
 const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt } = require('./prompts');
-const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode } = require('./rules');
+const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode } = require('./rules');
 const didit = require('./didit');
 const { T, initSchema } = require('./schema');
 const { crearPedirJson } = require('./llm');
@@ -648,33 +648,79 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         excluyentes = mem.requirements.filter(q => q.vacancy_id === (v && v.id)).sort((a, b) => a.ord - b.ord);
       }
 
-      const out = await pedirJson(
-        buildTranscriptPrompt(transcript, { requisitos: excluyentes, candidato, cargo, modo, perfil }),
-        { etiqueta: 'transcripcion', maxTokens: 10000 });
-      if (out.error) return res.status(502).json(out);
-
-      // Se guarda el análisis, nunca la transcripción.
-      const an = out.datos;
-      an._at = new Date().toISOString();
-      an._chars = transcript.trim().length;
-
+      // ---------------------------------------------------------------------------------
+      // EL ANÁLISIS CORRE EN SEGUNDO PLANO. Se responde ya, con el estado, y el trabajo sigue
+      // solo en el servidor. Antes el navegador esperaba los 30-40 segundos con un velo encima:
+      // el reclutador no podía abrir la siguiente entrevista hasta que este análisis
+      // terminara, y con entrevistas de 30 minutos una detrás de otra eso era tiempo muerto
+      // real. Ahora pega la transcripción, ve "procesando", y se va al tablero a seguir.
+      // La transcripción NO se guarda: vive en memoria mientras dura el análisis y se suelta.
+      // ---------------------------------------------------------------------------------
+      const textoTrans = transcript;   // copia local: req.body no sobrevive a la respuesta
       if (pool) {
-        // `ingles` NO se toca aquí. Lo marcó el evaluador durante la llamada y la
-        // transcripción no tiene con qué contradecirlo: viene en un solo idioma.
         await pool.query(
-          `UPDATE ${T.sessions} SET transcript_analisis=$2::jsonb, transcript_at=NOW(),
-                                    status = CASE WHEN status='issued' THEN status ELSE 'draft' END,
-                                    updated_at=NOW() WHERE id=$1`,
-          [id, JSON.stringify(an)]);
+          `UPDATE ${T.sessions} SET transcript_status='procesando', transcript_error=NULL,
+                                    transcript_started_at=NOW(), updated_at=NOW() WHERE id=$1`, [id]);
       } else {
         const s = mem.sessions.find(x => x.id === id);
-        s.transcript_analisis = an; s.transcript_at = an._at;
-        if (s.status !== 'issued') s.status = 'draft';
+        s.transcript_status = 'procesando'; s.transcript_error = null;
+        s.transcript_started_at = new Date().toISOString();
       }
-      res.json({ ok: true, analisis: an });
+      res.status(202).json({ ok: true, estado: 'procesando' });
+
+      // Lo que sigue ya no tiene a nadie esperando: cualquier fallo se guarda en la sesión
+      // para que el reclutador lo vea al volver, no se pierde en un log.
+      (async () => {
+        let an = null, error = null;
+        try {
+          const out = await pedirJson(
+            buildTranscriptPrompt(textoTrans, { requisitos: excluyentes, candidato, cargo, modo, perfil }),
+            { etiqueta: 'transcripcion', maxTokens: 10000 });
+          if (out.error) error = out;
+          else {
+            an = out.datos;
+            an._at = new Date().toISOString();
+            an._chars = textoTrans.trim().length;
+          }
+        } catch (e) {
+          console.error('[verificacion/transcript·fondo]', e.message);
+          error = { error: 'No se pudo analizar la transcripción. El detalle quedó en el registro del servidor.', motivo: 'interno' };
+        }
+        try {
+          if (pool) {
+            if (an) {
+              // `ingles` NO se toca aquí. Lo marcó el evaluador durante la llamada y la
+              // transcripción no tiene con qué contradecirlo: viene en un solo idioma.
+              await pool.query(
+                `UPDATE ${T.sessions} SET transcript_analisis=$2::jsonb, transcript_at=NOW(),
+                                          transcript_status='lista', transcript_error=NULL,
+                                          status = CASE WHEN status='issued' THEN status ELSE 'draft' END,
+                                          updated_at=NOW() WHERE id=$1`,
+                [id, JSON.stringify(an)]);
+            } else {
+              await pool.query(
+                `UPDATE ${T.sessions} SET transcript_status='error', transcript_error=$2::jsonb,
+                                          updated_at=NOW() WHERE id=$1`,
+                [id, JSON.stringify(error)]);
+            }
+          } else {
+            const s = mem.sessions.find(x => x.id === id);
+            if (an) {
+              s.transcript_analisis = an; s.transcript_at = an._at;
+              s.transcript_status = 'lista'; s.transcript_error = null;
+              if (s.status !== 'issued') s.status = 'draft';
+            } else {
+              s.transcript_status = 'error'; s.transcript_error = error;
+            }
+          }
+        } catch (e) {
+          console.error('[verificacion/transcript·guardar]', e.message);
+        }
+      })();
+      return;
     } catch (e) {
       console.error('[verificacion/transcript]', e.message);
-      res.status(500).json({ error: 'No se pudo analizar la transcripción. El detalle quedó en el registro del servidor.', motivo: 'interno' });
+      if (!res.headersSent) res.status(500).json({ error: 'No se pudo analizar la transcripción. El detalle quedó en el registro del servidor.', motivo: 'interno' });
     }
   });
 
@@ -1245,16 +1291,18 @@ ${!code ? `
           SELECT s.id, s.report_code, s.candidate, s.evaluator, s.mode, s.kind, s.status, s.semaforo,
                  s.didit_status, s.face_verdict, s.face_score, s.id_note,
                  s.started_at, s.issued_at, s.transcript_at, s.entrevista_at,
+                 s.transcript_status, s.transcript_started_at,
                  v.title AS vacancy_title, c.name AS company_name
           FROM ${T.sessions} s
           LEFT JOIN ${T.vacancies} v ON v.id=s.vacancy_id
           LEFT JOIN ${T.companies} c ON c.id=v.company_id
           ORDER BY s.created_at DESC LIMIT 200`);
-        return res.json(q.rows);
+        return res.json(q.rows.map(s => ({ ...s, transcript_status: estadoTranscripcion(s).estado })));
       }
       res.json(mem.sessions.slice().reverse().map(s => {
         const v = mem.vacancies.find(x => x.id === s.vacancy_id);
-        return { ...s, vacancy_title: v && v.title, company_name: v && v.company_name };
+        return { ...s, vacancy_title: v && v.title, company_name: v && v.company_name,
+                 transcript_status: estadoTranscripcion(s).estado };
       }));
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -1274,13 +1322,18 @@ ${!code ? `
         const row = s.rows[0];
         const ctx = { kind: row.kind, faceVerdict: row.face_verdict, diditStatus: row.didit_status, idNote: row.id_note };
         const { shot, ...sinImagen } = row;   // la imagen no viaja en el JSON
+        const tr = estadoTranscripcion(row);
         return res.json({ ...sinImagen, tiene_captura: !!shot, identidad: estadoIdentidad(ctx),
-                          documento: tipoDocumento(ctx), ratings: q.rows });
+                          documento: tipoDocumento(ctx), ratings: q.rows,
+                          transcript_status: tr.estado, transcript_error: tr.error });
       }
       const s = mem.sessions.find(x => x.id === id);
       if (!s) return res.status(404).json({ error: 'not found' });
       const v = mem.vacancies.find(x => x.id === s.vacancy_id);
-      res.json({ ...s, vacancy_title: v && v.title, company_name: v && v.company_name, ratings: mem.ratings.filter(x => x.session_id === id) });
+      const tr = estadoTranscripcion(s);
+      res.json({ ...s, vacancy_title: v && v.title, company_name: v && v.company_name,
+                 ratings: mem.ratings.filter(x => x.session_id === id),
+                 transcript_status: tr.estado, transcript_error: tr.error });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 

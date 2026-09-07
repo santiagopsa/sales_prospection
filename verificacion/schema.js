@@ -166,6 +166,14 @@ async function initSchema(pool) {
     // de `trayectoria` —que es lo que el CV declara— porque son dos cosas distintas: una la
     // escribió el candidato y la otra la sostuvo delante de un evaluador.
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS experiencia JSONB`,
+    // El análisis de la transcripción corre en segundo plano. Antes el navegador esperaba
+    // los 30-40 segundos con un velo encima y el reclutador no podía empezar con el
+    // siguiente candidato; ahora pega la transcripción, el servidor contesta enseguida y
+    // el estado vive aquí: 'procesando' → 'lista' | 'error'. started_at sirve para detectar
+    // un proceso que murió a mitad (un reinicio de Render) y ofrecer reintentar.
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS transcript_status TEXT`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS transcript_error JSONB`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS transcript_started_at TIMESTAMPTZ`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
 

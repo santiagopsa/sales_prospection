@@ -251,12 +251,17 @@ async function loadTablero(){
     $('#sesList').innerHTML = ss.length ? ss.map(s => {
       // Una sesión esperando transcripción no está "en curso": está esperando algo de afuera,
       // y si no se distingue en el tablero se pierde entre las demás y nadie la retoma.
-      const esperando = s.status === 'esperando' && !s.transcript_at;
-      const porConfirmar = s.status !== 'issued' && !!s.transcript_at;
-      const semTag = esperando ? 'a'
+      // El análisis corre en el servidor mientras el reclutador está en otra entrevista: el
+      // tablero es donde se entera de que terminó, así que el estado tiene que verse aquí.
+      const procesando = s.status !== 'issued' && s.transcript_status === 'procesando';
+      const fallo = s.status !== 'issued' && s.transcript_status === 'error';
+      const esperando = s.status === 'esperando' && !s.transcript_at && !procesando && !fallo;
+      const porConfirmar = s.status !== 'issued' && !!s.transcript_at && !procesando;
+      const semTag = procesando ? 'acc' : fallo ? 'r' : esperando ? 'a'
         : s.semaforo==='verde'?'v':(s.semaforo==='amarillo'?'a':(s.semaforo==='rojo'?'r':'n'));
-      const semTx = esperando ? 'ESPERA TRANSCRIPCIÓN'
-        : porConfirmar ? 'POR CONFIRMAR'
+      const semTx = procesando ? '⏳ ANALIZANDO' : fallo ? 'ANÁLISIS FALLÓ'
+        : esperando ? 'ESPERA TRANSCRIPCIÓN'
+        : porConfirmar ? 'LISTA PARA CALIFICAR'
         : s.semaforo ? s.semaforo.toUpperCase() : 'EN CURSO';
       return `<button class="row" data-ses="${s.id}" type="button">
         <div class="rowmain">
@@ -271,11 +276,20 @@ async function loadTablero(){
     }).join('') : `<div class="empty">Ninguna verificación todavía.</div>`;
     $('#sesList').querySelectorAll('[data-ses]').forEach(b =>
       b.addEventListener('click', () => verSesion(+b.dataset.ses)));
+
+    // Mientras haya un análisis en curso, el tablero se refresca solo: es la forma de que el
+    // reclutador vea "lista para calificar" sin recargar. Cuando no hay nada procesando, no
+    // se pregunta más — un tablero que consulta cada cinco segundos sin motivo es ruido.
+    clearTimeout(TABLERO_TIMER);
+    if(ss.some(s => s.status !== 'issued' && s.transcript_status === 'procesando')){
+      TABLERO_TIMER = setTimeout(() => { if($('#vTablero').classList.contains('on')) loadTablero(); }, 6000);
+    }
   }catch(e){
     $('#vacList').innerHTML = `<div class="empty">No se pudo cargar: ${esc(e.message)}</div>`;
     $('#sesList').innerHTML = '';
   }
 }
+let TABLERO_TIMER = null;
 
 /* ===================== abrir una verificación anterior =====================
    El acta se reconstruye desde la base de datos con el mismo render que la generó,
@@ -340,6 +354,7 @@ async function verSesion(id){
       tran: s.transcript_analisis || null,
       modo: s.transcript_analisis ? 'calificacion' : 'entrevista',
       esperando: s.status === 'esperando',
+      transEstado: s.transcript_status || null, transError: s.transcript_error || null,
       fin: s.status === 'issued', soloLectura: true,
     };
     if(s.status === 'issued'){ verActa(); }
@@ -356,10 +371,14 @@ function verBorrador(s){
   const i = S.ident || {};
   // Tres momentos distintos, y el botón tiene que decir cuál es: la entrevista sin hacer,
   // la entrevista hecha esperando la transcripción, o la transcripción ya leída sin confirmar.
-  const esperando = S.esperando && !S.tran;
-  const calificando = !!S.tran;
-  const etiqueta = esperando ? 'ESPERANDO TRANSCRIPCIÓN' : (calificando ? 'SIN CONFIRMAR' : 'SIN EMITIR');
-  const accion = esperando ? 'Pegar la transcripción'
+  const procesando = S.transEstado === 'procesando';
+  const fallo = S.transEstado === 'error';
+  const esperando = S.esperando && !S.tran && !procesando;
+  const calificando = !!S.tran && !procesando;
+  const etiqueta = procesando ? 'ANALIZANDO' : fallo && !S.tran ? 'ANÁLISIS FALLÓ'
+                 : esperando ? 'ESPERANDO TRANSCRIPCIÓN' : (calificando ? 'LISTA PARA CALIFICAR' : 'SIN EMITIR');
+  const accion = procesando ? 'Ver el avance'
+               : esperando || (fallo && !S.tran) ? 'Pegar la transcripción'
                : calificando ? 'Confirmar la calificación' : 'Retomar la sesión';
 
   $('#actaStage').innerHTML = `
@@ -373,7 +392,11 @@ function verBorrador(s){
       <div class="res"><div class="rn">Requisitos calificados</div><span class="rl">${cal} de ${S.reqs.length}</span></div>
       <div class="res"><div class="rn">Señales observadas</div><span class="rl">${nSig}</span></div>
       ${S.kind==='cierre' ? `<div class="res"><div class="rn">Verificación de identidad</div><span class="rl">${esc(i.texto || 'sin enviar')}</span></div>` : ''}
-      <p class="hint">${esperando
+      <p class="hint">${procesando
+        ? 'El servidor está analizando la transcripción. Tarda entre 20 y 40 segundos; el tablero se actualiza solo cuando termine.'
+        : fallo && !S.tran
+        ? 'El análisis no terminó: ' + esc((S.transError||{}).error || 'vuelve a pegar la transcripción.')
+        : esperando
         ? 'La entrevista ya se hizo. Falta pegar la transcripción de la llamada: de ahí sale la evidencia que va al acta.'
         : calificando
           ? 'La transcripción ya se leyó y hay un nivel propuesto para cada requisito. Falta que los confirmes.'
@@ -390,7 +413,16 @@ function verBorrador(s){
     S.tFase = Date.now();
     S.fase = 0;
     saveLocal(); drawSig();
-    if(esperando){ pantallaTranscripcion(); return; }
+    if(procesando){ pantallaProcesando(); return; }
+    if(esperando || (fallo && !S.tran)){ pantallaTranscripcion(); return; }
+    // El análisis terminó en segundo plano y nadie lo aplicó todavía: las propuestas de
+    // nivel, conducta e impacto se cargan ahora, una sola vez. Si ya hay niveles, es que el
+    // evaluador ya pasó por aquí y no se le pisa el trabajo.
+    if(calificando && !S.reqs.some(r => r.lvl > 0)){
+      aplicarTranscripcion(S.tran);
+      toast('Evidencia lista — revisa y confirma cada nivel');
+      return;
+    }
     S.modo = calificando ? 'calificacion' : 'entrevista';
     render(); go('vLive');
     toast('Sesión retomada');
@@ -2553,11 +2585,19 @@ async function leerArchivoTrans(f){
 
 async function analizarTranscripcion(){
   const texto = $('#transText').value.trim();
-  overlay(true, 'Leyendo la entrevista…', 'Claude está buscando la evidencia de cada requisito. Esto toma entre 20 y 40 segundos.');
+  overlay(true, 'Enviando la transcripción…', 'Un momento.');
   try{
     const out = await api(`/api/sessions/${S.sid}/transcript`, {method:'POST', body:{transcript: texto}});
-    aplicarTranscripcion(out.analisis);
-    toast('Evidencia lista — revisa y confirma cada nivel');
+    // Antes la respuesta traía el análisis y el navegador esperaba 30-40 segundos con un velo
+    // encima. Ahora el servidor contesta enseguida y analiza en segundo plano: el reclutador
+    // puede irse al tablero y empezar la siguiente entrevista. Si prefiere quedarse, la sala
+    // de espera consulta cada pocos segundos y salta sola a la calificación cuando esté.
+    if(out.estado === 'procesando'){
+      overlay(false);
+      pantallaProcesando();
+      return;
+    }
+    if(out.analisis){ aplicarTranscripcion(out.analisis); toast('Evidencia lista — revisa y confirma cada nivel'); }
   }catch(e){
     pantallaTranscripcion({
       titulo: (e.payload && e.payload.motivo) === 'truncado'
@@ -2567,6 +2607,62 @@ async function analizarTranscripcion(){
       raw: e.payload && e.payload.raw,
     });
   }finally{ overlay(false); }
+}
+
+/* El análisis está corriendo en el servidor. Dos salidas: quedarse (la pantalla consulta y
+   salta sola cuando termine) o irse al tablero y seguir con el siguiente candidato — que es
+   la razón por la que el análisis dejó de bloquear. */
+let PROCESANDO_TIMER = null;
+function pantallaProcesando(){
+  go('vTrans');
+  REPINTAR = () => pantallaProcesando();
+  $('#stage').innerHTML = '';
+  $('#transStage').innerHTML = `
+    <div class="setup" style="max-width:640px">
+      <div class="card" style="text-align:center;padding:34px 28px">
+        <div class="spin" style="margin-bottom:16px"></div>
+        <h1 style="font-size:22px">Analizando la entrevista de ${esc((S.cand||'').split(' ')[0] || 'este candidato')}</h1>
+        <p class="lede" style="margin:8px auto 0;max-width:46ch">Tarda entre 20 y 40 segundos y no
+        necesita que te quedes: <b>puedes empezar la siguiente entrevista</b> y esta verificación
+        te espera en el tablero como <i>lista para calificar</i>.</p>
+        <div class="tools" style="margin-top:22px;justify-content:center">
+          <button class="pri" id="btnSeguirOtro" type="button">Ir al tablero y seguir con otro</button>
+          <button id="btnQuedarme" type="button">Me quedo esperando aquí</button>
+        </div>
+      </div>
+    </div>`;
+  const parar = () => { clearTimeout(PROCESANDO_TIMER); PROCESANDO_TIMER = null; };
+  $('#btnSeguirOtro').addEventListener('click', async () => { parar(); await flush(); loadTablero(); });
+  $('#btnQuedarme').addEventListener('click', () => {
+    $('#btnQuedarme').disabled = true; $('#btnQuedarme').textContent = 'Esperando…';
+  });
+
+  // Se consulta cada 4 s mientras esta pantalla esté a la vista. Al terminar, se aplica el
+  // análisis igual que antes; si falló, se vuelve a la sala de espera con el motivo.
+  const consultar = async () => {
+    if(!$('#vTrans').classList.contains('on') || !S || !S.sid){ parar(); return; }
+    try{
+      const s = await api('/api/sessions/' + S.sid);
+      if(s.transcript_status === 'lista' && s.transcript_analisis){
+        parar(); aplicarTranscripcion(s.transcript_analisis);
+        toast('Evidencia lista — revisa y confirma cada nivel'); return;
+      }
+      if(s.transcript_status === 'error'){
+        parar();
+        const e = s.transcript_error || {};
+        pantallaTranscripcion({
+          titulo: e.motivo === 'truncado' ? 'La transcripción es demasiado larga para una sola pasada.'
+                : e.motivo === 'interrumpido' ? 'El análisis se interrumpió.'
+                : 'No se pudo sacar la evidencia.',
+          msg: e.error || 'Vuelve a intentarlo.', raw: e.raw,
+        });
+        return;
+      }
+    }catch(err){ /* sin red un momento: se vuelve a intentar */ }
+    PROCESANDO_TIMER = setTimeout(consultar, 4000);
+  };
+  parar();
+  PROCESANDO_TIMER = setTimeout(consultar, 2500);
 }
 
 // Lo que vuelve son PROPUESTAS. Se precargan para que el evaluador confirme o corrija —
@@ -2584,8 +2680,10 @@ function aplicarTranscripcion(an){
     // Lo que de verdad se lee en el informe: la explicación del analista y lo que quedó
     // sin comprobar. La cita se queda como rastro, no como cuerpo del documento.
     if(prop.por_que_ese_nivel) r.exp = String(prop.por_que_ese_nivel);
-    if(prop.por_confirmar || prop.falta_por_verificar)
-      r.falta = String(prop.por_confirmar || prop.falta_por_verificar);
+    // "recomendacion" es el nombre vigente. Los otros dos son de análisis anteriores que ya
+    // están guardados: se leen pero el informe los rotula igual, como recomendación.
+    if(prop.recomendacion || prop.por_confirmar || prop.falta_por_verificar)
+      r.falta = String(prop.recomendacion || prop.por_confirmar || prop.falta_por_verificar);
     r.nivelProp = Number(prop.nivel) || null;
   });
   // Conducta e impacto: propuestas también, como los niveles. Se precargan para que el
@@ -2605,7 +2703,7 @@ function aplicarTranscripcion(an){
   const ex = S.tran.experiencia_reciente;
   if(ex && (ex.empresa || ex.cargo)){
     S.exp = {empresa:ex.empresa||'', cargo:ex.cargo||'', periodo:ex.periodo||'',
-             resumen:ex.resumen||'', verificada: ex.verificada === true};
+             porque: ex.por_que_verificada || ex.resumen || '', verificada: ex.verificada === true};
   } else if((S.tray||[]).length){
     const t0 = S.tray[0];
     S.exp = {empresa:t0.empresa||'', cargo:t0.cargo||'', periodo:t0.periodo||'',
@@ -2622,7 +2720,7 @@ function aplicarTranscripcion(an){
   // Lo marca el evaluador en vivo, en la fase de inglés.
   const d = S.tran.declara || {};
   S.dec = S.dec || {};
-  ['pretension','disponibilidad','motivacion','nogo'].forEach(k => {
+  ['pretension','disponibilidad','motivacion','nogo','procesos'].forEach(k => {
     if(!String(S.dec[k]||'').trim() && String(d[k]||'').trim()) S.dec[k] = d[k];
   });
   S.fase = 0; S.tFase = Date.now();
@@ -2829,15 +2927,13 @@ function verActa(){
                 <div class="reqn">${esc(r.n)}</div>
                 <div class="reqv"><span class="rl">${r.lvl} / 5</span><span class="vd ${v}">${LVLTXT[r.lvl]}</span></div>
                 ${cuerpo?`<div class="aex">${esc(cuerpo)}</div>`:''}
-                ${r.falta?`<div class="afalta"><b>Por confirmar:</b> ${esc(r.falta)}</div>`:''}
+                ${r.falta?`<div class="afalta"><b>Recomendación:</b> ${esc(r.falta)}</div>`:''}
               </div>`;
             }).join('')}
             <!-- La nota de la escala va DENTRO del recuadro. Suelta debajo, se quedaba
                  huérfana al principio de la página siguiente, lejos de los números que
                  explica. -->
-            <p class="hint escala">Escala de 1 a 5 sobre evidencia de la sesión: <b>4 y 5</b> exigen
-            un caso propio narrado con alcance y resultado; <b>3</b> es experiencia real con alcance
-            parcial; <b>1 y 2</b>, conocimiento que no llega a sostenerse con un caso propio.</p>
+            <p class="hint escala">Escala 1-5 sobre evidencia de la sesión: <b>4-5</b> caso propio con alcance y resultado · <b>3</b> experiencia real con alcance parcial · <b>1-2</b> sin caso propio que lo sostenga.</p>
           </div>
           <!-- El ancla dejó de imprimirse debajo de cada requisito. "Ancla 4: escena y rol
                claros + 2/3 detalles verificables + cruce correcto" es el criterio con el que
@@ -2875,91 +2971,72 @@ function verActa(){
           ni describe a la persona fuera de ese contexto.</p>
         </div>` : ''}
 
-      <!-- BANDA 3 · dos bloques cortos que se acompañan bien: cómo se midió el idioma y
-           cómo se sostuvo la sesión. -->
-      <div class="${ingA ? 'inf par' : ''}">
-        <div class="infcol">
-          ${ingA ? `
-          <div class="zona"><span class="zn">Inglés</span><h3>Lo que se oyó</h3></div>
-          <div class="zbox">
-            ${!ingA.confirmado ? `
-              <p class="dtx"><b>No evaluado en esta sesión.</b> No se midió el inglés en la
-              conversación, así que este informe no dice nada sobre su inglés — ni a favor ni en contra.</p>
-            ` : `
-              <div class="ingfila">
-                <div class="ingniv">${esc(ingA.confirmado)}</div>
-                <div class="ingtx">
-                  ${ingA.nivel_exigido ? `<span class="ingpide">El cargo pide: ${esc(ingA.nivel_exigido)}</span>` : ''}
-                  <b>${esc(ANCLA_ING[ingA.confirmado] || '')}</b>
-                  ${ingA.nota ? `<p class="dtx" style="margin-top:6px">${esc(ingA.nota)}</p>` : ''}
+      <!-- BANDA DE TRES · experiencia, inglés e integridad. Son los tres bloques cortos del
+           informe y en tres columnas caben en un tercio de página; uno debajo de otro se
+           comían media. Cada uno se construye aparte y la banda se arma con los que existan,
+           para que ninguna columna quede vacía. -->
+      ${(() => {
+        const cols = [];
+        if(ultima) cols.push(`
+          <div class="tres">
+            <div class="zona"><span class="zn">Experiencia</span><h3>${ultima.ok ? 'Verificada' : 'Más reciente'}</h3></div>
+            <div class="zbox">
+              <div class="res"><div class="rn">${esc(ultima.cargo||'—')}<small>${esc(ultima.empresa||'')}${ultima.periodo?' · '+esc(ultima.periodo):''}</small></div>
+                <span class="vd ${ultima.ok?'ok':'nv'}">${ultima.ok?'VERIFICADA':'NO VERIFICADA'}</span></div>
+              ${(ultima.porque || ultima.resumen) ? `<p class="dtx">${esc(ultima.porque || ultima.resumen)}</p>` : ''}
+              ${ultima.ok ? '' : `<p class="hint">La verificación se concentra en la experiencia más reciente; esta quedó declarada y no verificada en esta sesión.</p>`}
+            </div>
+          </div>`);
+        if(ingA) cols.push(`
+          <div class="tres">
+            <div class="zona"><span class="zn">Inglés</span><h3>${ingA.confirmado ? 'Lo que se oyó' : 'No evaluado'}</h3></div>
+            <div class="zbox">
+              ${!ingA.confirmado ? `
+                <p class="dtx">No se evaluó el inglés en esta sesión; el informe no afirma nada sobre el idioma.</p>
+              ` : `
+                <div class="ingfila">
+                  <div class="ingniv">${esc(ingA.confirmado)}</div>
+                  <div class="ingtx"><b>${esc(ANCLA_ING[ingA.confirmado] || '')}</b></div>
                 </div>
-              </div>
-              <!-- El resto del acta se sostiene en cita textual de la transcripción. Esto no, y
-                   callarlo sería darle al lector una confianza que este dato no tiene. Meet
-                   transcribe en un solo idioma por archivo, así que el tramo en inglés no queda
-                   en texto utilizable: lo califica el evaluador escuchando, en vivo. -->
-              <div class="aev" style="margin-top:10px"><b>Cómo se midió:</b> un tramo de la entrevista
-                se condujo en inglés y ${esc(S.eval || 'el evaluador')} calificó el desempeño en vivo
-                contra la escala de conducta${ingA.minuto ? `, dejando anotado el minuto <b>${esc(ingA.minuto)}</b> de la grabación para su comprobación` : ''}.
-                Es una valoración de desempeño conversacional; una certificación estandarizada mide
-                otras dimensiones del idioma.</div>
-            `}
-          </div>` : ''}
-        </div>
-        <div class="infcol">
-          <div class="zona"><span class="zn">Integridad</span><h3>Cómo se sostuvo la sesión</h3></div>
-          <div class="zbox">
-            ${cierre ? actaIdentidad() : ''}
-            <div class="res"><div class="rn">Señales de asistencia por IA o fuente externa<small>Observadas en vivo durante la sesión</small></div><span class="vd ${nSig?'par':'ok'}">${nSig?nSig+' REGISTRADA'+(nSig>1?'S':''):'NINGUNA'}</span></div>
-            <div class="res"><div class="rn">Bitácora de la sesión<small>La transcripción de la entrevista queda archivada</small></div><span class="vd ok">DISPONIBLE</span></div>
-            ${nSig?`<div class="aev">Señales: ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(s.t)).join(' · ')}. Se reportan como observación factual; no constituyen un juicio sobre el candidato.</div>`:''}
-          </div>
-        </div>
-      </div>
-
-      <!-- UNA experiencia, la más reciente. La sesión dura 30 minutos y se verifica el empleo
-           que de verdad predice cómo va a trabajar mañana; listar los anteriores con un sello
-           de "no se abordó" al lado convierte una decisión de método en una lista de faltantes,
-           y además es el tramo que el candidato peor recuerda. -->
-      ${ultima ? `
-      <div class="zona"><span class="zn">Experiencia</span><h3>${ultima.ok ? 'Verificada en la sesión' : 'Experiencia más reciente'}</h3>
-        <span class="zs">Declarada en la hoja de vida · contrastada en la entrevista</span></div>
-      <div class="zbox">
-        <div class="res"><div class="rn">${esc(ultima.cargo||'—')}<small>${esc(ultima.empresa||'')}${ultima.periodo?' · '+esc(ultima.periodo):''}</small></div>
-          <span class="vd ${ultima.ok?'ok':'nv'}">${ultima.ok?'VERIFICADA':'NO VERIFICADA'}</span></div>
-        ${ultima.resumen ? `<p class="dtx" style="margin-top:10px">${esc(ultima.resumen)}</p>` : ''}
-        <p class="hint">${ultima.ok
-          ? 'Verificada significa que el candidato narró este trabajo con alcance y resultado propios durante la entrevista, no que aparezca en su hoja de vida.'
-          : 'La verificación se concentra en la experiencia más reciente. Esta quedó declarada en la hoja de vida y no verificada en esta sesión.'}</p>
-      </div>` : ''}
+                ${ingA.nivel_exigido ? `<p class="dtx"><b>El cargo pide:</b> ${esc(ingA.nivel_exigido)}.</p>` : ''}
+                ${ingA.nota ? `<p class="dtx">${esc(ingA.nota)}</p>` : ''}
+                <p class="hint">Calificado en vivo por ${esc(S.eval || 'el evaluador')}${ingA.minuto ? ` (min. ${esc(ingA.minuto)})` : ''}; valoración conversacional, no certificación.</p>
+              `}
+            </div>
+          </div>`);
+        cols.push(`
+          <div class="tres">
+            <div class="zona"><span class="zn">Integridad</span><h3>Cómo se sostuvo</h3></div>
+            <div class="zbox">
+              ${cierre ? actaIdentidad() : ''}
+              <div class="res"><div class="rn">Señales de asistencia por IA o fuente externa</div><span class="vd ${nSig?'par':'ok'}">${nSig?nSig+' REGISTRADA'+(nSig>1?'S':''):'NINGUNA'}</span></div>
+              <div class="res"><div class="rn">Bitácora de la sesión<small>Transcripción archivada</small></div><span class="vd ok">DISPONIBLE</span></div>
+              ${nSig?`<div class="aev">Señales: ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(s.t)).join(' · ')}. Observación factual, no un juicio sobre el candidato.</div>`:''}
+            </div>
+          </div>`);
+        return `<div class="banda3 n${cols.length}">${cols.join('')}</div>`;
+      })()}
 
       <!-- Factores de cierre: lo que el cliente necesita para mover la oferta. Va al final
            porque es lo último que se decide, y en dos columnas porque son dos lecturas
            distintas — lo que lo atrae y lo que puede salir mal. -->
-      ${(dec.motivacion || nogo.length || dec.procesos || VER || rec.texto || riesgos.length) ? `
-      <div class="zona"><span class="zn">Factores de cierre</span><h3>Qué mueve a ${esc((S.cand||'').split(' ')[0])} y qué puede fallar</h3>
-        <span class="zs">Sus palabras · nuestra lectura</span></div>
-      <div class="zbox dos">
+      ${(dec.motivacion || nogo.length || VER || riesgos.length) ? `
+      <div class="zona"><span class="zn">Factores de cierre</span><h3>Qué mueve a ${esc((S.cand||'').split(' ')[0])}${(VER||riesgos.length)?' y qué cuidar':''}</h3>
+        <span class="zs">${(VER||riesgos.length) ? 'Sus palabras · nuestra lectura' : 'En sus palabras'}</span></div>
+      <div class="zbox${(VER||riesgos.length)?' dos':''}">
         <div>
           ${dec.motivacion ? `<div class="mini">Por qué está buscando</div>
             <p class="dtx">${esc(dec.motivacion)}</p>` : ''}
           ${nogo.length ? `<div class="mini" style="margin-top:12px">No negociables</div>
             <ul class="lst">${nogo.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>` : ''}
-          ${(dec.pretension||dec.disponibilidad||dec.procesos) ? `<div class="mini" style="margin-top:12px">Condiciones declaradas</div>
-            ${dec.pretension ? `<div class="res"><div class="rn">Pretensión</div><span class="rl">${esc(dec.pretension)}</span></div>` : ''}
-            ${dec.disponibilidad ? `<div class="res"><div class="rn">Disponibilidad</div><span class="rl">${esc(dec.disponibilidad)}</span></div>` : ''}
-            ${dec.procesos ? `<div class="res"><div class="rn">Otros procesos activos</div><span class="rl">${esc(dec.procesos)}</span></div>` : ''}
-            <p class="hint">No verificado contra desprendibles ni contra terceros.</p>` : ''}
         </div>
-        <div>
+        ${(VER || riesgos.length) ? `<div>
           ${VER ? `<div class="mini">Nuestra recomendación</div>
             <div class="recver"><span class="vd ${VER[0]}">${esc(VER[1].toUpperCase())}</span></div>` : ''}
-          ${riesgos.length ? `<div class="mini" style="margin-top:${VER?'14px':'0'}">Riesgos y mitigación</div>
+          ${riesgos.length ? `<div class="mini" style="margin-top:${VER?'12px':'0'}">Riesgos y mitigación</div>
             ${riesgos.map(x=>`<div class="riesgo"><b>${esc(x.r)}</b>${x.m?`<span>Mitigación: ${esc(x.m)}</span>`:''}</div>`).join('')}` : ''}
-          ${(!VER && !riesgos.length) ? '<p class="hint" style="margin-top:0">Sin recomendación registrada.</p>' : ''}
-          <p class="hint">La recomendación es opinión del evaluador — lo único de este informe que
-          no es medición.</p>
-        </div>
+          <p class="hint">Opinión del evaluador — lo único de este informe que no es medición.</p>
+        </div>` : ''}
       </div>` : ''}
 
       <div class="cierrepie">
@@ -2969,15 +3046,14 @@ function verActa(){
           <p>${(doc.tipo === 'acta')
             ? `Si la persona no es quien este informe dice que es, o su desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo.`
             : `Si el desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo. <b>Este informe no certifica la identidad de la persona</b>: certifica lo observado sobre los requisitos del cargo.`} Verifique la autenticidad en <b>${esc(urlVerificacion(S.id))}</b>.</p>
-          <span class="sig">Firma de integridad: ${esc(firmaCorta())} · Evaluó: ${esc(S.eval||'—')} · Revisión de calidad: pendiente de cuatro ojos · Rúbrica anclada 1-5</span>
+          <span class="sig">Firma de integridad: ${esc(firmaCorta())} · Evaluó: ${esc(S.eval||'—')} · Revisión de calidad: pendiente de cuatro ojos · Escala anclada 1-5 · Sesión grabada y archivada${(doc.tipo === 'acta') ? ' · Identidad verificada por proveedor externo' : ''}</span>
         </div>
         ${S.id ? `<button class="abqr" type="button" title="${esc(urlVerificacionAbs(S.id))}">
           ${huecoQr(urlVerificacionAbs(S.id), 6, 'Verificar la autenticidad de este informe')}
           <span>Escanee para verificar</span>
         </button>` : ''}
       </div>
-        <p class="hint alcance">${esc(doc.alcance || '')} Metodología: entrevista estructurada con escalas ancladas (1-5) sobre los requisitos definidos por el cliente${
-          (doc.tipo === 'acta') ? '; identidad verificada por proveedor externo y cotejada contra el rostro de la sesión' : ''}; sesión grabada y archivada.</p>
+        ${doc.alcance ? `<p class="hint alcance">${esc(doc.alcance)}</p>` : ''}
       </div>
     </div>
     <div class="tools" style="margin-top:14px">
@@ -3011,9 +3087,8 @@ function actaIdentidad(){
     abandonada:  ['nv',  'SIN COMPLETAR', 'La verificación se envió y no se completó. Este informe no certifica identidad.'],
     fallida:     ['no',  'NO SUPERADA',   'La verificación de identidad no fue superada.'],
   }[est] || ['nv', 'NO REALIZADA', 'Este informe no certifica identidad.'];
-  return `<div class="res"><div class="rn">Identidad — documento, prueba de vida y cotejo con la sesión</div>
-            <span class="vd ${cuadro[0]}">${cuadro[1]}</span></div>
-          <div class="aev">${esc(cuadro[2])}</div>`;
+  return `<div class="res"><div class="rn">Identidad<small>${esc(cuadro[2])}</small></div>
+            <span class="vd ${cuadro[0]}">${cuadro[1]}</span></div>`;
 }
 
 function copiarJSON(){

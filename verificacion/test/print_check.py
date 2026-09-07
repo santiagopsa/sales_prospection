@@ -79,8 +79,14 @@ with sync_playwright() as pw:
     }""")
     pg.evaluate("""async (txt) => {
       await marcarFinEntrevista();
-      const out = await api('/api/sessions/'+S.sid+'/transcript', {method:'POST', body:{transcript: txt}});
-      aplicarTranscripcion(out.analisis);
+      // El análisis corre en segundo plano: se manda, se consulta hasta que esté, se aplica.
+      await api('/api/sessions/'+S.sid+'/transcript', {method:'POST', body:{transcript: txt}});
+      for(let i = 0; i < 60; i++){
+        const s = await api('/api/sessions/' + S.sid);
+        if(s.transcript_status === 'lista' && s.transcript_analisis){ aplicarTranscripcion(s.transcript_analisis); break; }
+        if(s.transcript_status === 'error') throw new Error('análisis falló: ' + JSON.stringify(s.transcript_error));
+        await new Promise(r => setTimeout(r, 300));
+      }
     }""", TRANS)
     pg.wait_for_selector("#vLive.on", timeout=9000); pg.wait_for_timeout(500)
 
@@ -89,7 +95,7 @@ with sync_playwright() as pw:
         if(!r.lvl) r.lvl = i === 1 ? 2 : 4;
         if((r.ev||'').length < 20) r.ev = 'Evidencia textual registrada durante la sesión para este requisito.';
         if(!r.exp) r.exp = 'Sostuvo el tema con un caso propio y fechado, y describió la fricción real del arranque con el detalle de quien la vivió.';
-        if(!r.falta) r.falta = 'El volumen exacto de la operación que manejó conviene precisarlo con una referencia del cliente anterior.';
+        if(!r.falta) r.falta = i === 0 ? 'Encajaría mejor con un par técnico en integración durante los primeros meses.' : '';
       });
       S.tray = [
         {empresa:'Alpina', cargo:'Consultor SAP PP', periodo:'2022 - 2024', estado:'confirmado'},
@@ -161,7 +167,7 @@ with sync_playwright() as pw:
            reqs:(vv.requirements||[]).map(r => ({rid:r.id, n:r.text, lvl:4,
              ev:'Evidencia textual registrada durante la sesión.',
              exp:'Narró dos incidentes propios con fecha y describió cómo escaló el segundo.',
-             falta:'El volumen de tickets que manejó conviene precisarlo con una referencia.', r})),
+             falta:'', r})),
            pf:[], perfil:[], impacto:[], tray:[], ing:null, ingNivel:null,
            dec:{}, rec:{riesgos:[]}, idc:{grab:true, cam:true}, sig:{},
            fase:0, t0:Date.now(), tFase:Date.now(), fin:false, fecha:null, hash:null};
@@ -188,8 +194,8 @@ import pypdf
 from PIL import Image
 
 DEBE = ["Dayana Maussá", "PeakU", "requisitos que definió", "Requisito por requisito",
-        "Cómo se comportó en la sesión", "Cómo se sostuvo la sesión", "Factores de cierre",
-        "Firma de integridad", "Por confirmar", "Tolerancia a la ambigüedad",
+        "Cómo se comportó en la sesión", "Cómo se sostuvo", "Factores de cierre",
+        "Firma de integridad", "Recomendación", "Tolerancia a la ambigüedad",
         "PeakU responde por este informe", "Experiencia",
         "Señales de asistencia por IA o fuente externa", "Bitácora de la sesión"]
 
@@ -198,7 +204,8 @@ DEBE = ["Dayana Maussá", "PeakU", "requisitos que definió", "Requisito por req
 PROHIBIDO = ["no se preguntó", "no se le pidió", "no se alcanzó", "no se profundizó",
              "no se abordó", "no se contrastó", "faltó indagar", "por tiempo",
              "la sesión no cubrió", "no se midió el inglés", "ancla 1", "ancla 2",
-             "ancla 3", "ancla 4", "ancla 5", "queda por verificar"]
+             "ancla 3", "ancla 4", "ancla 5", "queda por verificar", "por confirmar",
+             "conviene confirmar", "conviene validar"]
 
 # El QR es lo único que fallaría en silencio: se ve impecable y no escanea. Se decodifica
 # desde los PÍXELES que pinta el navegador CON EL CSS DE IMPRESIÓN aplicado —que es donde
@@ -273,8 +280,8 @@ for nombre, ruta, fondo in casos:
     for i, t in enumerate(tinta[:-1]):
         if t is not None and t < 12:
             errs.append(f"[{nombre}] la página {i+1} de {n} quedó casi vacía ({t}% de tinta): salto mal puesto")
-    if n > 4:
-        errs.append(f"[{nombre}] {n} páginas: demasiado largo para un informe de cliente")
+    if n > 2:
+        errs.append(f"[{nombre}] {n} páginas: el informe es de una hoja, dos como máximo")
 
 
 print("=" * 74)
@@ -350,7 +357,7 @@ tmin = "".join(("\n".join(p.extract_text() or "" for p in rmin.pages)).split()).
 print(f"{'informe mínimo':22} {len(rmin.pages)} pág · un requisito, sin inglés ni conducta")
 if len(rmin.pages) != 1:
     errs.append(f"el informe mínimo salió en {len(rmin.pages)} páginas: debería caber en una")
-for d in ["Andrés Peláez", "Requisito por requisito", "Cómo se sostuvo la sesión",
+for d in ["Andrés Peláez", "Requisito por requisito", "Cómo se sostuvo",
           "PeakU responde por este informe", "Firma de integridad"]:
     if "".join(d.split()).lower() not in tmin:
         errs.append(f"[mínimo] al PDF le falta: {d}")

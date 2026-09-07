@@ -169,7 +169,7 @@ with sync_playwright() as pw:
                 errs.append("REGRESIÓN: el acta no declara que el inglés se calificó en vivo")
             if "weimar" not in bajo_a and "evaluador" not in bajo_a:
                 errs.append("REGRESIÓN: el acta no dice quién calificó el inglés")
-            if "certificación estandarizada" not in bajo_a:
+            if "no certificación" not in bajo_a and "certificación estandarizada" not in bajo_a:
                 errs.append("REGRESIÓN: el acta no acota el alcance frente a un certificado")
             for delator in ["no proviene", "no se midió", "un solo idioma"]:
                 if delator in bajo_a:

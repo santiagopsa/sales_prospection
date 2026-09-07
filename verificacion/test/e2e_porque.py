@@ -85,7 +85,9 @@ with sync_playwright() as pw:
             uno = filas[0].inner_text()
             if CITA in uno:
                 errs.append("el cierre sigue mostrando la cita literal del candidato")
-            if "rol individual" not in uno and "fricción" not in uno.lower():
+            # El párrafo se acortó a 2-3 frases; lo que se comprueba es que explique con un
+            # caso propio, no que use una palabra en particular.
+            if "rollout" not in uno.lower() and "caso" not in uno.lower():
                 errs.append(f"no explica por qué cumple: {uno!r}")
             if "CUMPLE" not in uno:
                 errs.append("se perdió el veredicto del renglón")
@@ -153,13 +155,16 @@ with sync_playwright() as pw:
             errs.append("REGRESIÓN: el acta sigue pegando la cita cruda de la transcripción")
         if "rollout de producción completo" not in acta:
             errs.append("el acta no trae la explicación del veredicto")
-        if "Por confirmar" not in acta:
-            errs.append("el acta no dice qué queda por confirmar")
-        if "volumen exacto de la operación" not in acta:
-            errs.append("no imprime el pendiente concreto que devolvió el análisis")
-        # Y lo que no puede aparecer nunca: el guion con el que trabajamos por dentro.
-        for delator in ["Ancla 1", "Ancla 2", "Ancla 3", "Ancla 4", "Ancla 5",
-                        "no se preguntó", "no se abordó", "no se contrastó"]:
+        # "Por confirmar" se fue: le preguntaba al cliente por qué no lo confirmamos nosotros.
+        # Lo que queda es una recomendación corta y opcional, y solo cuando aporta.
+        if "Recomendación" not in acta:
+            errs.append("el acta no imprime la recomendación que devolvió el análisis")
+        if "autonomía sobre el módulo" not in acta:
+            errs.append("no imprime la recomendación concreta que devolvió el análisis")
+        # Y lo que no puede aparecer nunca: el guion con el que trabajamos por dentro, ni
+        # una tarea de verificación pendiente.
+        for delator in ["Ancla 1", "Ancla 2", "Ancla 3", "Ancla 4", "Ancla 5", "Por confirmar",
+                        "conviene confirmar", "no se preguntó", "no se abordó", "no se contrastó"]:
             if delator.lower() in acta.lower():
                 errs.append(f"el acta le muestra al cliente algo interno: {delator}")
         if "REGISTRADA" in acta and "Evidencia textual en cada requisito" in acta:

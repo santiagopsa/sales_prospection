@@ -225,6 +225,7 @@ const server = http.createServer(async (req, res) => {
       ingles_requerido:v&&v.ingles_requerido, ingles_nivel:v&&v.ingles_nivel, ingles_uso:v&&v.ingles_uso,
       ingles:s.ingles||null, vacancy_perfil:(v&&v.perfil)||[],
       experiencia:s.experiencia||null,
+      transcript_status:s.transcript_status||null, transcript_error:s.transcript_error||null,
       tiene_captura:!!shot, identidad:estadoIdentidad(ctx),
       documento:tipoDocumento(ctx), ratings:db.ratings.filter(r=>r.session_id===s.id)});
   }
@@ -330,10 +331,19 @@ const server = http.createServer(async (req, res) => {
     if(!s) return json(res,404,{error:'not found'});
     const t = clean(b.transcript);
     if(t.length < 400) return json(res,400,{error:'La transcripción está vacía o es demasiado corta. Una entrevista de 30 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.'});
-    if(t.includes('__ILEGIBLE__')) return json(res,502,{
-      error:'Claude no devolvió un JSON que se pueda leer. Vuelve a intentarlo; si se repite, revisa que el texto sea el levantamiento o el job description y no otra cosa.',
-      motivo:'ilegible', raw:'No encuentro una entrevista en este texto.'});
     const reqs = db.requirements.filter(q=>q.vacancy_id===s.vacancy_id).sort((a,b2)=>a.ord-b2.ord);
+    s.transcript_status = 'procesando'; s.transcript_error = null;
+    s.transcript_started_at = new Date().toISOString();
+    json(res,202,{ok:true, estado:'procesando'});
+    // __LENTO__ alarga el análisis para que una prueba alcance a irse al tablero y volver.
+    const espera = t.includes('__LENTO__') ? 6000 : 1200;
+    setTimeout(() => {
+      if(t.includes('__ILEGIBLE__')){
+        s.transcript_status = 'error';
+        s.transcript_error = {error:'Claude no devolvió un JSON que se pueda leer. Vuelve a intentarlo; si se repite, revisa que el texto sea la transcripción de la entrevista y no otra cosa.',
+          motivo:'ilegible', raw:'No encuentro una entrevista en este texto.'};
+        return;
+      }
     // El segundo requisito queda sin cubrir a propósito: es el caso que más importa probar.
     const an = {
       por_requisito: reqs.map((r,i)=>({
@@ -343,10 +353,10 @@ const server = http.createServer(async (req, res) => {
         evidencia: i === 1 ? '' : 'En Alpina, entre marzo y noviembre de 2023, yo llevé el rollout de PP… lo que se nos cayó fue el maestro de materiales la primera semana.',
         por_que_ese_nivel: i === 1
           ? ''
-          : 'Lleva un rollout de producción completo, del que da fechas, alcance y su rol individual. Describió con detalle la caída del maestro de materiales en el arranque y el criterio con el que la resolvió, y maneja las transacciones de listas de materiales con soltura de uso diario.',
-        por_confirmar: i === 1
-          ? 'Conviene validar el manejo de la integración entre módulos con media hora técnica junto al líder de calidad antes de la oferta.'
-          : 'El volumen exacto de la operación que manejó —usuarios y plantas cubiertas— es el dato que conviene precisar con una referencia del cliente anterior.',
+          : 'Lleva un rollout de producción completo con fechas, alcance y rol propio. Resolvió la caída del maestro de materiales en el arranque con criterio propio y maneja las transacciones de uso diario con soltura.',
+        recomendacion: i === 1
+          ? ''
+          : 'Rinde más con autonomía sobre el módulo y un par en calidad para la integración.',
         detalles: i === 1 ? [] : [{detalle:'¿Qué transacción usa para listas de materiales?', respondio:'CS01, y CS02 para modificar', correcto:true}],
         senales: [],
         nota: ''
@@ -357,7 +367,7 @@ const server = http.createServer(async (req, res) => {
       perfil: ((db.vacancies.find(x=>x.id===s.vacancy_id)||{}).perfil||[]).map((x,i)=>({
         rasgo:x.rasgo,
         presente: i === 1 ? null : true,
-        observado: i === 1 ? '' : 'Arrancó la parametrización con el maestro de materiales incompleto y fijó él mismo el criterio de qué campos bloqueaban el arranque, en lugar de esperar la definición del cliente. Sostuvo ese criterio cuando se le cuestionó.',
+        observado: i === 1 ? '' : 'Arrancó con el maestro de materiales incompleto y fijó él mismo el criterio de qué campos bloqueaban, en vez de esperar la definición del cliente.',
         cita: i === 1 ? '' : 'Nadie me iba a dar esa definición, entonces decidí que sin unidad de medida no arrancaba el material y el resto lo dejaba pasar.'
       })),
       impacto:[
@@ -366,16 +376,18 @@ const server = http.createServer(async (req, res) => {
         {titulo:'CS01 / CS02', sub:'Transacciones de uso diario', texto:'Respondió sin dudar y describió la pantalla real, no la definición.'}
       ],
       experiencia_reciente:{empresa:'Alpina', cargo:'Consultor SAP PP', periodo:'2022 - 2024', verificada:true,
-        resumen:'Llevó el rollout del módulo de producción entre marzo y noviembre de 2023, con responsabilidad directa sobre la parametrización y el arranque. Resolvió la caída del maestro de materiales en la primera semana fijando él mismo el criterio de qué campos bloqueaban el arranque.'},
-      declara:{pretension:'Habló de 12 millones', disponibilidad:'Dos semanas', motivacion:'Busca autonomía en la decisión técnica', nogo:'Baja autonomía'},
+        por_que_verificada:'Narró decisiones propias con fechas y alcance consistentes entre sí y con lo declarado en la hoja de vida.'},
+      declara:{pretension:'12 millones, negociable', disponibilidad:'Dos semanas', procesos:'Ninguno', motivacion:'Busca autonomía en la decisión técnica', nogo:'Baja autonomía'},
       senales_generales:[],
       advertencias: t.includes('__CORTADA__') ? ['La transcripción parece cortada: termina a mitad de una frase.'] : [],
       resumen:'Sostuvo el núcleo del cargo con un caso propio. Quedó sin medir la integración.',
       _at:new Date().toISOString(), _chars:t.length
     };
-    s.transcript_analisis = an; s.transcript_at = an._at;
-    if(s.status !== 'issued') s.status = 'draft';
-    return json(res,200,{ok:true, analisis:an});
+      s.transcript_analisis = an; s.transcript_at = an._at;
+      s.transcript_status = 'lista'; s.transcript_error = null;
+      if(s.status !== 'issued') s.status = 'draft';
+    }, espera);
+    return;
   }
 
   // --- identidad simulada (no llama a Didit de verdad) ---

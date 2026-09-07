@@ -602,7 +602,12 @@ input,textarea,select{font:inherit;color:inherit}
 
   /* Nada de encabezados huérfanos al pie de una página. */
   .zona{break-after:avoid;page-break-after:avoid}
-  .zbox,.req,.tray,.aback,.sellos,.acthd{break-inside:avoid;page-break-inside:avoid}
+  /* Los recuadros se PUEDEN partir entre páginas; lo que no se parte es la unidad de lectura
+     —una fila, una tarjeta, el bloque de respaldo—. Un recuadro entero que no cabe se iba a la
+     página siguiente y dejaba un tercio de hoja en blanco, y con tres páginas de tope eso es
+     la diferencia entre dos y tres. */
+  .req,.tray,.aback,.sellos,.acthd,.res,.riesgo,.imp{break-inside:avoid;page-break-inside:avoid}
+  .zbox{break-inside:auto}
   .acthd{break-after:avoid}
 
   /* La firma es una cadena larga: que parta por caracteres, no que se salga de la caja,
@@ -619,7 +624,7 @@ input,textarea,select{font:inherit;color:inherit}
 }
 .printhd,.printft{display:none}
 
-@page{ margin:20mm 14mm 20mm }
+@page{ margin:14mm 13mm 15mm }
 
 /* Señal de que un botón de navegación sí hizo algo, aunque la página no tenga scroll. */
 .destacar{animation:destello 1.4s ease-out}
@@ -735,14 +740,16 @@ input,textarea,select{font:inherit;color:inherit}
 
 /* La cintilla de datos va en rejilla, no en línea corrida: en línea, los chips quedaban de
    anchos distintos según el largo del valor y la fila se leía como una lista desordenada. */
-.chips{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:12px 0 0}
+/* Los chips miden lo que mide su contenido y se acomodan en fila; los que no quepan pasan a
+   la siguiente. Una rejilla de columnas fijas los igualaba de ancho, y con cinco chips en una
+   hoja Carta cada uno quedaba tan angosto que el valor se partía letra por letra. */
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 0}
 .chip{font-size:12px;color:var(--ink);background:var(--panel);border:1px solid var(--line2);
-  border-radius:6px;padding:6px 10px;line-height:1.3;display:flex;align-items:baseline;gap:6px}
+  border-radius:6px;padding:5px 10px;line-height:1.3;display:inline-flex;align-items:baseline;
+  gap:5px;max-width:100%}
 .chip .ci{flex:none;font-size:11px;line-height:1}
-.chip b{color:var(--ink2);font-weight:700;font-size:10.5px;flex:none}
-.chip span{color:var(--ink2);min-width:0;overflow-wrap:anywhere}
-@media (max-width:700px){ .chips{grid-template-columns:repeat(2,1fr)} }
-@media (max-width:460px){ .chips{grid-template-columns:1fr} }
+.chip b{color:var(--ink2);font-weight:700;font-size:10.5px;flex:none;white-space:nowrap}
+.chip span:last-child{color:var(--ink2);min-width:0}
 
 .posic{margin-top:16px;border-left:3px solid var(--acc);background:var(--acc-soft);
   border-radius:0 9px 9px 0;padding:12px 16px}
@@ -808,8 +815,69 @@ input,textarea,select{font:inherit;color:inherit}
   .posic{background:transparent;border-left-color:#666;padding:9px 13px}
   .posic p{font-size:12.5px}
   .imp{border-left-color:#666}
-  .sellos{margin:12px 0 0}
-  .ahd .bajada{font-size:12px}
+  .sellos{margin:10px 0 0}
+  .ahd .bajada{font-size:11.5px}
+  /* En papel el objetivo es UNA página, dos como máximo: márgenes de documento, tipo de
+     documento. Lo que en pantalla es cómodo en la hoja es aire desperdiciado. */
+  .acta{font-size:10.6px}
+  .acta .ahd h2{font-size:18px}
+  .acta .ahd .cert{font-size:9.5px}
+  .acta .ahd .rl2{font-size:11.5px}
+  .acta .ahd .mt{font-size:10px;line-height:1.5}
+  .acta .actaiso{width:38px;margin-bottom:6px}
+  .acta .zona{margin:9px 0 5px;padding:4px 9px}
+  .acta .zona .zn,.acta .zona h3{font-size:9px}
+  .acta .zona .zs{font-size:8.5px}
+  .acta .zbox{padding:7px 10px;border-radius:7px}
+  .acta .req{padding:5px 0;gap:9px;grid-template-columns:minmax(0,.8fr) 66px minmax(0,2.8fr)}
+  .acta .reqn{font-size:11px;line-height:1.3}
+  .acta .reqv .rl{font-size:12.5px}
+  .acta .reqv .vd{font-size:8.5px;padding:2px 6px}
+  .acta .aex{font-size:10.4px;line-height:1.42}
+  .acta .afalta{font-size:10px;margin-top:5px}
+  .acta .hint.escala{font-size:9px;margin-top:6px;padding-top:5px}
+  .acta .imps{gap:6px}
+  .acta .imp{padding:6px 9px}
+  .acta .imp b{font-size:11px}
+  .acta .imp .isub{font-size:8.5px}
+  .acta .imp p{font-size:9.8px;line-height:1.35}
+  /* La cintilla y los sellos en UNA fila cada uno: en dos filas se comen 60px de una hoja
+     que tiene que cerrar en dos páginas. Con cinco chips a cinco columnas cada uno mide
+     ~130px, suficiente para "Disponibilidad: dos semanas" sin partir. */
+  .acta .chip{font-size:9.5px;padding:3px 7px;gap:4px}
+  .acta .chips{gap:5px;margin-top:6px}
+  .acta .sello{font-size:9px;padding:2px 7px}
+  .acta .sellos{gap:5px}
+  .acta .ahd{padding-bottom:8px}
+  .acta .ahd .bajada{margin-top:4px}
+  .acta .abqr svg{width:104px;height:104px}
+  .acta .aback{padding:9px 12px}
+  .acta .cierrepie{margin-top:8px}
+  .acta .hint.alcance{margin-top:6px}
+  .acta .zbox.dos{gap:14px}
+  .acta .riesgo{padding:4px 0}
+  .acta .posic{margin-top:8px;padding:6px 10px}
+  .acta .posic{margin-top:9px;padding:7px 11px}
+  .acta .posic p{font-size:11px;line-height:1.45}
+  .acta .mini{font-size:8.5px;margin-bottom:3px}
+  .acta .dtx{font-size:10.4px;line-height:1.42}
+  .acta .lst{font-size:10.8px;line-height:1.45}
+  .acta .riesgo{padding:5px 0;font-size:10.8px}
+  .acta .riesgo span{font-size:10.2px}
+  .acta .res{padding:6px 0}
+  .acta .res .rn{font-size:11px}
+  .acta .res .rn small{font-size:9.5px}
+  .banda3{gap:10px}
+  .banda3 .zona{margin-top:9px}
+  .banda3 .zbox{padding:8px 10px}
+  .banda3 .dtx{font-size:10px}
+  .banda3 .ingniv{font-size:15px;width:34px;height:34px}
+  .banda3 .ingtx b{font-size:10.2px}
+  .acta .hint{font-size:9.2px!important;margin-top:5px}
+  .acta .aback{padding:10px 13px;gap:12px}
+  .acta .aback h4{font-size:11.5px}
+  .acta .aback p{font-size:10.2px}
+  .acta .cierrepie{margin-top:10px}
   /* Dentro de las dos columnas, los recuadros SÍ se pueden partir entre páginas. Con
      break-inside:avoid —que es lo correcto en el resto del documento— un recuadro que no
      cabía se iba entero a la página siguiente y dejaba media hoja en blanco. Lo que no se
@@ -875,3 +943,70 @@ input,textarea,select{font:inherit;color:inherit}
 /* La nota de la escala cierra el recuadro de requisitos: separada por la línea, para que se
    lea como pie de la sección y no como un requisito más. */
 .hint.escala{border-top:1px solid var(--line);padding-top:8px;margin-top:10px}
+
+
+/* ================== la banda de tres ==================
+   Experiencia · inglés · integridad, en columnas iguales. Cada columna trae su propia barra
+   de sección, así que la banda se lee como tres secciones cortas lado a lado y no como una
+   sección con tres cajas. Con dos columnas —sin inglés, por ejemplo— se reparte en dos. */
+.banda3{display:grid;gap:14px;align-items:start;margin-top:4px}
+.banda3.n3{grid-template-columns:repeat(3,1fr)}
+.banda3.n2{grid-template-columns:repeat(2,1fr)}
+.banda3.n1{grid-template-columns:1fr}
+.banda3 .tres{min-width:0}
+@media screen{ .banda3 .zona{margin-top:16px} .banda3 .zbox{padding:11px 13px} }
+.banda3 .zona .zs{display:none}
+/* En una columna angosta, la etiqueta y su sello no caben lado a lado sin que la etiqueta
+   se parta en cinco renglones: el sello va arriba, a la derecha, y la etiqueta debajo. */
+.banda3 .res{padding:6px 0;display:block;position:relative}
+.banda3 .res .rn{font-size:12px;padding-right:0;display:block}
+.banda3 .res .rn small{font-size:10.5px;margin-top:2px}
+.banda3 .res .vd{display:inline-block;margin:0 0 4px;float:right}
+.banda3 .res .rl{display:block;margin-top:2px}
+.banda3 .res::after{content:"";display:block;clear:both}
+@media screen{ .banda3 .dtx{font-size:12px;line-height:1.5} }
+.banda3 .dtx{margin-top:6px}
+.banda3 .ingfila{gap:9px;align-items:center}
+.banda3 .ingniv{flex:none}
+@media screen{ .banda3 .ingniv{font-size:17px;width:38px;height:38px} .banda3 .ingtx b{font-size:11px} }
+.banda3 .ingtx b{line-height:1.4;font-weight:600}
+@media screen and (max-width:820px){ .banda3.n3,.banda3.n2{grid-template-columns:1fr} }
+
+/* ================== densidad del documento ==================
+   Un informe se lee en una hoja, no en una pantalla con scroll. El tipo base baja y todos los
+   espaciados con él: la estructura la dan las bandas, no el aire entre bloques.
+   Va dentro de @media screen a propósito: este bloque está DESPUÉS del de impresión en el
+   archivo, y con la misma especificidad le ganaba, así que la compactación de papel no
+   llegaba a aplicarse nunca. */
+@media screen{
+.acta{font-size:13px}
+.acta .ahd{padding-bottom:10px}
+.acta .ahd h2{font-size:21px}
+.acta .ahd .bajada{font-size:12.5px;margin-top:6px}
+.acta .sellos{margin:11px 0 0;gap:6px}
+.acta .sello{font-size:10.5px;padding:4px 9px}
+.acta .chips{margin-top:8px;gap:6px}
+.acta .chip{font-size:11px;padding:5px 9px}
+.acta .posic{margin-top:12px;padding:9px 13px}
+.acta .posic p{font-size:12.5px;line-height:1.5}
+.acta .posic .mini{margin-bottom:2px}
+.acta .zona{margin:16px 0 7px;padding:5px 10px}
+.acta .zbox{padding:11px 14px}
+.acta .req{padding:8px 0;gap:10px}
+.acta .reqn{font-size:12.5px}
+.acta .reqv .rl{font-size:14px}
+.acta .aex{font-size:12.5px;line-height:1.5}
+.acta .afalta{font-size:11.5px;margin-top:6px;padding:4px 0 4px 10px}
+.acta .hint.escala{font-size:10.5px;padding-top:6px;margin-top:8px}
+.acta .imps{gap:7px}
+.acta .imp{padding:8px 11px}
+.acta .imp b{font-size:13px}
+.acta .imp .isub{font-size:9.5px;margin-top:2px}
+.acta .imp p{font-size:11px;line-height:1.4;margin-top:4px}
+.acta .zbox.dos{gap:16px}
+.acta .mini{margin-bottom:4px}
+.acta .lst{font-size:12px;line-height:1.5}
+.acta .riesgo{padding:6px 0;font-size:12px}
+.acta .riesgo span{font-size:11.5px}
+.acta .cierrepie{margin-top:16px}
+}

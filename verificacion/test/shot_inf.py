@@ -88,8 +88,14 @@ with sync_playwright() as pw:
     # Colgar y pegar la transcripción, como en la vida real
     pg.evaluate("""async (txt) => {
       await marcarFinEntrevista();
-      const out = await api('/api/sessions/'+S.sid+'/transcript', {method:'POST', body:{transcript: txt}});
-      aplicarTranscripcion(out.analisis);
+      // El análisis corre en segundo plano: se manda, se consulta hasta que esté, se aplica.
+      await api('/api/sessions/'+S.sid+'/transcript', {method:'POST', body:{transcript: txt}});
+      for(let i = 0; i < 60; i++){
+        const s = await api('/api/sessions/' + S.sid);
+        if(s.transcript_status === 'lista' && s.transcript_analisis){ aplicarTranscripcion(s.transcript_analisis); break; }
+        if(s.transcript_status === 'error') throw new Error('análisis falló: ' + JSON.stringify(s.transcript_error));
+        await new Promise(r => setTimeout(r, 300));
+      }
     }""", TRANS)
     pg.wait_for_selector("#vLive.on", timeout=9000); pg.wait_for_timeout(500)
 

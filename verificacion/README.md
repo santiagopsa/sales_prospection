@@ -95,6 +95,9 @@ Aparte a propósito: son la parte que no puede fallar y la única con pruebas pr
 
 - **La regla del sujeto.** En todo lo que se imprime, el sujeto de la frase es el candidato o la evidencia — nunca la entrevista, el evaluador ni el tiempo disponible. "No se preguntó por las relaciones del modelo" y "su soltura con el modelado conviene validarla con una prueba corta" dicen el mismo hecho; la primera le cuenta al cliente que quien entrevistó no hizo su trabajo y le quita crédito a todo lo demás. El prompt de la transcripción trae la lista de frases prohibidas y `test/print_check.py` la verifica sobre el PDF: si una se cuela, la prueba falla.
 - **Se verifica UN empleo: el más reciente.** La sesión dura 30 minutos. Listar los anteriores con un sello de "no verificada" al lado convierte una decisión de método en una lista de faltantes, y además es el tramo que el candidato peor recuerda. Si ese empleo no quedó narrado con alcance y resultado propios, el reclutador lo ve advertido en la pantalla de cierre —con la opción de marcarlo si de verdad se verificó— y el informe lo dice como *no verificada*, sin explicar por qué.
+- **"Recomendación", no "por confirmar".** Una línea que decía *conviene confirmar X con una prueba* le preguntaba al cliente, en la práctica, por qué no lo confirmamos nosotros — y a esa altura ya no hay nada que hacer. Lo que queda es un consejo corto sobre cómo aprovechar el perfil, opcional, y vacío es lo normal. `print_check.py` falla si el PDF trae "por confirmar" o "conviene confirmar".
+- **Topes de largo, en el prompt.** 55 palabras por requisito, 35 por rasgo de conducta, 30 para el porqué de la experiencia, 12 por tarjeta, 8 para la aspiración. El informe es de una hoja, dos como máximo, y un párrafo largo no es más riguroso: es un párrafo que el cliente no lee.
+- **La experiencia dice por qué quedó verificada**, no qué contó: decisiones propias, detalles consistentes entre sí y con lo declarado, alcance coherente con el cargo. Lo que contó ya está en los requisitos.
 - **La conducta solo tiene dos resultados**: se evidenció o no se evidenció. No se explica el hueco: explicarlo es enseñar el guion.
 - **El ancla de la rúbrica no se imprime.** "Ancla 4: escena y rol claros + 2/3 detalles verificables" es el criterio con el que trabajamos por dentro. El informe explica la escala una vez, en el idioma del cliente, y cuando no hay párrafo de analista cae a una frase por nivel (`NIVEL_CLIENTE`), nunca al ancla.
 - **Máximo 3 requisitos excluyentes** (`MAX_REQ`). No es una preferencia de pantalla: la sesión dura 25 minutos y lo que se reparte entre los temas no es solo el tiempo sino la repregunta, que es donde se cae quien no hizo el trabajo. El levantamiento propone hasta 3, la revisión y la edición no dejan pasar de ahí, y el servidor devuelve `400` si alguien manda más por API. El **inglés no cuenta** contra el tope: no se pregunta, se escucha en un tramo aparte.
@@ -128,6 +131,7 @@ python3 verificacion/test/e2e_transcripcion.py # entrevistar sin escribir, calif
 python3 verificacion/test/e2e_ingles.py    # el inglés se mide escuchando, no preguntando
 python3 verificacion/test/e2e_perfil.py    # tope de 3 requisitos, dos preguntas y el perfil de conducta
 python3 verificacion/test/print_check.py   # el PDF que recibe el cliente, en los 4 casos reales
+python3 verificacion/test/e2e_paralelo.py  # el análisis en segundo plano: pegar, irse, seguir con otro
 ```
 
 Y una herramienta que no afirma nada, solo deja mirar el resultado — capturas de cada pantalla y el PDF del informe:
@@ -169,6 +173,12 @@ Va a dos columnas, formato `v4-2026-09`:
 El contexto y la recomendación se llenan en la fase **Contexto**; la conducta y las tarjetas, en la fase **Conducta**, después de leer la transcripción.
 
 **Ojo con el formato.** El snapshot congela los *datos* de un informe emitido, que es lo que promete la firma de integridad. La maqueta no: un informe emitido bajo `v3-2026-08` se vuelve a dibujar con la de `v4`, con su mismo contenido. Si mañana hace falta que un informe viejo se vea exactamente como el día que se entregó, hay que guardar también el HTML, no solo los datos.
+
+### El análisis corre en segundo plano
+
+Pegar la transcripción dejó de bloquear. Antes el navegador esperaba los 30-40 segundos del análisis con un velo encima y el reclutador no podía abrir la siguiente entrevista; con entrevistas de 30 minutos una tras otra, eso era tiempo muerto real. Ahora `POST /api/sessions/:id/transcript` contesta `202 {estado:'procesando'}` de inmediato y el análisis sigue solo en el servidor, con su estado en la sesión (`transcript_status`: `procesando` → `lista` | `error`). La pantalla de espera ofrece dos salidas: irse al tablero y empezar con otro candidato, o quedarse — en cuyo caso consulta cada cuatro segundos y salta sola a la calificación. El tablero muestra la sesión como *analizando* y se refresca solo mientras haya algo en curso; al terminar aparece como *lista para calificar*, y al abrirla las propuestas se aplican una sola vez (si ya hay niveles, el evaluador ya pasó por ahí y no se le pisa nada).
+
+Un análisis en `procesando` desde hace más de seis minutos se reporta como interrumpido —Render reinicia el proceso al desplegar— y se ofrece volver a pegar. La transcripción no se guarda en ningún momento: vive en memoria mientras dura el análisis. `test/e2e_paralelo.py` recorre el caso completo: pegar, irse, abrir otra entrevista, volver a la primera ya lista, y un análisis que falla.
 
 ### El PDF, que es lo que de verdad recibe el cliente
 

@@ -294,7 +294,7 @@ FIN_DE_LA_TRANSCRIPCION>>>
 ═══════════════════════════════════════════════════════════
 
 QUÉ SE IMPRIME Y QUÉ NO — importa para saber cómo escribir cada campo:
-- "por_que_ese_nivel" y "por_confirmar" VAN AL INFORME que lee el cliente. Se escriben en tu voz de analista, completos, para alguien que no estuvo en la llamada.
+- "por_que_ese_nivel" y "recomendacion" VAN AL INFORME que lee el cliente. Se escriben en tu voz de analista, completos, para alguien que no estuvo en la llamada.
 - "evidencia" NO va al informe: queda como rastro de auditoría para quien revise la sesión. Por eso sí es cita literal.
 
 ═══════════════════════════════════════════════════════════
@@ -316,6 +316,21 @@ PROHIBIDO ESCRIBIR — ni estas frases ni ninguna parecida:
   ✗ "Faltó indagar…"             ✗ "El evaluador no…"
 Cualquier frase que describa lo que la entrevista hizo o dejó de hacer está prohibida,
 por más cierta que sea. Eso vive en el rastro interno, no en el informe.
+
+LARGO — tan importante como el sujeto:
+El informe es de UNA página, dos como máximo. Cada campo que se imprime tiene un tope de
+palabras y se cumple. Un párrafo largo no es más riguroso: es un párrafo que el cliente no lee.
+  · "por_que_ese_nivel": 2 o 3 frases, MÁXIMO 55 PALABRAS. Un solo caso que respalde el nivel,
+    no la lista de todo lo que mencionó. Sin enumerar marcas, herramientas ni cifras salvo que
+    UNA sea la que decide el veredicto.
+  · "recomendacion": UNA frase, MÁXIMO 20 PALABRAS, y solo si de verdad aporta.
+  · "perfil[].observado": 1 o 2 frases, MÁXIMO 35 PALABRAS.
+  · "experiencia_reciente.por_que_verificada": UNA frase, MÁXIMO 30 PALABRAS.
+  · "impacto[].texto": MÁXIMO 12 PALABRAS.
+  · "declara.pretension": la cifra y una condición, MÁXIMO 8 PALABRAS ("Más de 7,5 millones,
+    negociable"). No la frase entera del candidato.
+  · "declara.procesos": "Ninguno" si dijo que no tiene; si tiene, cuántos y en qué etapa,
+    MÁXIMO 6 PALABRAS.
 
 CÓMO SE DICE, ENTONCES:
   ✗ "No se preguntó la diferencia entre WHERE y HAVING."
@@ -352,8 +367,8 @@ decidir si la persona encaja en su equipo, no solo si sabe hacer el trabajo.
 - Aquí solo existen dos resultados: **se evidenció** o **no se evidenció**. Nada más. No se explica
   por qué un rasgo no se evidenció, ni se menciona qué se preguntó o dejó de preguntarse: eso es
   proceso interno y en el informe se lee como una disculpa.
-- "observado": 2 o 3 frases sobre la conducta que el rasgo mostró en la conversación, con el hecho
-  concreto que la sostiene. Si el rasgo NO se evidenció, una sola frase neutra en la misma clave:
+- "observado": 1 o 2 frases, máximo 35 palabras, sobre la conducta que el rasgo mostró, con el
+  hecho concreto que la sostiene. Sin relato: el hecho y la lectura. Si el rasgo NO se evidenció, una sola frase neutra en la misma clave:
   "No se evidenció en esta sesión", sin explicación ni excusa.
 - "cita": lo que dijo, textual, que sostiene la lectura. Sin cita, el rasgo no se reporta como visto.
 - "presente": true cuando se evidenció, false cuando la conversación mostró lo contrario, null
@@ -363,16 +378,19 @@ decidir si la persona encaja en su equipo, no solo si sabe hacer el trabajo.
 
 **"experiencia_reciente"** — la sesión dura 30 minutos, así que se verifica UN empleo: el más
 reciente. No reportes los anteriores ni los compares; el informe no habla de ellos. Si el candidato
-narró ese empleo con escena, alcance y resultado propios, "verificada" va en true. Si la
-conversación no llegó a ese terreno, va en false y el resumen vacío — sin explicar por qué.
+narró ese empleo con escena, alcance y resultado propios, "verificada" va en true.
+"por_que_verificada" NO resume lo que contó —eso ya está en los requisitos— sino POR QUÉ se da
+por verificada: que narró decisiones propias, que los detalles cuadran entre sí y con lo declarado,
+que el alcance que describió es coherente con el cargo. Una frase. Si no quedó verificada: false y
+la frase vacía, sin explicar por qué.
 
-**"impacto"** — de 3 a 6 tarjetas con lo que este candidato DEMOSTRÓ en la conversación. Son lo
+**"impacto"** — de 3 a 5 tarjetas con lo que este candidato DEMOSTRÓ en la conversación. Son lo
 primero que mira el cliente, así que cada una tiene que ganarse el espacio.
 - "titulo": corto y concreto, 2 o 3 palabras. Una herramienta con su nivel real ("Power BI avanzado"),
   un tiempo de trayectoria que él sostuvo con escenas ("6 años en RCM"), un alcance ("equipos de 12").
 - "sub": la etiqueta de qué es eso, tres o cuatro palabras.
-- "texto": una frase corta anclada en lo que contó. Si no puedes anclarla en algo que dijo, la tarjeta
-  sobra: bórrala. Prefiero tres tarjetas ciertas que seis rellenas.
+- "texto": una frase de máximo 12 palabras anclada en lo que contó. Si no puedes anclarla en algo
+  que dijo, la tarjeta sobra: bórrala. Prefiero tres tarjetas ciertas que cinco rellenas.
 - No repitas aquí los tres requisitos: eso ya tiene su propia sección. Estas tarjetas son lo que
   apareció ALREDEDOR — la herramienta que mencionó de paso, el tamaño de la operación que manejaba.
 
@@ -395,8 +413,8 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL NI BLOQUES DE CÓDIGO:
       "cubierto": true,
       "nivel": 4,
       "evidencia": "cita textual de lo que dijo el candidato, recortada con … si hace falta. USO INTERNO: es el rastro de auditoría, no se imprime en el informe",
-      "por_que_ese_nivel": "UN PÁRRAFO, de 3 a 5 frases, que es lo único que el cliente lee de este requisito. Empieza por lo que el candidato demostró, con el caso concreto que lo respalda, y cierra con el alcance real de ese dominio. Tu voz de analista, no cita textual. Sujeto: el candidato",
-      "por_confirmar": "UNA frase, opcional, sobre lo que conviene confirmar de ESTE requisito antes de decidir, y con qué se confirmaría (una prueba técnica corta, una referencia, media hora con el líder del área). Mira hacia adelante y habla del perfil del candidato, jamás de lo que la entrevista hizo o dejó de hacer. Déjala vacía si el requisito quedó demostrado sin reservas: una reserva inventada es tan mala como esconder una real",
+      "por_que_ese_nivel": "2 o 3 frases, máximo 55 palabras: lo único que el cliente lee de este requisito. Qué demostró el candidato y el caso que lo respalda. Tu voz de analista, no cita textual. Sujeto: el candidato",
+      "recomendacion": "UNA frase, máximo 20 palabras, OPCIONAL. Un consejo práctico al cliente sobre cómo aprovechar o complementar este perfil ('Encajaría mejor con un par técnico en redes durante los primeros meses'). NUNCA una tarea de verificación pendiente —'conviene confirmar', 'validar con una prueba'— porque eso le pregunta al cliente por qué no lo confirmamos nosotros. Vacío si no hay nada que valga la pena decir; vacío es lo normal",
       "detalles": [{"detalle": "el detalle verificable", "respondio": "lo que contestó, citado", "correcto": true}],
       "senales": ["señal de impostor observada en este tema, con la cita que la sostiene"],
       "nota": "solo si algo de la transcripción es dudoso o está mal transcrito, vacío si no"
@@ -406,7 +424,7 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL NI BLOQUES DE CÓDIGO:
     {
       "rasgo": "el rasgo tal como se lo pasaron",
       "presente": true,
-      "observado": "2 o 3 frases sobre la conducta evidenciada, con el hecho que la sostiene. Vacío si presente es null. Esto SÍ se imprime",
+      "observado": "1 o 2 frases, máximo 35 palabras, con el hecho que sostiene la lectura. Vacío si presente es null. Esto SÍ se imprime",
       "cita": "lo que dijo, textual, que sostiene la lectura. Vacío si no hubo evidencia"
     }
   ],
@@ -418,11 +436,12 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL NI BLOQUES DE CÓDIGO:
     "cargo": "el cargo en ese empleo",
     "periodo": "el periodo tal como lo dijo",
     "verificada": true,
-    "resumen": "UN PÁRRAFO de 2 o 3 frases sobre lo que el candidato narró de ese empleo: qué hizo, con qué alcance y con qué resultado. Solo lo que sostuvo en la conversación. Si no la narró, deja verificada en false y el resumen vacío"
+    "por_que_verificada": "UNA frase, máximo 30 palabras, sobre por qué se da por verificada: decisiones propias, detalles consistentes entre sí y con lo declarado, alcance coherente con el cargo. No cuentes lo que hizo. Vacío si verificada es false"
   },
   "declara": {
-    "pretension": "lo que dijo sobre expectativa salarial, vacío si no se habló",
-    "disponibilidad": "cuándo podría empezar, vacío si no se habló",
+    "pretension": "la cifra y una condición, máximo 8 palabras ('Más de 7,5 millones, negociable'). Vacío si no se habló",
+    "disponibilidad": "cuándo podría empezar, máximo 5 palabras, vacío si no se habló",
+    "procesos": "'Ninguno' si dijo que no tiene otros procesos; si tiene, cuántos y en qué etapa, máximo 6 palabras. Vacío si no se habló",
     "motivacion": "por qué está buscando, en sus palabras, vacío si no se habló",
     "nogo": "lo que dijo que no negocia, una por línea, vacío si no se habló"
   },
