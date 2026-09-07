@@ -51,9 +51,12 @@ def confirmar_niveles(pg, niveles=(5, 4), evidencias=None):
             break
         pg.click(f'[data-lv="{n}"]')
         pg.wait_for_timeout(120)
-        caja = pg.query_selector("[data-notes]")
-        if caja:
-            pg.fill("[data-notes]", ev[i] if i < len(ev) else ev[-1])
+        # Lo que se exige para emitir es el porqué (se imprime); el rastro de auditoría quedó
+        # plegado y opcional. El texto de prueba sirve para los dos.
+        # Como un evaluador de verdad: si la transcripción ya propuso el porqué, se acepta;
+        # solo se escribe cuando viene vacío.
+        if pg.query_selector("[data-porque]") and not pg.input_value("[data-porque]").strip():
+            pg.fill("[data-porque]", ev[i] if i < len(ev) else ev[-1])
         pg.wait_for_timeout(150)
         pg.click("[data-next]")
         pg.wait_for_timeout(350)

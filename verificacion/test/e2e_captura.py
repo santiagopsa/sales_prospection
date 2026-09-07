@@ -99,36 +99,39 @@ with sync_playwright() as pw:
         errs.append("subir la captura al final de la entrevista no la marca como guardada")
     pg.screenshot(path="/tmp/pk/cap_03_subida.png", full_page=True)
 
-    # ---------- C. "Ir y completar" cae en el requisito correcto ----------
+    # ---------- C. Lo que falta de un requisito se resuelve en el cierre ----------
     # Se califica solo el primero: el segundo queda sin nivel a propósito.
     flujo.pegar_transcripcion(pg)
     pg.wait_for_timeout(300)
-    nombres = [pg.inner_text("#stage").split("\n")[0]]
     flujo.confirmar_niveles(pg, (5,))
-    segundo = None
-    for _ in range(6):
-        cab = pg.inner_text("#stage").split("\n")[0]
-        if "Cierre de la sesión" in cab:
-            break
-        if pg.query_selector('[data-lv="5"]') and cab not in nombres:
-            segundo = cab
-        pg.click("[data-next]"); pg.wait_for_timeout(340)
+    pg.evaluate("() => { S.reqs[1].lvl = 0; touch(); S.fase = fases().length - 1; render(); }")
+    pg.wait_for_timeout(400)
     cab = pg.inner_text("#stage")
     if "Cierre de la sesión" not in cab:
         errs.append("no se llegó al cierre de la sesión")
     else:
-        ir = pg.query_selector_all("[data-ir]")
-        if not ir:
-            errs.append("no aparece ningún 'Ir y completar' habiendo un requisito sin nivel")
-        else:
-            pg.screenshot(path="/tmp/pk/cap_04_cierre.png", full_page=True)
-            ir[0].click(); pg.wait_for_timeout(420)
-            destino = pg.inner_text("#stage").split("\n")[0]
-            if not pg.query_selector('[data-lv="5"]'):
-                errs.append(f"'Ir y completar' no cayó en un requisito, cayó en: {destino!r}")
-            elif segundo and destino != segundo:
-                errs.append(f"'Ir y completar' cayó en {destino!r} y el que faltaba era {segundo!r}")
-            pg.screenshot(path="/tmp/pk/cap_05_destino.png", full_page=True)
+        if pg.query_selector("[data-ir]"):
+            errs.append("el cierre todavía manda a otra pantalla con 'Ir y completar'")
+        fijos = pg.query_selector_all("#stage .fixreq")
+        if len(fijos) != 1:
+            errs.append(f"con un solo requisito sin nivel deberían aparecer 1 bloque para completar y aparecen {len(fijos)}")
+        elif fijos[0].get_attribute("data-fix") != "1":
+            errs.append("el bloque para completar no es el del requisito que faltaba")
+        if not pg.is_disabled("#stage #btnActa"):
+            errs.append("dejó emitir con un requisito sin nivel")
+        pg.screenshot(path="/tmp/pk/cap_04_cierre.png", full_page=True)
+        if fijos:
+            pg.click('#stage [data-fixlv="4"][data-i="1"]'); pg.wait_for_timeout(250)
+            if not pg.evaluate("() => S.reqs[1].lvl === 4"):
+                errs.append("el botón de nivel del cierre no calificó el requisito que faltaba")
+            pg.fill('#stage [data-fixpq="1"]', "Explicó la integración con un caso propio y precisó los quiebres.")
+            pg.wait_for_timeout(300)
+            # Lo que se abre es la compuerta de requisitos; las otras (identidad, semáforo)
+            # tienen su propio camino y no son de esta prueba.
+            g = pg.evaluate("() => { const g=[...document.querySelectorAll('#stage .gate')].find(x=>/nivel y su porqué/.test(x.textContent)); return g ? g.className : ''; }")
+            if "ok" not in g:
+                errs.append(f"completado en el cierre, la compuerta de requisitos sigue cerrada: {g!r}")
+            pg.screenshot(path="/tmp/pk/cap_05_resuelto.png", full_page=True)
     pg.close()
 
     # ---------- D. Si falta la captura, se sube desde el cierre ----------

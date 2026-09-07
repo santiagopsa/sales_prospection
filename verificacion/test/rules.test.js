@@ -53,13 +53,24 @@ t('requisito sin calificar bloquea', () => {
   const f = bloqueos({identity:ID_OK, signals:{}, ratings:[{req_text:'x', level:null, evidence:'evidencia larga aquí'}]}).faltas;
   assert.ok(f.some(x => x.includes('sin calificar')));
 });
-t('evidencia corta bloquea', () => {
+// Lo que se exige para emitir es el PORQUÉ del nivel —lo que se imprime—, no el rastro de
+// auditoría. Cualquiera de los dos campos basta; ninguno de los dos, bloquea.
+t('sin porqué ni evidencia bloquea', () => {
   const f = bloqueos({identity:ID_OK, signals:{}, ratings:[{req_text:'x', level:4, evidence:'corto'}]}).faltas;
-  assert.ok(f.some(x => x.includes('evidencia')));
+  assert.ok(f.some(x => x.includes('por qué')));
 });
-t('evidencia en blanco bloquea', () => {
-  const f = bloqueos({identity:ID_OK, signals:{}, ratings:[{req_text:'x', level:4, evidence:'           '}]}).faltas;
-  assert.ok(f.some(x => x.includes('evidencia')));
+t('todo en blanco bloquea', () => {
+  const f = bloqueos({identity:ID_OK, signals:{}, ratings:[{req_text:'x', level:4, evidence:'           ', analisis:''}]}).faltas;
+  assert.ok(f.some(x => x.includes('por qué')));
+});
+t('el porqué escrito a mano basta, sin evidencia', () => {
+  const f = bloqueos({identity:ID_OK, signals:{}, ratings:[{req_text:'x', level:4, evidence:'',
+    analisis:'Narró un caso propio con alcance y resultado.'}]}).faltas;
+  assert.ok(!f.some(x => x.includes('por qué')));
+});
+t('la evidencia sola sigue bastando (sesiones anteriores)', () => {
+  const f = bloqueos({identity:ID_OK, signals:{}, ratings:[{req_text:'x', level:4, evidence:'evidencia suficientemente larga'}]}).faltas;
+  assert.ok(!f.some(x => x.includes('por qué')));
 });
 
 console.log('sondeo vs cierre — la identidad no se pide en la primera entrevista');

@@ -92,11 +92,13 @@ with sync_playwright() as pw:
             if "CUMPLE" not in uno:
                 errs.append("se perdió el veredicto del renglón")
 
-            # El segundo no se tocó en la conversación y el evaluador le puso 4 a mano:
-            # sin justificación de la transcripción, la explicación es el ancla.
+            # El segundo no se tocó en la conversación y el evaluador le puso 4 a mano y
+            # escribió el porqué: eso es lo que se muestra, no el ancla de la rúbrica.
             dos = filas[1].inner_text()
-            if "Ancla 4" not in dos:
-                errs.append(f"sin transcripción no cae al ancla de la rúbrica: {dos!r}")
+            if "caso propio" not in dos:
+                errs.append(f"el porqué escrito por el evaluador no aparece en el cierre: {dos!r}")
+            if "Ancla" in dos:
+                errs.append(f"con porqué escrito, sigue mostrando el ancla: {dos!r}")
         pg.screenshot(path="/tmp/pk/pq_01_confirmado.png", full_page=True)
     pg.close()
 

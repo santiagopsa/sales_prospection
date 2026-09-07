@@ -200,7 +200,10 @@ async function api(path, opts={}){
 
 /* ===================== estado ===================== */
 const KEY = 'pkv_sesion_v2';
-const EV_MIN = 10;   // mínimo de caracteres para que la evidencia cuente; el servidor aplica el mismo
+const EV_MIN = 10;   // mínimo de caracteres para que el porqué cuente; el servidor aplica el mismo
+// Lo que se exige para emitir es el porqué del nivel — lo que se imprime. El rastro de
+// auditoría sirve de respaldo para sesiones anteriores, donde era el único texto.
+const porqueDe = r => String(r.exp || r.ev || '').trim();
 let X = null;      // extracción del levantamiento en revisión
 let S = null;      // sesión en curso
 let VAC = null;    // vacante cargada para la sesión
@@ -1637,8 +1640,17 @@ function render(){
           ${[1,2,3,4,5].map(v => `<button class="lv ${r.lvl===v?'sel':''}" data-lv="${v}" data-v="${v}" type="button"><div class="n">${v}</div><div class="t">${LVLTXT[v]}</div></button>`).join('')}
         </div>
         <div class="anchor" id="anchorBox">${r.lvl?ANCHORS[r.lvl]:'Pasa el cursor sobre un nivel para ver su ancla, o marca el que corresponda.'}</div>
-        <textarea class="notes" data-notes placeholder="La escena que contó, la fricción que narró, los detalles que cuadraron o no. Normalmente queda como rastro interno; si la sesión se califica sin transcripción, esto es lo que lee el cliente.">${esc(r.ev||'')}</textarea>
+
+        <!-- El porqué es lo que se imprime, así que es el campo principal y el que se exige.
+             La transcripción lo propone; si no lo propuso —o no gustó— el evaluador lo escribe
+             aquí. El rastro de auditoría queda debajo, plegado y opcional. -->
+        <div class="f" style="margin-top:12px"><label>Por qué ${r.lvl ? (r.lvl>=4?'cumple':(r.lvl===3?'cumple parcialmente':'no cumple')) : 'cumple o no'} — este párrafo se imprime en el informe</label>
+          <textarea class="notes" data-porque rows="4" placeholder="Dos o tres frases, con el caso que lo sostiene. El sujeto es el candidato: qué demostró y con qué. Nunca lo que la entrevista dejó de hacer.">${esc(r.exp||'')}</textarea></div>
         <div class="evnote" id="evNote"></div>
+        <details class="guionbox" style="margin-top:10px">
+          <summary>Rastro interno de auditoría (opcional, no se imprime)</summary>
+          <textarea class="notes" data-notes rows="3" style="margin-top:8px" placeholder="La cita o la escena que sostiene el nivel. Queda archivado para quien revise la sesión.">${esc(r.ev||'')}</textarea>
+        </details>
         <div class="nav">
           <button data-prev type="button">Atrás</button>
           <button class="pri" data-next type="button">${f.i===S.reqs.length-1?'Ir al cierre':'Siguiente requisito'}</button>
@@ -1652,13 +1664,14 @@ function render(){
       b.addEventListener('mouseleave', reset);
     });
     const evNote = () => {
-      const n = (r.ev||'').trim().length;
+      const n = porqueDe(r).length;
       const el = $('#evNote');
       if(!el) return;
       el.className = 'evnote' + (n > EV_MIN ? ' ok' : (n ? ' warn' : ''));
-      el.textContent = n > EV_MIN ? 'Evidencia registrada'
-        : (n ? 'Muy corta — sin esto no se puede emitir el acta' : 'Sin evidencia no se puede emitir el acta');
+      el.textContent = n > EV_MIN ? 'Listo para el informe'
+        : (n ? 'Muy corto — sin el porqué no se puede emitir' : 'Sin el porqué no se puede emitir el informe');
     };
+    st.querySelector('[data-porque]').addEventListener('input', e => { r.exp = e.target.value; evNote(); touch(); });
     st.querySelector('[data-notes]').addEventListener('input', e => { r.ev = e.target.value; evNote(); touch(); });
     evNote();
   }
@@ -1933,7 +1946,7 @@ function render(){
     const nSig = Object.values(S.sig).filter(Boolean).length;
     const idOk = idChecksDe(S.kind).every(c => S.idc[c.id]);
     const allLvl = S.reqs.every(r => r.lvl>0);
-    const evOk = S.reqs.every(r => (r.ev||'').trim().length > EV_MIN);
+    const evOk = S.reqs.every(r => porqueDe(r).length > EV_MIN);
     const idn = S.ident || {};
     const idFalla = S.kind==='cierre' && (idn.face_verdict==='no_coincide' || idn.didit_status==='Declined');
     const idEspera = S.kind==='cierre' && ['pendiente','en_curso','en_revision','sin_cotejo'].includes(idn.estado||'pendiente') && idn.estado!=='rechazada';
@@ -1956,7 +1969,7 @@ function render(){
     // Qué falta exactamente, para poder decirlo en vez de solo marcar el renglón en rojo.
     const faltaId = idChecksDe(S.kind).filter(c => !S.idc[c.id]);
     const sinLvl = S.reqs.map((r,i) => ({r,i})).filter(x => !x.r.lvl);
-    const sinEv  = S.reqs.map((r,i) => ({r,i})).filter(x => (x.r.ev||'').trim().length <= EV_MIN);
+    const sinEv  = S.reqs.map((r,i) => ({r,i})).filter(x => porqueDe(x.r).length <= EV_MIN);
     // El índice de cada fase se BUSCA en la lista viva. Antes estaba escrito a mano
     // ("fase 0 = identidad, fase i+1 = requisito i"), que era cierto cuando había una
     // sola lista de fases. Con la lista partida en dos momentos —entrevista y
@@ -1977,6 +1990,23 @@ function render(){
         ${marcables.map(c => `<button class="chk" data-idc="${c.id}" type="button">
           <span class="box">✓</span><span class="tx">${esc(c.t)}<small>${esc(c.d)}</small></span></button>`).join('')}
         ${faltaShot ? cajaCaptura('cierre') : ''}
+      </div>`;
+    };
+
+    // Lo que falta de un requisito se resuelve AQUÍ. Mandar al reclutador a otra pantalla
+    // con un "Ir y completar" para escribir dos frases es hacerle perder el hilo del cierre;
+    // el nivel y el porqué caben en un renglón y medio debajo de la compuerta.
+    const panelFaltaReq = () => {
+      const faltan = S.reqs.map((r,i) => ({r,i})).filter(x => !x.r.lvl || porqueDe(x.r).length <= EV_MIN);
+      if(!faltan.length) return '';
+      return `<div class="gatefix">
+        ${faltan.map(({r,i}) => `<div class="fixreq" data-fix="${i}">
+          <div class="fixn">${esc(r.n)}</div>
+          <div class="lvls chica">
+            ${[1,2,3,4,5].map(v => `<button class="lv ${r.lvl===v?'sel':''}" data-fixlv="${v}" data-v="${v}" data-i="${i}" type="button"><div class="n">${v}</div><div class="t">${LVLTXT[v]}</div></button>`).join('')}
+          </div>
+          <textarea class="notes" data-fixpq="${i}" rows="3" placeholder="Por qué ${r.lvl ? (r.lvl>=4?'cumple':(r.lvl===3?'cumple parcialmente':'no cumple')) : 'cumple o no'}: dos o tres frases con el caso que lo sostiene. Se imprime en el informe.">${esc(r.exp||'')}</textarea>
+        </div>`).join('')}
       </div>`;
     };
 
@@ -2042,12 +2072,10 @@ function render(){
                faltaId.length ? `Falta${faltaId.length>1?'n':''}: ${faltaId.map(c=>esc(c.t.toLowerCase())).join(' · ')}` : '',
                null)}
         ${panelFaltaId()}
-        ${gate(allLvl, 'Todos los requisitos calificados',
-               sinLvl.length ? `Sin nivel: ${sinLvl.map(x=>esc(x.r.n)).join(' · ')}` : '',
-               sinLvl.length ? irAReq(sinLvl[0].i) : null)}
-        ${gate(evOk, 'Evidencia textual registrada en cada requisito',
-               sinEv.length ? `Muy corta o vacía en: ${sinEv.map(x=>esc(x.r.n)).join(' · ')}` : '',
-               sinEv.length ? irAReq(sinEv[0].i) : null)}
+        ${gate(allLvl && evOk, 'Cada requisito con su nivel y su porqué',
+               (sinLvl.length || sinEv.length) ? 'Se completa aquí abajo, sin salir de esta pantalla.' : '',
+               null)}
+        ${panelFaltaReq()}
         ${S.kind==='cierre' ? gate(!idEspera, 'Verificación de identidad resuelta',
                idEspera ? (idn.texto || 'Enviada, sin completar') : '', null) : ''}
         ${gate(sem!=='r', 'Semáforo permite emisión',
@@ -2060,9 +2088,33 @@ function render(){
         </div>
         <p class="hint">${puede
           ? 'El JSON va a la carpeta de la sesión en Drive, junto con la grabación y la bitácora.'
-          : '<b>El acta no se puede generar todavía.</b> Arriba está señalado en rojo lo que falta; toca la línea para ir directo a esa pantalla.'}</p>
+          : '<b>El informe no se puede generar todavía.</b> Arriba está señalado en rojo lo que falta, y se completa ahí mismo.'}</p>
       </div>`;
     st.querySelectorAll('[data-ir]').forEach(b => b.addEventListener('click', e => goFase(+e.currentTarget.dataset.ir)));
+    st.querySelectorAll('[data-fixlv]').forEach(b => b.addEventListener('click', e => {
+      const i = +e.currentTarget.dataset.i;
+      S.reqs[i].lvl = +e.currentTarget.dataset.fixlv; touch(); render();
+    }));
+    // Mientras se escribe NO se repinta la pantalla: repintar al salir del campo hacía que
+    // al pasar al siguiente porqué el documento se reconstruyera debajo del cursor y el
+    // texto cayera en un elemento ya desmontado. Se actualiza solo lo que cambia: el estado
+    // de la compuerta y el botón de emitir. Los campos se quedan donde están.
+    const refrescarCompuerta = () => {
+      const ok = S.reqs.every(r => r.lvl > 0 && porqueDe(r).length > EV_MIN);
+      const g = [...st.querySelectorAll('.gate')].find(x => /nivel y su porqué/.test(x.textContent));
+      if(g){
+        g.classList.toggle('ok', ok); g.classList.toggle('no', !ok);
+        const ic = g.querySelector('.ic'); if(ic) ic.textContent = ok ? '✓' : '!';
+        const sm = g.querySelector('.gt small'); if(sm) sm.textContent = ok ? 'Listo.' : 'Se completa aquí abajo, sin salir de esta pantalla.';
+      }
+      const b = st.querySelector('#btnActa');
+      if(b) b.disabled = !(ok && sem!=='r' && idOk && !idEspera);
+      const h = st.querySelector('#btnActa') && st.querySelector('#btnActa').closest('.card').querySelector('p.hint:last-child');
+      if(h && ok && sem!=='r' && idOk && !idEspera) h.innerHTML = 'El JSON va a la carpeta de la sesión en Drive, junto con la grabación y la bitácora.';
+    };
+    st.querySelectorAll('[data-fixpq]').forEach(el => el.addEventListener('input', e => {
+      S.reqs[+el.dataset.fixpq].exp = e.target.value; touch(); refrescarCompuerta();
+    }));
     st.querySelectorAll('[data-idc]').forEach(b => b.addEventListener('click', e => {
       const k = e.currentTarget.dataset.idc;
       if(k === 'shot') return;             // este se marca solo al subir la imagen

@@ -134,6 +134,9 @@ with sync_playwright() as pw:
     ev = pg.input_value("[data-notes]")
     if "Alpina" not in ev:
         errs.append(f"la evidencia no quedó precargada con la cita: {ev[:70]!r}")
+    pq = pg.input_value("[data-porque]")
+    if "rollout" not in pq.lower():
+        errs.append(f"el porqué no quedó precargado con la explicación del análisis: {pq[:70]!r}")
     pg.screenshot(path="/tmp/pk/tr_05_calificar.png", full_page=True)
 
     # ---------- E. El requisito que no se tocó se dice de frente ----------

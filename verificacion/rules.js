@@ -74,7 +74,13 @@ function bloqueos({ identity = {}, signals = {}, ratings = [], kind = 'sondeo',
   }
   if (!ratings.length) f.push('No hay requisitos calificados.');
   if (ratings.some(r => !r.level)) f.push('Hay requisitos sin calificar.');
-  if (ratings.some(r => clean(r.evidence).length <= 10)) f.push('Falta evidencia textual en algún requisito.');
+  // Lo que se exige es lo que se imprime: el porqué del nivel. El rastro de auditoría
+  // (`evidence`) dejó de ser el cuerpo del informe y no puede seguir siendo la condición
+  // para emitirlo; cuando el análisis no lo produjo, el evaluador escribe el porqué y eso
+  // basta. Se acepta cualquiera de los dos para no bloquear sesiones ya calificadas.
+  if (ratings.some(r => clean(r.analisis).length <= 10 && clean(r.evidence).length <= 10)) {
+    f.push('Falta explicar por qué cumple o no en algún requisito.');
+  }
   if (sem.color === 'rojo') {
     f.push(sem.idFalla
       ? 'El rostro verificado no corresponde al de la entrevista: no se emite, se escala.'
