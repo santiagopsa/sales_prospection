@@ -451,4 +451,36 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL NI BLOQUES DE CÓDIGO:
 }`;
 }
 
-module.exports = { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt };
+/* Traducción del informe al inglés. Entra un objeto plano {clave: texto en español} con
+   todo lo que el informe imprime y que no es un rótulo fijo (los rótulos los tiene la
+   pantalla en los dos idiomas). Sale el mismo objeto, mismas claves, en inglés.
+   Lo que NO se traduce: nombres de personas y empresas, productos y tecnologías (SAP PP,
+   Excel), cifras, monedas, fechas en formato numérico, códigos. Lo que sí: cargos, párrafos,
+   rasgos, periodos escritos con palabras ("marzo a noviembre de 2023"). */
+function buildTranslatePrompt(textos) {
+  return `Traduce al inglés profesional (Estados Unidos) los textos de un informe de verificación de
+candidato que una firma de reclutamiento entrega a su cliente. El lector es el gerente que
+decide la contratación.
+
+REGLAS
+- Devuelve SOLO un objeto JSON con EXACTAMENTE las mismas claves que recibes; cada valor es la
+  traducción del valor recibido. Ninguna clave nueva, ninguna clave menos.
+- Traduce el sentido, no palabra por palabra. Registro profesional, directo, sin adornos.
+- Conserva la longitud: una frase no se vuelve un párrafo ni un párrafo una frase.
+- NO traduzcas ni cambies: nombres de personas, de empresas y de clientes; nombres de
+  productos, tecnologías, módulos y herramientas (SAP PP, MM, QM, Excel, Salesforce…);
+  cifras, monedas, porcentajes, códigos y fechas numéricas. Los niveles de inglés (A1…C1)
+  se dejan igual.
+- Sí traduce: títulos de cargo, periodos escritos con palabras, ciudades cuando tienen
+  nombre en inglés de uso común, y todo párrafo o frase.
+- El sujeto de cada frase sigue siendo el candidato o la evidencia, nunca la entrevista ni
+  el evaluador: si el original dice "Demostró…", en inglés dice "Demonstrated…" o
+  "She/He demonstrated…" según convenga, nunca "The interview showed…".
+- Si un texto ya está en inglés, devuélvelo igual.
+- Sin comillas tipográficas, sin notas del traductor, sin texto fuera del JSON.
+
+TEXTOS (JSON):
+${JSON.stringify(textos, null, 2)}`;
+}
+
+module.exports = { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt };

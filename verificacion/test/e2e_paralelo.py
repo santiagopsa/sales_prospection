@@ -113,7 +113,9 @@ with sync_playwright() as pw:
     if not listo:
         errs.append("la primera sesión nunca apareció como LISTA PARA CALIFICAR en el tablero")
 
-    pg.click(f'[data-ses="{sid1}"]'); pg.wait_for_selector("#vActa.on", timeout=9000); pg.wait_for_timeout(300)
+    pg.click(f'[data-ses="{sid1}"]'); pg.wait_for_timeout(300)
+    if pg.is_visible("#pregunta"): pg.click("#pgSi")     # hay otra sesión en curso: se pregunta en la página
+    pg.wait_for_selector("#vActa.on", timeout=9000); pg.wait_for_timeout(300)
     b = pg.inner_text("#actaStage")
     if "LISTA PARA CALIFICAR" not in b:
         errs.append("al abrir la primera sesión no dice que está lista para calificar")
@@ -124,7 +126,9 @@ with sync_playwright() as pw:
     pg.evaluate("() => { S.reqs[0].lvl = 2; touch(); }")
     pg.evaluate("async () => { await flush(); loadTablero(); }")
     pg.wait_for_selector("#vTablero.on", timeout=9000); pg.wait_for_timeout(500)
-    pg.click(f'[data-ses="{sid1}"]'); pg.wait_for_selector("#vActa.on", timeout=9000); pg.wait_for_timeout(300)
+    pg.click(f'[data-ses="{sid1}"]'); pg.wait_for_timeout(300)
+    if pg.is_visible("#pregunta"): pg.click("#pgSi")
+    pg.wait_for_selector("#vActa.on", timeout=9000); pg.wait_for_timeout(300)
     pg.click("#btnRetomar"); pg.wait_for_selector("#vLive.on", timeout=9000); pg.wait_for_timeout(300)
     if pg.evaluate("() => S.reqs[0].lvl") != 2:
         errs.append("retomar por segunda vez pisó el nivel que el evaluador ya había corregido")

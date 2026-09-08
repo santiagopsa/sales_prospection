@@ -10,7 +10,7 @@
 // No toca deals ni wishlist: sus tablas viven en el schema "verificacion".
 const express = require('express');
 const path = require('path');
-const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt } = require('./prompts');
+const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt } = require('./prompts');
 const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode } = require('./rules');
 const didit = require('./didit');
 const { T, initSchema } = require('./schema');
@@ -1295,6 +1295,75 @@ ${!code ? `
     } catch (e) {
       console.error('[verificacion/sessions.issue]', e.message);
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Idioma del informe. 'es' solo guarda la preferencia. 'en' traduce una vez —lo que la
+  // pantalla manda en `textos`, que es lo que se imprime— y lo deja guardado con el acta:
+  // la segunda vez que alguien lo abre en inglés no se vuelve a traducir, y el documento
+  // no cambia de palabras entre una lectura y otra. Se invalida si cambian los textos
+  // (huella), cosa que en un acta emitida no pasa.
+  r.post('/api/sessions/:id/traduccion', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const idioma = req.body && req.body.idioma === 'en' ? 'en' : 'es';
+      const textos = (req.body && req.body.textos && typeof req.body.textos === 'object') ? req.body.textos : {};
+      const s0 = await leerSesion(pool, id);
+      if (!s0) return res.status(404).json({ error: 'not found' });
+
+      const leerTrad = async () => {
+        if (pool) {
+          const q = await pool.query(`SELECT traducciones FROM ${T.sessions} WHERE id=$1`, [id]);
+          return (q.rows[0] && q.rows[0].traducciones) || {};
+        }
+        const s = mem.sessions.find(x => x.id === id);
+        return (s && s.traducciones) || {};
+      };
+      const guardar = async (trads) => {
+        if (pool) {
+          await pool.query(`UPDATE ${T.sessions} SET idioma=$2, traducciones=$3::jsonb, updated_at=NOW() WHERE id=$1`,
+                           [id, idioma, JSON.stringify(trads)]);
+        } else {
+          const s = mem.sessions.find(x => x.id === id);
+          if (s) { s.idioma = idioma; s.traducciones = trads; }
+        }
+      };
+
+      const trads = await leerTrad();
+      if (idioma === 'es') { await guardar(trads); return res.json({ ok: true, idioma }); }
+
+      const claves = Object.keys(textos).filter(k => clean(textos[k]));
+      // Sin textos es solo "déjalo en inglés": si ya hay traducción, se devuelve esa.
+      if (!claves.length && trads.en && trads.en.textos) {
+        await guardar(trads);
+        return res.json({ ok: true, idioma, textos: trads.en.textos, reutilizada: true });
+      }
+      const huella = require('crypto').createHash('sha1')
+        .update(JSON.stringify(claves.sort().map(k => [k, textos[k]]))).digest('hex').slice(0, 16);
+      if (trads.en && trads.en.huella === huella) {
+        await guardar(trads);
+        return res.json({ ok: true, idioma, textos: trads.en.textos, reutilizada: true });
+      }
+      if (!claves.length) {
+        trads.en = { textos: {}, huella, at: new Date().toISOString() };
+        await guardar(trads);
+        return res.json({ ok: true, idioma, textos: {} });
+      }
+      if (!anthropic) return res.status(500).json({ error: 'ANTHROPIC_API_KEY no configurada' });
+
+      const entrada = {}; for (const k of claves) entrada[k] = String(textos[k]);
+      const out = await pedirJson(buildTranslatePrompt(entrada), { etiqueta: 'traduccion', maxTokens: 6000 });
+      if (out && out.error) return res.status(502).json({ error: 'No se pudo traducir el informe. ' + out.error, motivo: out.motivo });
+      // Lo que el modelo no devolvió, o devolvió vacío, se queda en español antes que en
+      // blanco: un hueco en el informe es peor que una frase sin traducir.
+      const salida = {};
+      for (const k of claves) salida[k] = clean(out && out[k]) ? String(out[k]) : entrada[k];
+      trads.en = { textos: salida, huella, at: new Date().toISOString() };
+      await guardar(trads);
+      res.json({ ok: true, idioma, textos: salida });
+    } catch (e) {
+      console.error('[verificacion/sessions.traduccion]', e.message);
+      res.status(e.status || 500).json({ error: 'No se pudo traducir el informe. ' + e.message });
     }
   });
 

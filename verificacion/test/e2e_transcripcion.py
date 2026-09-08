@@ -99,7 +99,10 @@ with sync_playwright() as pw:
     pg.screenshot(path="/tmp/pk/tr_03_tablero.png", full_page=True)
 
     # ---------- C. Volver y retomar justo donde toca ----------
-    pg.click('[data-ses]:has-text("Dayana")'); pg.wait_for_timeout(900)
+    pg.click('[data-ses]:has-text("Dayana")'); pg.wait_for_timeout(300)
+    # Con una sesión en curso, abrir otra pregunta en la página (no con confirm()).
+    if pg.is_visible("#pregunta"): pg.click("#pgSi")
+    pg.wait_for_selector("#vActa.on", timeout=9000); pg.wait_for_timeout(600)
     borrador = pg.inner_text("#actaStage")
     if "ESPERANDO TRANSCRIPCIÓN" not in borrador.upper():
         errs.append("al reabrirla no dice que está esperando la transcripción")

@@ -174,6 +174,11 @@ async function initSchema(pool) {
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS transcript_status TEXT`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS transcript_error JSONB`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS transcript_started_at TIMESTAMPTZ`,
+    // El informe se entrega en español o en inglés, a elección del reclutador. El snapshot
+    // sigue siendo uno solo (en español, congelado al emitir); la traducción es una capa
+    // encima, se pide una vez y queda guardada con el acta para que no cambie entre lecturas.
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS idioma TEXT DEFAULT 'es'`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS traducciones JSONB`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`,
 

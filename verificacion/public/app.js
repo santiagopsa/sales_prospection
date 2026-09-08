@@ -53,6 +53,130 @@ const NIVEL_CLIENTE = {
   1:'No quedó sostenido con evidencia durante la entrevista.'
 };
 
+/* ===================== idioma del informe =====================
+   El informe se entrega en español o en inglés, a elección del reclutador. Los rótulos fijos
+   viven aquí en los dos idiomas; el contenido (párrafos, requisitos, cargo, rasgos…) lo
+   traduce el servidor una sola vez y queda guardado con el acta. Lo que no tenga traducción
+   se imprime en español antes que en blanco. */
+const IDIOMAS = { es: 'Español', en: 'English' };
+const ROTULOS = {
+  es: {
+    doc_ficha: 'Ficha de sondeo', doc_acta: 'Informe de verificación', doc_acta_sin_id: 'Informe de verificación de conocimiento', doc_antiguo: 'Informe de verificación',
+    alcance_ficha: 'Uso interno de PeakU. Registra lo observado sobre los requisitos excluyentes. No certifica identidad.',
+    alcance_acta: 'Certifica conocimiento sobre los requisitos definidos por el cliente e identidad verificada.',
+    alcance_acta_sin_id: 'Certifica conocimiento sobre los requisitos definidos por el cliente. No certifica identidad.',
+    marca: 'PeakU Verificado', informe: 'Informe', verificado_el: 'Verificado el', vigente_hasta: 'Vigente hasta', sesion_grabada: 'Sesión supervisada · grabada',
+    aviso_viejo_t: 'Este informe se emitió con una versión anterior del formato.',
+    aviso_viejo: 'Lo que ves está reconstruido con los datos que quedaron guardados, así que puede no coincidir exactamente con la copia que se entregó — esa copia es la referencia. Los informes emitidos de ahora en adelante se congelan al emitirse y se ven siempre igual.',
+    el_cliente: 'el cliente',
+    sello_id_ok: 'Identidad verificada', sello_id_no: 'Identidad no certificada', sello_vivo: 'Sesión supervisada en vivo', sello_sin_senales: 'Sin señales de asistencia',
+    sello_exp_ok: 'Experiencia reciente verificada', sello_exp_no: 'Experiencia reciente no verificada',
+    chip_ubicacion: 'Ubicación', chip_disponibilidad: 'Disponibilidad', chip_pretension: 'Aspiración', chip_ingles: 'Inglés', chip_procesos: 'Otros procesos',
+    posicionamiento: 'Posicionamiento',
+    z_ajuste: 'Ajuste al rol', z_ajuste_h: 'Requisito por requisito', z_ajuste_s: 'Lo que definió el cliente, contrastado en la entrevista',
+    recomendacion: 'Recomendación',
+    escala: 'Escala 1-5 sobre evidencia de la sesión: <b>4-5</b> caso propio con alcance y resultado · <b>3</b> experiencia real con alcance parcial · <b>1-2</b> sin caso propio que lo sostenga.',
+    z_impacto: 'Lo que demostró', z_impacto_h: 'En la entrevista', z_impacto_s: 'Sostenido en la conversación, no tomado de la hoja de vida',
+    z_conducta: 'Conducta', z_conducta_h: 'Cómo se comportó en la sesión', z_conducta_s: 'Evidenciado en la entrevista',
+    ev_si: 'SE EVIDENCIÓ', ev_no: 'NO SE EVIDENCIÓ', ev_sin: 'SIN EVIDENCIA',
+    conducta_nota: 'Conducta evidenciada durante la sesión grabada. No es un perfil psicométrico ni describe a la persona fuera de ese contexto.',
+    z_exp: 'Experiencia', exp_verificada_h: 'Verificada', exp_reciente_h: 'Más reciente', exp_verificada: 'VERIFICADA', exp_no_verificada: 'NO VERIFICADA',
+    exp_nota_no: 'La verificación se concentra en la experiencia más reciente; esta quedó declarada y no verificada en esta sesión.',
+    z_ing: 'Inglés', ing_oido: 'Lo que se oyó', ing_no_evaluado: 'No evaluado',
+    ing_no_texto: 'No se evaluó el inglés en esta sesión; el informe no afirma nada sobre el idioma.',
+    ing_pide: 'El cargo pide:', ing_calificado: 'Calificado en vivo por', ing_min: 'min.', ing_nota: 'valoración conversacional, no certificación.', el_evaluador: 'el evaluador',
+    z_integridad: 'Integridad', z_integridad_h: 'Cómo se sostuvo',
+    senales_t: 'Señales de asistencia por IA o fuente externa', senal_registrada: 'REGISTRADA', senales_registradas: 'REGISTRADAS', ninguna: 'NINGUNA',
+    bitacora: 'Bitácora de la sesión', bitacora_s: 'Transcripción archivada', disponible: 'DISPONIBLE',
+    senales_pre: 'Señales:', senales_post: 'Observación factual, no un juicio sobre el candidato.',
+    z_cierre: 'Factores de cierre', cierre_h: 'Qué mueve a', cierre_h2: ' y qué cuidar', cierre_s2: 'Sus palabras · nuestra lectura', cierre_s1: 'En sus palabras',
+    motivacion: 'Por qué está buscando', nogo: 'No negociables', nuestra_rec: 'Nuestra recomendación', riesgos: 'Riesgos y mitigación', mitigacion: 'Mitigación:',
+    opinion: 'Opinión del evaluador — lo único de este informe que no es medición.',
+    ver_si: 'Recomendado', ver_reserva: 'Recomendado con una reserva', ver_no: 'No recomendado',
+    responde: 'PeakU responde por este informe.',
+    garantia_acta: 'Si la persona no es quien este informe dice que es, o su desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo.',
+    garantia_sin_id: 'Si el desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo. <b>Este informe no certifica la identidad de la persona</b>: certifica lo observado sobre los requisitos del cargo.',
+    verifique: 'Verifique la autenticidad en',
+    firma: 'Firma de integridad:', evaluo: 'Evaluó:', revision: 'Revisión de calidad: pendiente de cuatro ojos', escala_anclada: 'Escala anclada 1-5', grabada_archivada: 'Sesión grabada y archivada', id_externa: 'Identidad verificada por proveedor externo',
+    qr_alt: 'Verificar la autenticidad de este informe', escanee: 'Escanee para verificar', qr_grande: 'Escanea este código para verificar la autenticidad de este informe.',
+    id_t: 'Identidad',
+    id_verificada: ['VERIFICADA', 'Documento validado por proveedor externo con prueba de vida, y rostro cotejado contra la sesión', 'coincidencia'],
+    id_dudosa: ['PARCIAL', 'Documento validado, pero el cotejo del rostro quedó en zona dudosa', 'y fue revisado manualmente.'],
+    id_rechazada: ['NO REALIZADA', 'El candidato optó por no verificar su identidad. Este informe no la certifica.'],
+    id_abandonada: ['SIN COMPLETAR', 'La verificación se envió y no se completó. Este informe no certifica identidad.'],
+    id_fallida: ['NO SUPERADA', 'La verificación de identidad no fue superada.'],
+    id_otra: ['NO REALIZADA', 'Este informe no certifica identidad.'],
+    lvl: {5:'CUMPLE',4:'CUMPLE',3:'PARCIAL',2:'NO CUMPLE',1:'NO CUMPLE'},
+    ancla_ing: null,   // se usa ANCLA_ING
+    volver_lista: 'Volver a la lista', volver_cierre: 'Volver al cierre', imprimir: 'Imprimir o guardar en PDF', copiar_json: 'Copiar JSON del archivo',
+    ver_en: 'Ver en English', ver_es: 'Ver en español',
+  },
+  en: {
+    doc_ficha: 'Screening sheet', doc_acta: 'Verification report', doc_acta_sin_id: 'Skills verification report', doc_antiguo: 'Verification report',
+    alcance_ficha: 'PeakU internal use. Records what was observed on the must-have requirements. Does not certify identity.',
+    alcance_acta: 'Certifies knowledge of the requirements defined by the client and verified identity.',
+    alcance_acta_sin_id: 'Certifies knowledge of the requirements defined by the client. Does not certify identity.',
+    marca: 'PeakU Verified', informe: 'Report', verificado_el: 'Verified on', vigente_hasta: 'Valid until', sesion_grabada: 'Supervised · recorded session',
+    aviso_viejo_t: 'This report was issued with an earlier version of the format.',
+    aviso_viejo: 'What you see is rebuilt from the data that was saved, so it may not match the copy that was delivered — that copy is the reference. Reports issued from now on are frozen at issue and always look the same.',
+    el_cliente: 'the client',
+    sello_id_ok: 'Identity verified', sello_id_no: 'Identity not certified', sello_vivo: 'Live supervised session', sello_sin_senales: 'No signs of assistance',
+    sello_exp_ok: 'Recent experience verified', sello_exp_no: 'Recent experience not verified',
+    chip_ubicacion: 'Location', chip_disponibilidad: 'Availability', chip_pretension: 'Salary expectation', chip_ingles: 'English', chip_procesos: 'Other processes',
+    posicionamiento: 'Positioning',
+    z_ajuste: 'Fit for the role', z_ajuste_h: 'Requirement by requirement', z_ajuste_s: 'What the client defined, tested in the interview',
+    recomendacion: 'Recommendation',
+    escala: '1-5 scale on evidence from the session: <b>4-5</b> first-hand case with scope and outcome · <b>3</b> real experience with partial scope · <b>1-2</b> no first-hand case to support it.',
+    z_impacto: 'What was demonstrated', z_impacto_h: 'In the interview', z_impacto_s: 'Sustained in conversation, not taken from the résumé',
+    z_conducta: 'Behavior', z_conducta_h: 'How the candidate behaved in the session', z_conducta_s: 'Evidenced in the interview',
+    ev_si: 'EVIDENCED', ev_no: 'NOT EVIDENCED', ev_sin: 'NO EVIDENCE',
+    conducta_nota: 'Behavior evidenced during the recorded session. Not a psychometric profile; it does not describe the person outside that context.',
+    z_exp: 'Experience', exp_verificada_h: 'Verified', exp_reciente_h: 'Most recent', exp_verificada: 'VERIFIED', exp_no_verificada: 'NOT VERIFIED',
+    exp_nota_no: 'Verification focuses on the most recent experience; this one was declared and not verified in this session.',
+    z_ing: 'English', ing_oido: 'What we heard', ing_no_evaluado: 'Not assessed',
+    ing_no_texto: 'English was not assessed in this session; the report makes no claim about the language.',
+    ing_pide: 'The role requires:', ing_calificado: 'Rated live by', ing_min: 'min.', ing_nota: 'conversational assessment, not a certification.', el_evaluador: 'the evaluator',
+    z_integridad: 'Integrity', z_integridad_h: 'How it held up',
+    senales_t: 'Signs of AI or external assistance', senal_registrada: 'RECORDED', senales_registradas: 'RECORDED', ninguna: 'NONE',
+    bitacora: 'Session log', bitacora_s: 'Archived transcript', disponible: 'AVAILABLE',
+    senales_pre: 'Signs:', senales_post: 'Factual observation, not a judgment about the candidate.',
+    z_cierre: 'Closing factors', cierre_h: 'What drives', cierre_h2: ' and what to watch', cierre_s2: 'Their words · our reading', cierre_s1: 'In their words',
+    motivacion: 'Why they are looking', nogo: 'Non-negotiables', nuestra_rec: 'Our recommendation', riesgos: 'Risks and mitigation', mitigacion: 'Mitigation:',
+    opinion: "Evaluator's opinion — the only part of this report that is not a measurement.",
+    ver_si: 'Recommended', ver_reserva: 'Recommended with one reservation', ver_no: 'Not recommended',
+    responde: 'PeakU stands behind this report.',
+    garantia_acta: 'If the person is not who this report says they are, or their performance does not match what is certified here within the first 90 days, PeakU redoes the search at no cost.',
+    garantia_sin_id: 'If performance does not match what is certified here within the first 90 days, PeakU redoes the search at no cost. <b>This report does not certify the person\'s identity</b>: it certifies what was observed on the role\'s requirements.',
+    verifique: 'Verify authenticity at',
+    firma: 'Integrity signature:', evaluo: 'Evaluated by:', revision: 'Quality review: pending four-eyes check', escala_anclada: 'Anchored 1-5 scale', grabada_archivada: 'Session recorded and archived', id_externa: 'Identity verified by external provider',
+    qr_alt: 'Verify the authenticity of this report', escanee: 'Scan to verify', qr_grande: 'Scan this code to verify the authenticity of this report.',
+    id_t: 'Identity',
+    id_verificada: ['VERIFIED', 'Document validated by an external provider with liveness check, and face matched against the session', 'match'],
+    id_dudosa: ['PARTIAL', 'Document validated, but the face match fell in a doubtful range', 'and was reviewed manually.'],
+    id_rechazada: ['NOT PERFORMED', 'The candidate chose not to verify their identity. This report does not certify it.'],
+    id_abandonada: ['NOT COMPLETED', 'Verification was sent and not completed. This report does not certify identity.'],
+    id_fallida: ['NOT PASSED', 'Identity verification was not passed.'],
+    id_otra: ['NOT PERFORMED', 'This report does not certify identity.'],
+    lvl: {5:'MEETS',4:'MEETS',3:'PARTIAL',2:'DOES NOT MEET',1:'DOES NOT MEET'},
+    ancla_ing: {
+      C1:'Holds a nuanced technical discussion: disagrees, qualifies and self-corrects without losing the thread. Does not search for words.',
+      B2:'Holds a work conversation without noticeable friction. Occasional pauses and errors that do not get in the way.',
+      B1:'Gets the point across on familiar topics, in short sentences. Loses fluency as soon as the conversation leaves prepared ground.',
+      A2:'Answers the basics and falls back to Spanish. Cannot sustain a work conversation.',
+      A1:'Cannot sustain the exchange.',
+    },
+    volver_lista: 'Back to the list', volver_cierre: 'Back to closing', imprimir: 'Print or save as PDF', copiar_json: 'Copy archive JSON',
+    ver_en: 'Ver en English', ver_es: 'Ver en español',
+  },
+};
+// Nombres de las señales en inglés; el catálogo de arriba (SIGNALS) es el de la pantalla.
+const SENALES_EN = {lat:'Prompting latency', lee:'Reading gaze', voz:'Reading voice', nav:'Cannot navigate own file',
+                    pan:'Resists screen sharing', inc:'Inconsistency', aud:'Telltale audio', mod:'Impossible edit'};
+const idiomaInforme = () => (S && S.idioma === 'en') ? 'en' : 'es';
+const R = k => { const d = ROTULOS[idiomaInforme()]; return (d && d[k] != null) ? d[k] : ROTULOS.es[k]; };
+// Un texto de contenido: en inglés sale la traducción guardada; si no la hay, el original.
+const tx = (k, es) => (idiomaInforme() === 'en' && S && S.trad && S.trad[k]) ? S.trad[k] : es;
+
 const ANCLA_CORTA = {
   5:'Ancla 5: escena específica + rol individual + fricción real narrada + 3/3 detalles verificables + criterio propio en el cruce.',
   4:'Ancla 4: escena y rol claros + fricción real + 2/3 detalles verificables; cruce correcto aunque superficial.',
@@ -171,13 +295,18 @@ function overlay(on, title, sub){
   if(sub) $('#ovSub').textContent = sub;
   $('#overlay').classList.toggle('on', !!on);
 }
-function fechaLarga(d){
+function fechaLarga(d, idioma){
+  if(idioma === 'en'){
+    const M=['January','February','March','April','May','June','July','August','September','October','November','December'];
+    return M[d.getMonth()]+' '+d.getDate()+', '+d.getFullYear();
+  }
   const M=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
   return d.getDate()+' de '+M[d.getMonth()]+' de '+d.getFullYear();
 }
-function masSeis(d){
+function masSeis(d, idioma){
   const x=new Date(d); x.setMonth(x.getMonth()+6);
-  const M=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const M = idioma === 'en' ? ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                            : ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
   return String(x.getDate()).padStart(2,'0')+'-'+M[x.getMonth()]+'-'+x.getFullYear();
 }
 function fechaCorta(s){
@@ -311,7 +440,8 @@ let TABLERO_TIMER = null;
    así que lo que se ve aquí es exactamente lo que se emitió. */
 async function verSesion(id){
   if(S && S.sid && !S.fin && !S.soloLectura){
-    if(!confirm('Tienes una sesión en curso sin terminar.\n\nSi abres otra verificación la pierdes de vista, aunque queda guardada en el servidor. ¿Continuar?')) return;
+    if(!await preguntar('Tienes una sesión en curso sin terminar', 'Si abres otra verificación la pierdes de vista, aunque queda guardada en el servidor.', 'Abrir la otra', 'Quedarme')) return;
+    await flush();
   }
   overlay(true, 'Abriendo la verificación…', '');
   try{
@@ -359,6 +489,10 @@ async function verSesion(id){
                   : {...(s.identidad || {}), didit_status: s.didit_status,
                      face_verdict: s.face_verdict, face_score: s.face_score},
       doc: (snap && snap.documento) || s.documento || null,
+      // El idioma en que se dejó el informe y su traducción, si ya se pidió. Solo cuentan
+      // en un informe emitido: antes de emitir el texto todavía cambia.
+      idioma: (s.status === 'issued' && s.idioma === 'en') ? 'en' : 'es',
+      trad: (s.status === 'issued' && s.traducciones && s.traducciones.en && s.traducciones.en.textos) || null,
       formato: s.formato || null, sinSnapshot: !!(s.status === 'issued' && !snap),
       hash: s.integrity_hash || null, diditUrl: s.didit_url || null,
       fecha: (snap && snap.emitido) ? new Date(snap.emitido).getTime()
@@ -1093,10 +1227,10 @@ function montarRequisitos(st){
     [R[i], R[j]] = [R[j], R[i]];
     pintarEdicion();
   }));
-  st.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
+  st.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
     const i = +b.dataset.del;
     if(R.length === 1){ toast('La vacante necesita al menos un requisito.'); return; }
-    if(!confirm(`¿Quitar "${R[i].text || 'este requisito'}"?\n\nLas verificaciones ya emitidas conservan su texto: no se tocan.`)) return;
+    if(!await preguntar(`¿Quitar "${R[i].text || 'este requisito'}"?`, 'Las verificaciones ya emitidas conservan su texto: no se tocan.', 'Quitar', 'Dejarlo')) return;
     R.splice(i, 1); pintarEdicion();
   }));
   st.querySelectorAll('[data-addd]').forEach(b => b.addEventListener('click', () => {
@@ -2122,6 +2256,14 @@ function render(){
       </div>` : ''}
 
       <div class="card">
+        <div class="fttl" style="margin-bottom:6px">Idioma del informe</div>
+        <p class="hint" style="margin-top:0">El cliente lo recibe en el idioma que elijas. Se puede cambiar después, desde el informe.</p>
+        <div class="modes" id="setIdioma" style="margin-top:10px">
+          ${['es','en'].map(k => `<button class="mode ${(S.idiomaElegido||'es')===k?'sel':''}" data-idioma="${k}" type="button"><b>${IDIOMAS[k]}</b><span>${k==='es' ? 'Como se escribió en la sesión.' : 'Se traduce al emitir; los nombres propios no cambian.'}</span></button>`).join('')}
+        </div>
+      </div>
+
+      <div class="card">
         <div class="fttl" style="margin-bottom:11px">Sin carpeta completa no hay acta</div>
         ${gate(idOk, 'Identidad verificada y grabación activa',
                faltaId.length ? `Falta${faltaId.length>1?'n':''}: ${faltaId.map(c=>esc(c.t.toLowerCase())).join(' · ')}` : '',
@@ -2146,6 +2288,10 @@ function render(){
           : '<b>El informe no se puede generar todavía.</b> Arriba está señalado en rojo lo que falta, y se completa ahí mismo.'}</p>
       </div>`;
     st.querySelectorAll('[data-ir]').forEach(b => b.addEventListener('click', e => goFase(+e.currentTarget.dataset.ir)));
+    st.querySelectorAll('[data-idioma]').forEach(b => b.addEventListener('click', e => {
+      S.idiomaElegido = e.currentTarget.dataset.idioma; saveLocal();
+      st.querySelectorAll('[data-idioma]').forEach(m => m.classList.toggle('sel', m === e.currentTarget));
+    }));
     st.querySelectorAll('[data-fixlv]').forEach(b => b.addEventListener('click', e => {
       const i = +e.currentTarget.dataset.i;
       S.reqs[i].lvl = +e.currentTarget.dataset.fixlv; touch(); render();
@@ -2358,7 +2504,7 @@ function montarIdentidad(st){
 
   const b3 = st.querySelector('#btnRechazoId');
   if(b3) b3.addEventListener('click', async () => {
-    if(!confirm('¿El candidato prefirió no verificar su identidad?\n\nEl acta se emite igual, pero dirá que certifica conocimiento y no identidad.')) return;
+    if(!await preguntar('¿El candidato prefirió no verificar su identidad?', 'El acta se emite igual, pero dirá que certifica conocimiento y no identidad.', 'Sí, no quiso', 'Volver')) return;
     try{
       await api(`/api/sessions/${S.sid}/identidad/rechazada`, {method:'POST', body:{}});
       S.ident = {estado:'rechazada', texto:'El candidato no quiso verificar su identidad'};
@@ -2848,13 +2994,14 @@ function prepararImpresion(){
      "Consola de Verificación" en el PDF que recibe el cliente. No se puede numerar las
      páginas desde CSS —Chrome no implementa las cajas de margen de @page, y un elemento
      fijo no reserva espacio y se monta sobre el texto—, así que esto es lo que hay. */
+  const tipo = S && S.sinSnapshot ? 'antiguo' : ((doc && doc.tipo) || 'acta');
+  const titulo = R('doc_' + tipo) || R('doc_acta');
   if(S && S.id){
-    try{ document.title = `${(doc && doc.titulo) || 'Informe de verificación'} ${S.id}` +
-      (S.cand ? ` · ${S.cand}` : '') + ' · PeakU'; }catch(e){}
+    try{ document.title = `${titulo} ${S.id}` + (S.cand ? ` · ${S.cand}` : '') + ' · PeakU'; }catch(e){}
   }
-  $('#phLeft').innerHTML = `<b>${esc((doc && doc.titulo) || 'Informe de verificación')}</b> · PeakU Verificado`;
+  $('#phLeft').innerHTML = `<b>${esc(titulo)}</b> · ${R('marca')}`;
   $('#phRight').textContent = S ? (S.id || '') : '';
-  $('#pfLeft').textContent = S ? [S.cand, S.rol, S.cli].filter(Boolean).join(' · ') : '';
+  $('#pfLeft').textContent = S ? [S.cand, tx('cargo', S.rol), S.cli].filter(Boolean).join(' · ') : '';
   $('#pfRight').textContent = S && S.id ? `${S.id} · ${urlVerificacion(S.id)}` : '';
 }
 // Ctrl+P y el menú del navegador no pasan por el botón: se engancha el evento del sistema.
@@ -2880,7 +3027,8 @@ async function emitirActa(){
     S.doc = out.documento || null;
     if(out.identidad) S.ident = {...(S.ident||{}), ...out.identidad};
     saveLocal();
-    verActa();
+    if(S.idiomaElegido === 'en'){ overlay(false); await cambiarIdioma('en'); if(S.idioma !== 'en') verActa(); }
+    else verActa();
   }catch(e){
     const f = e.payload && e.payload.faltas;
     toast(f ? f.join(' ') : ('No se pudo emitir: ' + e.message));
@@ -2892,13 +3040,71 @@ function firmaCorta(){
   return h ? h.slice(0,16).match(/.{1,4}/g).join('-') : '—';
 }
 
+const ISO_PEAKU = `<svg class="iso actaiso" viewBox="0 0 174.8 90.4" role="img" aria-label="PeakU" focusable="false"><path class="b" d="M 126.84 54.14 C 131.82 58.32 139.23 57.67 143.40 52.70 L 125.39 37.59 C 121.22 42.56 121.87 49.97 126.84 54.14"/><path class="b" d="M 167.13 6.13 C 162.16 1.96 154.75 2.61 150.58 7.58 L 168.58 22.69 C 172.75 17.71 172.11 10.30 167.13 6.13"/><path class="b" d="M 152.02 24.14 C 147.05 19.96 146.40 12.55 150.58 7.58 L 125.39 37.59 C 129.57 32.62 136.98 31.97 141.95 36.14 C 146.93 40.31 147.57 47.73 143.40 52.70 L 168.58 22.69 C 164.41 27.66 157.00 28.31 152.02 24.14"/><path class="b" d="M 141.95 36.14 C 136.98 31.97 129.57 32.62 125.39 37.59 L 143.40 52.70 C 147.57 47.73 146.93 40.31 141.95 36.14"/><path class="b" d="M 152.02 24.14 C 157.00 28.31 164.41 27.66 168.58 22.69 L 150.58 7.58 C 146.40 12.55 147.05 19.96 152.02 24.14"/><path class="a" d="M 73.12 6.13 C 68.14 1.96 60.73 2.61 56.56 7.58 L 44.90 21.48 L 62.62 36.92 L 74.56 22.69 C 78.73 17.71 78.09 10.30 73.12 6.13"/><path class="a" d="M 120.12 6.13 C 115.15 1.96 107.74 2.61 103.57 7.58 L 121.57 22.69 C 125.75 17.71 125.10 10.30 120.12 6.13"/><path class="a" d="M 105.02 24.14 C 109.99 28.31 117.40 27.66 121.57 22.69 L 103.57 7.58 C 99.39 12.55 100.04 19.96 105.02 24.14"/><path class="a" d="M 53.21 67.60 L 62.98 55.95 C 60.76 58.59 56.82 58.94 54.17 56.72 C 51.53 54.50 51.18 50.55 53.40 47.91 L 24.20 82.71 C 23.55 83.49 22.80 84.15 22.00 84.72 L 21.99 84.75 C 21.99 84.75 33.67 76.08 34.11 75.75 C 36.51 74.02 39.46 72.99 42.66 72.99 C 42.65 72.99 42.65 72.99 42.64 72.99 L 42.68 72.99 C 42.67 72.99 42.66 72.99 42.66 72.99 C 46.39 73.00 50.01 74.67 50.94 78.48 L 50.94 78.48 C 49.87 74.83 50.58 70.73 53.21 67.60"/><path class="a" d="M 58.01 24.14 C 53.04 19.96 52.39 12.55 56.56 7.58 L 6.20 67.60 C 10.37 62.62 17.78 61.98 22.75 66.15 C 25.79 68.70 27.20 72.45 26.90 76.12 C 26.71 78.46 25.83 80.77 24.20 82.71 L 53.40 47.91 L 74.56 22.69 C 70.39 27.66 62.98 28.31 58.01 24.14"/><path class="a" d="M 22.75 66.15 C 17.78 61.98 10.37 62.62 6.20 67.60 C 2.02 72.57 2.67 79.98 7.64 84.16 C 11.84 87.67 17.75 87.75 22.01 84.72 C 22.80 84.15 23.55 83.49 24.20 82.71 C 25.83 80.77 26.71 78.46 26.90 76.12 C 27.20 72.45 25.79 68.70 22.75 66.15"/><path class="a" d="M 121.57 22.69 C 117.40 27.66 109.99 28.31 105.02 24.14 C 100.04 19.96 99.39 12.55 103.57 7.58 L 62.98 55.95 L 53.21 67.60 C 54.60 65.94 56.35 64.77 58.25 64.10 C 62.05 62.74 66.45 63.37 69.76 66.15 C 74.73 70.32 75.38 77.73 71.21 82.71 Z M 121.57 22.69"/><path class="a" d="M 69.76 66.15 C 66.45 63.37 62.05 62.74 58.25 64.10 C 56.35 64.77 54.60 65.94 53.21 67.60 C 50.58 70.73 49.87 74.83 50.94 78.48 C 51.57 80.62 52.82 82.61 54.66 84.16 C 59.62 88.33 67.04 87.68 71.21 82.71 C 75.38 77.73 74.73 70.32 69.76 66.15"/></svg>`;
+
+/* Todo lo que el informe imprime y que NO es un rótulo fijo, como un objeto plano. Es lo que
+   se manda a traducir y lo que después se lee con tx(clave, original). Se calcula sobre el
+   mismo estado que dibuja el acta, así que las claves coinciden una a una con lo que se ve.
+   Los nombres de personas y empresas no entran: no se traducen. */
+function textosDelInforme(){
+  const t = {};
+  const pon = (k, v) => { v = String(v == null ? '' : v).trim(); if(v) t[k] = v; };
+  const dec = S.dec || {}, rec = S.rec || {};
+  pon('cargo', S.rol);
+  S.reqs.forEach((r, i) => {
+    pon(`req.${i}.n`, r.n);
+    const p = porQue(r, i);
+    const cuerpo = (!p.esAncla && p.texto) ? p.texto : ((r.ev || '').trim() || NIVEL_CLIENTE[r.lvl] || '');
+    pon(`req.${i}.cuerpo`, cuerpo);
+    pon(`req.${i}.falta`, r.falta);
+  });
+  pon('rec.texto', rec.texto);
+  (rec.riesgos || []).forEach((x, i) => { pon(`rec.${i}.r`, x.r); pon(`rec.${i}.m`, x.m); });
+  (S.snapImpacto || S.impacto || []).forEach((x, i) => { if(!x) return; pon(`imp.${i}.t`, x.titulo); pon(`imp.${i}.s`, x.sub); pon(`imp.${i}.x`, x.texto); });
+  (S.snapPerfil || S.perfil || []).forEach((o, i) => { if(!o) return; pon(`pf.${i}.r`, o.rasgo); pon(`pf.${i}.o`, o.observado); });
+  const x = S.snapExp || S.exp || ((S.tray || [])[0] ? {...(S.tray[0]), porque: ''} : null);
+  if(x){ pon('exp.cargo', x.cargo); pon('exp.periodo', x.periodo); pon('exp.porque', x.porque || x.resumen); }
+  const ingA = S.snapIngles || (S.ing ? {nivel_exigido: S.ing.nivel, nota: S.ingNota} : null);
+  if(ingA){ pon('ing.exigido', ingA.nivel_exigido); pon('ing.nota', ingA.nota); }
+  ['ubicacion','disponibilidad','pretension','procesos','motivacion'].forEach(k => pon('dec.'+k, dec[k]));
+  (dec.nogo || '').split('\n').map(v => v.trim()).filter(Boolean).forEach((v, i) => pon(`dec.nogo.${i}`, v));
+  return t;
+}
+
+/* Cambia el idioma en que se ve (y se imprime) el informe. La primera vez en inglés se
+   traduce en el servidor y queda guardado con el acta; después es instantáneo. Si la
+   traducción falla, el informe se queda en español y se dice por qué: nunca se muestra un
+   documento a medias. */
+async function cambiarIdioma(idioma){
+  if(!S) return;
+  idioma = idioma === 'en' ? 'en' : 'es';
+  if(idioma === 'en' && !S.trad){
+    overlay(true, 'Traduciendo el informe…', 'Una sola vez: la traducción queda guardada con el informe.');
+    try{
+      const out = await api('/api/sessions/' + S.sid + '/traduccion', {method:'POST', body:{idioma:'en', textos: textosDelInforme()}});
+      S.trad = out.textos || {};
+    }catch(e){
+      overlay(false);
+      toast('No se pudo traducir: ' + e.message + ' El informe sigue en español.');
+      return;
+    }finally{ overlay(false); }
+  } else if(S.sid && !S.soloLectura || S.fin){
+    api('/api/sessions/' + S.sid + '/traduccion', {method:'POST', body:{idioma}, tope: 8000}).catch(() => {});
+  }
+  S.idioma = idioma;
+  saveLocal();
+  verActa();
+}
+
 function verActa(){
+  const EN = idiomaInforme() === 'en';
   const d = new Date(S.fecha || Date.now());
   const nSig = Object.values(S.sig).filter(Boolean).length;
   const dec = S.dec || {}, rec = S.rec || {};
-  const doc = S.sinSnapshot
-    ? {titulo:'Informe de verificación', alcance:'', tipo:'antiguo'}
-    : (S.doc || {titulo:'Informe de verificación', alcance:'', tipo:'acta'});
+  // El título y el alcance del documento salen por tipo, en el idioma del informe.
+  const tipoDoc = S.sinSnapshot ? 'antiguo' : ((S.doc && S.doc.tipo) || 'acta');
+  const doc = {tipo: tipoDoc, titulo: R('doc_' + tipoDoc) || R('doc_acta'),
+               alcance: (tipoDoc === 'antiguo' || !S.doc || !S.doc.alcance) ? '' : (R('alcance_' + tipoDoc) || '')};
   const idn = S.ident || {};
   const cierre = S.kind === 'cierre';
   const idOk = cierre && idn.estado === 'verificada';
@@ -2925,21 +3131,24 @@ function verActa(){
             ok: t0.estado === 'confirmado'};
   })();
   const riesgos = (rec.riesgos||[]).filter(x => (x.r||'').trim());
-  const VER = {si:['ok','Recomendado'], reserva:['par','Recomendado con una reserva'], no:['no','No recomendado']}[rec.veredicto] || null;
+  const VER = {si:['ok',R('ver_si')], reserva:['par',R('ver_reserva')], no:['no',R('ver_no')]}[rec.veredicto] || null;
+  const LVL = R('lvl');
+  const anclaIng = R('ancla_ing') || ANCLA_ING;
+  const nombreSenal = sg => EN ? (SENALES_EN[sg.id] || sg.t) : sg.t;
 
   // Conducta e impacto salieron de la entrevista, así que se congelan con el resto. Un acta
   // vieja no los tiene y el documento se dibuja igual: los bloques simplemente no aparecen.
-  const perfil = (S.snapPerfil || S.perfil || []).filter(o => o && (o.rasgo||'').trim());
-  const impacto = (S.snapImpacto || S.impacto || []).filter(x => x && (x.titulo||'').trim());
+  const perfil = (S.snapPerfil || S.perfil || []).map((o, i) => ({...o, i})).filter(o => o && (o.rasgo||'').trim());
+  const impacto = (S.snapImpacto || S.impacto || []).map((x, i) => ({...x, i})).filter(x => x && (x.titulo||'').trim());
 
   // La cinta de datos. Solo lo que de verdad se recogió: un chip con la etiqueta y nada
   // detrás le dice al cliente que no preguntamos, que es peor que no mostrar el chip.
   const chips = [
-    dec.ubicacion && ['📍', 'Ubicación', dec.ubicacion],
-    dec.disponibilidad && ['🗓', 'Disponibilidad', dec.disponibilidad],
-    dec.pretension && ['💰', 'Aspiración', dec.pretension],
-    (ingA && ingA.confirmado) && ['🗣', 'Inglés', ingA.confirmado],
-    dec.procesos && ['⏳', 'Otros procesos', dec.procesos],
+    dec.ubicacion && ['📍', R('chip_ubicacion'), tx('dec.ubicacion', dec.ubicacion)],
+    dec.disponibilidad && ['🗓', R('chip_disponibilidad'), tx('dec.disponibilidad', dec.disponibilidad)],
+    dec.pretension && ['💰', R('chip_pretension'), tx('dec.pretension', dec.pretension)],
+    (ingA && ingA.confirmado) && ['🗣', R('chip_ingles'), ingA.confirmado],
+    dec.procesos && ['⏳', R('chip_procesos'), tx('dec.procesos', dec.procesos)],
   ].filter(Boolean);
 
   // La bajada del encabezado. No es una frase de venta: es el conteo. Cuántos de los
@@ -2948,46 +3157,51 @@ function verActa(){
   const cumple = S.reqs.filter(r => r.lvl >= 4).length;
   const parcial = S.reqs.filter(r => r.lvl === 3).length;
   const nReq = S.reqs.length;
-  const quien = S.cli ? esc(S.cli) : 'el cliente';
+  const quien = S.cli ? esc(S.cli) : R('el_cliente');
   const resumenReq = !nReq ? ''
-    : nReq === 1
-      ? `El único requisito que definió ${quien} <b>${cumple ? 'quedó sostenido' : (parcial ? 'quedó sostenido parcialmente' : 'no quedó sostenido')}</b>` +
-        (cumple || parcial ? ' con evidencia de la sesión.' : ' con evidencia de la sesión.')
-      : `De los ${nReq} requisitos que definió ${quien}, ` +
-        `<b>${cumple} quedó${cumple===1?'':'ron'} sostenido${cumple===1?'':'s'}</b> con evidencia de la sesión` +
-        (parcial ? `, ${parcial} parcialmente` : '') + '.';
+    : EN
+      ? (nReq === 1
+          ? `The only requirement ${quien} defined <b>${cumple ? 'was supported' : (parcial ? 'was partially supported' : 'was not supported')}</b> with evidence from the session.`
+          : `Of the ${nReq} requirements ${quien} defined, <b>${cumple} ${cumple===1?'was':'were'} supported</b> with evidence from the session` +
+            (parcial ? `, ${parcial} partially` : '') + '.')
+      : (nReq === 1
+          ? `El único requisito que definió ${quien} <b>${cumple ? 'quedó sostenido' : (parcial ? 'quedó sostenido parcialmente' : 'no quedó sostenido')}</b> con evidencia de la sesión.`
+          : `De los ${nReq} requisitos que definió ${quien}, ` +
+            `<b>${cumple} quedó${cumple===1?'':'ron'} sostenido${cumple===1?'':'s'}</b> con evidencia de la sesión` +
+            (parcial ? `, ${parcial} parcialmente` : '') + '.');
 
   // Sellos: solo lo que de verdad se midió en esta sesión.
+  const nR = S.reqs.length;
+  const selloReq = EN ? `${nR} requirement${nR>1?'s':''} measured` : `${nR} requisito${nR>1?'s':''} medido${nR>1?'s':''}`;
+  const selloSen = nSig === 0 ? R('sello_sin_senales')
+    : EN ? `${nSig} sign${nSig>1?'s':''} recorded` : `${nSig} señal${nSig>1?'es':''} registrada${nSig>1?'s':''}`;
   const sellos = [
-    cierre ? [idOk, idOk ? 'Identidad verificada' : 'Identidad no certificada'] : null,
-    [true, 'Sesión supervisada en vivo'],
-    [nSig === 0, nSig === 0 ? 'Sin señales de asistencia' : `${nSig} señal${nSig>1?'es':''} registrada${nSig>1?'s':''}`],
-    [true, `${S.reqs.length} requisito${S.reqs.length>1?'s':''} medido${S.reqs.length>1?'s':''}`],
-    ultima ? [ultima.ok, ultima.ok ? 'Experiencia reciente verificada'
-                                   : 'Experiencia reciente no verificada'] : null,
+    cierre ? [idOk, idOk ? R('sello_id_ok') : R('sello_id_no')] : null,
+    [true, R('sello_vivo')],
+    [nSig === 0, selloSen],
+    [true, selloReq],
+    ultima ? [ultima.ok, ultima.ok ? R('sello_exp_ok') : R('sello_exp_no')] : null,
   ].filter(Boolean);
 
   $('#actaStage').innerHTML = `
     ${S.sinSnapshot ? `<div class="aviso">
-      <b>Este informe se emitió con una versión anterior del formato.</b>
-      Lo que ves está reconstruido con los datos que quedaron guardados, así que puede no
-      coincidir exactamente con la copia que se entregó — esa copia es la referencia.
-      Los informes emitidos de ahora en adelante se congelan al emitirse y se ven siempre igual.
+      <b>${R('aviso_viejo_t')}</b>
+      ${R('aviso_viejo')}
     </div>` : ''}
-    <div class="acta">
+    <div class="acta" lang="${EN ? 'en' : 'es'}">
       <div class="ahd">
         <div>
-          <svg class="iso actaiso" viewBox="0 0 174.8 90.4" role="img" aria-label="PeakU" focusable="false"><path class="b" d="M 126.84 54.14 C 131.82 58.32 139.23 57.67 143.40 52.70 L 125.39 37.59 C 121.22 42.56 121.87 49.97 126.84 54.14"/><path class="b" d="M 167.13 6.13 C 162.16 1.96 154.75 2.61 150.58 7.58 L 168.58 22.69 C 172.75 17.71 172.11 10.30 167.13 6.13"/><path class="b" d="M 152.02 24.14 C 147.05 19.96 146.40 12.55 150.58 7.58 L 125.39 37.59 C 129.57 32.62 136.98 31.97 141.95 36.14 C 146.93 40.31 147.57 47.73 143.40 52.70 L 168.58 22.69 C 164.41 27.66 157.00 28.31 152.02 24.14"/><path class="b" d="M 141.95 36.14 C 136.98 31.97 129.57 32.62 125.39 37.59 L 143.40 52.70 C 147.57 47.73 146.93 40.31 141.95 36.14"/><path class="b" d="M 152.02 24.14 C 157.00 28.31 164.41 27.66 168.58 22.69 L 150.58 7.58 C 146.40 12.55 147.05 19.96 152.02 24.14"/><path class="a" d="M 73.12 6.13 C 68.14 1.96 60.73 2.61 56.56 7.58 L 44.90 21.48 L 62.62 36.92 L 74.56 22.69 C 78.73 17.71 78.09 10.30 73.12 6.13"/><path class="a" d="M 120.12 6.13 C 115.15 1.96 107.74 2.61 103.57 7.58 L 121.57 22.69 C 125.75 17.71 125.10 10.30 120.12 6.13"/><path class="a" d="M 105.02 24.14 C 109.99 28.31 117.40 27.66 121.57 22.69 L 103.57 7.58 C 99.39 12.55 100.04 19.96 105.02 24.14"/><path class="a" d="M 53.21 67.60 L 62.98 55.95 C 60.76 58.59 56.82 58.94 54.17 56.72 C 51.53 54.50 51.18 50.55 53.40 47.91 L 24.20 82.71 C 23.55 83.49 22.80 84.15 22.00 84.72 L 21.99 84.75 C 21.99 84.75 33.67 76.08 34.11 75.75 C 36.51 74.02 39.46 72.99 42.66 72.99 C 42.65 72.99 42.65 72.99 42.64 72.99 L 42.68 72.99 C 42.67 72.99 42.66 72.99 42.66 72.99 C 46.39 73.00 50.01 74.67 50.94 78.48 L 50.94 78.48 C 49.87 74.83 50.58 70.73 53.21 67.60"/><path class="a" d="M 58.01 24.14 C 53.04 19.96 52.39 12.55 56.56 7.58 L 6.20 67.60 C 10.37 62.62 17.78 61.98 22.75 66.15 C 25.79 68.70 27.20 72.45 26.90 76.12 C 26.71 78.46 25.83 80.77 24.20 82.71 L 53.40 47.91 L 74.56 22.69 C 70.39 27.66 62.98 28.31 58.01 24.14"/><path class="a" d="M 22.75 66.15 C 17.78 61.98 10.37 62.62 6.20 67.60 C 2.02 72.57 2.67 79.98 7.64 84.16 C 11.84 87.67 17.75 87.75 22.01 84.72 C 22.80 84.15 23.55 83.49 24.20 82.71 C 25.83 80.77 26.71 78.46 26.90 76.12 C 27.20 72.45 25.79 68.70 22.75 66.15"/><path class="a" d="M 121.57 22.69 C 117.40 27.66 109.99 28.31 105.02 24.14 C 100.04 19.96 99.39 12.55 103.57 7.58 L 62.98 55.95 L 53.21 67.60 C 54.60 65.94 56.35 64.77 58.25 64.10 C 62.05 62.74 66.45 63.37 69.76 66.15 C 74.73 70.32 75.38 77.73 71.21 82.71 Z M 121.57 22.69"/><path class="a" d="M 69.76 66.15 C 66.45 63.37 62.05 62.74 58.25 64.10 C 56.35 64.77 54.60 65.94 53.21 67.60 C 50.58 70.73 49.87 74.83 50.94 78.48 C 51.57 80.62 52.82 82.61 54.66 84.16 C 59.62 88.33 67.04 87.68 71.21 82.71 C 75.38 77.73 74.73 70.32 69.76 66.15"/></svg>
+          ${ISO_PEAKU}
           <h2>${esc(S.cand)}</h2>
-          <div class="cert">${esc(doc.titulo)} · PeakU Verificado</div>
-          <div class="rl2">${[esc(S.rol), S.cli && '<b>'+esc(S.cli)+'</b>'].filter(Boolean).join(' · ')}</div>
+          <div class="cert">${esc(doc.titulo)} · ${R('marca')}</div>
+          <div class="rl2">${[esc(tx('cargo', S.rol)), S.cli && '<b>'+esc(S.cli)+'</b>'].filter(Boolean).join(' · ')}</div>
           ${resumenReq ? `<p class="bajada">${resumenReq}</p>` : ''}
         </div>
         <div class="mt">
-          Informe <b class="mono">${esc(S.id)}</b><br>
-          Verificado el <b>${fechaLarga(d)}</b><br>
-          Vigente hasta <b>${masSeis(d)}</b><br>
-          Sesión supervisada · grabada
+          ${R('informe')} <b class="mono">${esc(S.id)}</b><br>
+          ${R('verificado_el')} <b>${fechaLarga(d, idiomaInforme())}</b><br>
+          ${R('vigente_hasta')} <b>${masSeis(d, idiomaInforme())}</b><br>
+          ${R('sesion_grabada')}
         </div>
       </div>
 
@@ -3002,8 +3216,8 @@ function verActa(){
       </div>` : ''}
 
       ${rec.texto ? `<div class="posic">
-        <div class="mini">Posicionamiento</div>
-        <p>${esc(rec.texto)}</p>
+        <div class="mini">${R('posicionamiento')}</div>
+        <p>${esc(tx('rec.texto', rec.texto))}</p>
       </div>` : ''}
 
       <!-- BANDA 1 · dos columnas: el ajuste a los requisitos, que es la razón de ser del
@@ -3013,50 +3227,40 @@ function verActa(){
            lee como un hueco. -->
       <div>
         <div class="infcol">
-          <div class="zona"><span class="zn">Ajuste al rol</span><h3>Requisito por requisito</h3>
-            <span class="zs">Lo que definió el cliente, contrastado en la entrevista</span></div>
+          <div class="zona"><span class="zn">${R('z_ajuste')}</span><h3>${R('z_ajuste_h')}</h3>
+            <span class="zs">${R('z_ajuste_s')}</span></div>
           <div class="zbox">
             ${S.reqs.map((r, i) => {
               const v = r.lvl>=4?'ok':(r.lvl===3?'par':'no');
-              // Antes aquí se pegaba r.ev — la cita cruda de la transcripción, a veces un
-              // párrafo entero. Eso es el rastro de auditoría, no el informe: quien lo lee no
-              // estuvo en la llamada y no tiene por qué interpretar un fragmento de diálogo.
-              // Ahora se imprime el juicio (por qué cumple o no) y lo que quedó sin comprobar.
+              // Se imprime el juicio (por qué cumple o no) y, si aplica, la recomendación.
+              // Cascada: explicación del analista → lo que escribió el evaluador → la frase
+              // del nivel. La cita cruda (`evidence`) sigue siendo el cuerpo de las actas
+              // emitidas antes de que existiera `analisis`: un documento ya entregado no se
+              // reescribe. El ancla de la rúbrica es criterio interno y no entra.
               const p = porQue(r, i);
-              // Cascada: explicación → cita archivada → ancla. La cita sigue siendo el cuerpo
-              // de las actas emitidas ANTES de este cambio: su snapshot guarda `evidence` y no
-              // `analisis`, y un documento ya entregado no se reescribe porque el software
-              // haya evolucionado. También cubre la sesión calificada a mano, donde lo único
-              // que hay es lo que el evaluador escribió.
-              // Explicación del analista → lo que escribió el evaluador → la frase del nivel.
-              // El ancla de la rúbrica ya no entra en esta cascada: es criterio interno.
               const cuerpo = (!p.esAncla && p.texto) ? p.texto
                            : ((r.ev || '').trim() || NIVEL_CLIENTE[r.lvl] || '');
               return `<div class="req">
-                <div class="reqn">${esc(r.n)}</div>
-                <div class="reqv"><span class="rl">${r.lvl} / 5</span><span class="vd ${v}">${LVLTXT[r.lvl]}</span></div>
-                ${cuerpo?`<div class="aex">${esc(cuerpo)}</div>`:''}
-                ${r.falta?`<div class="afalta"><b>Recomendación:</b> ${esc(r.falta)}</div>`:''}
+                <div class="reqn">${esc(tx(`req.${i}.n`, r.n))}</div>
+                <div class="reqv"><span class="rl">${r.lvl} / 5</span><span class="vd ${v}">${LVL[r.lvl]}</span></div>
+                ${cuerpo?`<div class="aex">${esc(tx(`req.${i}.cuerpo`, cuerpo))}</div>`:''}
+                ${r.falta?`<div class="afalta"><b>${R('recomendacion')}:</b> ${esc(tx(`req.${i}.falta`, r.falta))}</div>`:''}
               </div>`;
             }).join('')}
             <!-- La nota de la escala va DENTRO del recuadro. Suelta debajo, se quedaba
                  huérfana al principio de la página siguiente, lejos de los números que
                  explica. -->
-            <p class="hint escala">Escala 1-5 sobre evidencia de la sesión: <b>4-5</b> caso propio con alcance y resultado · <b>3</b> experiencia real con alcance parcial · <b>1-2</b> sin caso propio que lo sostenga.</p>
+            <p class="hint escala">${R('escala')}</p>
           </div>
-          <!-- El ancla dejó de imprimirse debajo de cada requisito. "Ancla 4: escena y rol
-               claros + 2/3 detalles verificables + cruce correcto" es el criterio con el que
-               trabajamos por dentro; al cliente no le dice nada y delata el guion. La escala
-               se explica una vez, en su idioma, para que el número siga teniendo respaldo. -->
         </div>
         ${impacto.length ? `
-        <div class="zona"><span class="zn">Lo que demostró</span><h3>En la entrevista</h3>
-          <span class="zs">Sostenido en la conversación, no tomado de la hoja de vida</span></div>
+        <div class="zona"><span class="zn">${R('z_impacto')}</span><h3>${R('z_impacto_h')}</h3>
+          <span class="zs">${R('z_impacto_s')}</span></div>
         <div class="imps">
           ${impacto.map(x => `<div class="imp">
-            <b>${esc(x.titulo||'')}</b>
-            ${x.sub?`<span class="isub">${esc(x.sub)}</span>`:''}
-            ${x.texto?`<p>${esc(x.texto)}</p>`:''}
+            <b>${esc(tx(`imp.${x.i}.t`, x.titulo||''))}</b>
+            ${x.sub?`<span class="isub">${esc(tx(`imp.${x.i}.s`, x.sub))}</span>`:''}
+            ${x.texto?`<p>${esc(tx(`imp.${x.i}.x`, x.texto))}</p>`:''}
           </div>`).join('')}
         </div>` : ''}
       </div>
@@ -3064,20 +3268,19 @@ function verActa(){
       <!-- BANDA 2 · conducta, a ancho completo: son párrafos, y un párrafo en media columna
            se parte en renglones de cuatro palabras. -->
         ${perfil.length ? `
-        <div class="zona"><span class="zn">Conducta</span><h3>Cómo se comportó en la sesión</h3>
-          <span class="zs">Evidenciado en la entrevista</span></div>
+        <div class="zona"><span class="zn">${R('z_conducta')}</span><h3>${R('z_conducta_h')}</h3>
+          <span class="zs">${R('z_conducta_s')}</span></div>
         <div class="zbox">
           ${perfil.map(o => {
-            const e = o.presente === true ? ['ok','SE EVIDENCIÓ']
-                    : o.presente === false ? ['no','NO SE EVIDENCIÓ'] : ['nv','SIN EVIDENCIA'];
+            const e = o.presente === true ? ['ok',R('ev_si')]
+                    : o.presente === false ? ['no',R('ev_no')] : ['nv',R('ev_sin')];
             return `<div class="req">
-              <div class="reqn">${esc(o.rasgo||'')}</div>
+              <div class="reqn">${esc(tx(`pf.${o.i}.r`, o.rasgo||''))}</div>
               <div class="reqv"><span class="vd ${e[0]}">${e[1]}</span></div>
-              ${o.observado ? `<div class="aex">${esc(o.observado)}</div>` : ''}
+              ${o.observado ? `<div class="aex">${esc(tx(`pf.${o.i}.o`, o.observado))}</div>` : ''}
             </div>`;
           }).join('')}
-          <p class="hint">Conducta evidenciada durante la sesión grabada. No es un perfil psicométrico
-          ni describe a la persona fuera de ese contexto.</p>
+          <p class="hint">${R('conducta_nota')}</p>
         </div>` : ''}
 
       <!-- BANDA DE TRES · experiencia, inglés e integridad. Son los tres bloques cortos del
@@ -3088,39 +3291,39 @@ function verActa(){
         const cols = [];
         if(ultima) cols.push(`
           <div class="tres">
-            <div class="zona"><span class="zn">Experiencia</span><h3>${ultima.ok ? 'Verificada' : 'Más reciente'}</h3></div>
+            <div class="zona"><span class="zn">${R('z_exp')}</span><h3>${ultima.ok ? R('exp_verificada_h') : R('exp_reciente_h')}</h3></div>
             <div class="zbox">
-              <div class="res"><div class="rn">${esc(ultima.cargo||'—')}<small>${esc(ultima.empresa||'')}${ultima.periodo?' · '+esc(ultima.periodo):''}</small></div>
-                <span class="vd ${ultima.ok?'ok':'nv'}">${ultima.ok?'VERIFICADA':'NO VERIFICADA'}</span></div>
-              ${(ultima.porque || ultima.resumen) ? `<p class="dtx">${esc(ultima.porque || ultima.resumen)}</p>` : ''}
-              ${ultima.ok ? '' : `<p class="hint">La verificación se concentra en la experiencia más reciente; esta quedó declarada y no verificada en esta sesión.</p>`}
+              <div class="res"><div class="rn">${esc(tx('exp.cargo', ultima.cargo||'—'))}<small>${esc(ultima.empresa||'')}${ultima.periodo?' · '+esc(tx('exp.periodo', ultima.periodo)):''}</small></div>
+                <span class="vd ${ultima.ok?'ok':'nv'}">${ultima.ok?R('exp_verificada'):R('exp_no_verificada')}</span></div>
+              ${(ultima.porque || ultima.resumen) ? `<p class="dtx">${esc(tx('exp.porque', ultima.porque || ultima.resumen))}</p>` : ''}
+              ${ultima.ok ? '' : `<p class="hint">${R('exp_nota_no')}</p>`}
             </div>
           </div>`);
         if(ingA) cols.push(`
           <div class="tres">
-            <div class="zona"><span class="zn">Inglés</span><h3>${ingA.confirmado ? 'Lo que se oyó' : 'No evaluado'}</h3></div>
+            <div class="zona"><span class="zn">${R('z_ing')}</span><h3>${ingA.confirmado ? R('ing_oido') : R('ing_no_evaluado')}</h3></div>
             <div class="zbox">
               ${!ingA.confirmado ? `
-                <p class="dtx">No se evaluó el inglés en esta sesión; el informe no afirma nada sobre el idioma.</p>
+                <p class="dtx">${R('ing_no_texto')}</p>
               ` : `
                 <div class="ingfila">
                   <div class="ingniv">${esc(ingA.confirmado)}</div>
-                  <div class="ingtx"><b>${esc(ANCLA_ING[ingA.confirmado] || '')}</b></div>
+                  <div class="ingtx"><b>${esc(anclaIng[ingA.confirmado] || '')}</b></div>
                 </div>
-                ${ingA.nivel_exigido ? `<p class="dtx"><b>El cargo pide:</b> ${esc(ingA.nivel_exigido)}.</p>` : ''}
-                ${ingA.nota ? `<p class="dtx">${esc(ingA.nota)}</p>` : ''}
-                <p class="hint">Calificado en vivo por ${esc(S.eval || 'el evaluador')}${ingA.minuto ? ` (min. ${esc(ingA.minuto)})` : ''}; valoración conversacional, no certificación.</p>
+                ${ingA.nivel_exigido ? `<p class="dtx"><b>${R('ing_pide')}</b> ${esc(tx('ing.exigido', ingA.nivel_exigido))}.</p>` : ''}
+                ${ingA.nota ? `<p class="dtx">${esc(tx('ing.nota', ingA.nota))}</p>` : ''}
+                <p class="hint">${R('ing_calificado')} ${esc(S.eval || R('el_evaluador'))}${ingA.minuto ? ` (${R('ing_min')} ${esc(ingA.minuto)})` : ''}; ${R('ing_nota')}</p>
               `}
             </div>
           </div>`);
         cols.push(`
           <div class="tres">
-            <div class="zona"><span class="zn">Integridad</span><h3>Cómo se sostuvo</h3></div>
+            <div class="zona"><span class="zn">${R('z_integridad')}</span><h3>${R('z_integridad_h')}</h3></div>
             <div class="zbox">
               ${cierre ? actaIdentidad() : ''}
-              <div class="res"><div class="rn">Señales de asistencia por IA o fuente externa</div><span class="vd ${nSig?'par':'ok'}">${nSig?nSig+' REGISTRADA'+(nSig>1?'S':''):'NINGUNA'}</span></div>
-              <div class="res"><div class="rn">Bitácora de la sesión<small>Transcripción archivada</small></div><span class="vd ok">DISPONIBLE</span></div>
-              ${nSig?`<div class="aev">Señales: ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(s.t)).join(' · ')}. Observación factual, no un juicio sobre el candidato.</div>`:''}
+              <div class="res"><div class="rn">${R('senales_t')}</div><span class="vd ${nSig?'par':'ok'}">${nSig ? nSig+' '+(nSig>1?R('senales_registradas'):R('senal_registrada')) : R('ninguna')}</span></div>
+              <div class="res"><div class="rn">${R('bitacora')}<small>${R('bitacora_s')}</small></div><span class="vd ok">${R('disponible')}</span></div>
+              ${nSig?`<div class="aev">${R('senales_pre')} ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(nombreSenal(s))).join(' · ')}. ${R('senales_post')}</div>`:''}
             </div>
           </div>`);
         return `<div class="banda3 n${cols.length}">${cols.join('')}</div>`;
@@ -3130,55 +3333,54 @@ function verActa(){
            porque es lo último que se decide, y en dos columnas porque son dos lecturas
            distintas — lo que lo atrae y lo que puede salir mal. -->
       ${(dec.motivacion || nogo.length || VER || riesgos.length) ? `
-      <div class="zona"><span class="zn">Factores de cierre</span><h3>Qué mueve a ${esc((S.cand||'').split(' ')[0])}${(VER||riesgos.length)?' y qué cuidar':''}</h3>
-        <span class="zs">${(VER||riesgos.length) ? 'Sus palabras · nuestra lectura' : 'En sus palabras'}</span></div>
+      <div class="zona"><span class="zn">${R('z_cierre')}</span><h3>${R('cierre_h')} ${esc((S.cand||'').split(' ')[0])}${(VER||riesgos.length)?R('cierre_h2'):''}</h3>
+        <span class="zs">${(VER||riesgos.length) ? R('cierre_s2') : R('cierre_s1')}</span></div>
       <div class="zbox${(VER||riesgos.length)?' dos':''}">
         <div>
-          ${dec.motivacion ? `<div class="mini">Por qué está buscando</div>
-            <p class="dtx">${esc(dec.motivacion)}</p>` : ''}
-          ${nogo.length ? `<div class="mini" style="margin-top:12px">No negociables</div>
-            <ul class="lst">${nogo.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+          ${dec.motivacion ? `<div class="mini">${R('motivacion')}</div>
+            <p class="dtx">${esc(tx('dec.motivacion', dec.motivacion))}</p>` : ''}
+          ${nogo.length ? `<div class="mini" style="margin-top:12px">${R('nogo')}</div>
+            <ul class="lst">${nogo.map((x, i)=>`<li>${esc(tx(`dec.nogo.${i}`, x))}</li>`).join('')}</ul>` : ''}
         </div>
         ${(VER || riesgos.length) ? `<div>
-          ${VER ? `<div class="mini">Nuestra recomendación</div>
+          ${VER ? `<div class="mini">${R('nuestra_rec')}</div>
             <div class="recver"><span class="vd ${VER[0]}">${esc(VER[1].toUpperCase())}</span></div>` : ''}
-          ${riesgos.length ? `<div class="mini" style="margin-top:${VER?'12px':'0'}">Riesgos y mitigación</div>
-            ${riesgos.map(x=>`<div class="riesgo"><b>${esc(x.r)}</b>${x.m?`<span>Mitigación: ${esc(x.m)}</span>`:''}</div>`).join('')}` : ''}
-          <p class="hint">Opinión del evaluador — lo único de este informe que no es medición.</p>
+          ${riesgos.length ? `<div class="mini" style="margin-top:${VER?'12px':'0'}">${R('riesgos')}</div>
+            ${(rec.riesgos||[]).map((x, i) => (x.r||'').trim() ? `<div class="riesgo"><b>${esc(tx(`rec.${i}.r`, x.r))}</b>${x.m?`<span>${R('mitigacion')} ${esc(tx(`rec.${i}.m`, x.m))}</span>`:''}</div>` : '').join('')}` : ''}
+          <p class="hint">${R('opinion')}</p>
         </div>` : ''}
       </div>` : ''}
 
       <div class="cierrepie">
       <div class="aback">
         <div class="abtx">
-          <h4>PeakU responde por este informe.</h4>
-          <p>${(doc.tipo === 'acta')
-            ? `Si la persona no es quien este informe dice que es, o su desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo.`
-            : `Si el desempeño no corresponde a lo aquí certificado dentro de los primeros 90 días, PeakU repone la búsqueda sin costo. <b>Este informe no certifica la identidad de la persona</b>: certifica lo observado sobre los requisitos del cargo.`} Verifique la autenticidad en <b>${esc(urlVerificacion(S.id))}</b>.</p>
-          <span class="sig">Firma de integridad: ${esc(firmaCorta())} · Evaluó: ${esc(S.eval||'—')} · Revisión de calidad: pendiente de cuatro ojos · Escala anclada 1-5 · Sesión grabada y archivada${(doc.tipo === 'acta') ? ' · Identidad verificada por proveedor externo' : ''}</span>
+          <h4>${R('responde')}</h4>
+          <p>${(doc.tipo === 'acta') ? R('garantia_acta') : R('garantia_sin_id')} ${R('verifique')} <b>${esc(urlVerificacion(S.id))}</b>.</p>
+          <span class="sig">${R('firma')} ${esc(firmaCorta())} · ${R('evaluo')} ${esc(S.eval||'—')} · ${R('revision')} · ${R('escala_anclada')} · ${R('grabada_archivada')}${(doc.tipo === 'acta') ? ' · ' + R('id_externa') : ''}</span>
         </div>
         ${S.id ? `<button class="abqr" type="button" title="${esc(urlVerificacionAbs(S.id))}">
-          ${huecoQr(urlVerificacionAbs(S.id), 6, 'Verificar la autenticidad de este informe')}
-          <span>Escanee para verificar</span>
+          ${huecoQr(urlVerificacionAbs(S.id), 6, R('qr_alt'))}
+          <span>${R('escanee')}</span>
         </button>` : ''}
       </div>
         ${doc.alcance ? `<p class="hint alcance">${esc(doc.alcance)}</p>` : ''}
       </div>
     </div>
     <div class="tools" style="margin-top:14px">
-      <button data-back type="button">${S.soloLectura ? 'Volver a la lista' : 'Volver al cierre'}</button>
-      <button class="pri" id="btnPrint" type="button">Imprimir o guardar en PDF</button>
-      <button id="btnJson2" type="button">Copiar JSON del archivo</button>
+      <button data-back type="button">${S.soloLectura ? R('volver_lista') : R('volver_cierre')}</button>
+      <button class="pri" id="btnPrint" type="button">${R('imprimir')}</button>
+      <button id="btnIdioma" type="button">${EN ? R('ver_es') : R('ver_en')}</button>
+      <button id="btnJson2" type="button">${R('copiar_json')}</button>
     </div>`;
   pintarQrs($('#actaStage'));
   const qa = $('#actaStage').querySelector('.abqr');
-  if(qa) qa.addEventListener('click', () => qrGrande(urlVerificacionAbs(S.id),
-    'Escanea este código para verificar la autenticidad de este informe.'));
+  if(qa) qa.addEventListener('click', () => qrGrande(urlVerificacionAbs(S.id), R('qr_grande')));
   $('#actaStage').querySelector('[data-back]').addEventListener('click', () => {
     if(S.soloLectura){ loadTablero(); return; }
     go('vLive'); render();
   });
   $('#actaStage').querySelector('#btnPrint').addEventListener('click', () => { prepararImpresion(); window.print(); });
+  $('#actaStage').querySelector('#btnIdioma').addEventListener('click', () => cambiarIdioma(EN ? 'es' : 'en'));
   $('#actaStage').querySelector('#btnJson2').addEventListener('click', copiarJSON);
   go('vActa');
 }
@@ -3189,15 +3391,13 @@ function actaIdentidad(){
   const i = S.ident || {};
   const est = i.estado || 'pendiente';
   const score = i.face_score != null ? Number(i.face_score).toFixed(1) : null;
-  const cuadro = {
-    verificada:  ['ok',  'VERIFICADA',    'Documento validado por proveedor externo con prueba de vida, y rostro cotejado contra la sesión' + (score?` (coincidencia ${score}/100)`:'') + '.'],
-    dudosa:      ['par', 'PARCIAL',       'Documento validado, pero el cotejo del rostro quedó en zona dudosa' + (score?` (${score}/100)`:'') + ' y fue revisado manualmente.'],
-    rechazada:   ['nv',  'NO REALIZADA',  'El candidato optó por no verificar su identidad. Este informe no la certifica.'],
-    abandonada:  ['nv',  'SIN COMPLETAR', 'La verificación se envió y no se completó. Este informe no certifica identidad.'],
-    fallida:     ['no',  'NO SUPERADA',   'La verificación de identidad no fue superada.'],
-  }[est] || ['nv', 'NO REALIZADA', 'Este informe no certifica identidad.'];
-  return `<div class="res"><div class="rn">Identidad<small>${esc(cuadro[2])}</small></div>
-            <span class="vd ${cuadro[0]}">${cuadro[1]}</span></div>`;
+  const clase = {verificada:'ok', dudosa:'par', rechazada:'nv', abandonada:'nv', fallida:'no'}[est] || 'nv';
+  const r = R('id_' + est) || R('id_otra');
+  let texto = r[1];
+  if(est === 'verificada') texto += (score ? ` (${r[2]} ${score}/100)` : '') + '.';
+  else if(est === 'dudosa') texto += (score ? ` (${score}/100)` : '') + ' ' + r[2];
+  return `<div class="res"><div class="rn">${R('id_t')}<small>${esc(texto)}</small></div>
+            <span class="vd ${clase}">${r[0]}</span></div>`;
 }
 
 function copiarJSON(){

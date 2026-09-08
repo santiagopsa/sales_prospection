@@ -9,7 +9,7 @@
 // Ninguna de las otras pruebas lo veía: el stub no llama a Claude, así que el flujo pasaba
 // en verde de punta a punta con el prompt vacío por dentro.
 const assert = require('assert');
-const { buildIntakePrompt, buildCvPrompt } = require('../prompts');
+const { buildIntakePrompt, buildCvPrompt, buildTranslatePrompt } = require('../prompts');
 
 let n = 0;
 const t = (nombre, fn) => { fn(); n++; console.log('  ✓', nombre); };
@@ -89,6 +89,20 @@ t('todo lo que entra sale en el prompt — marcador único', () => {
   const marca = 'MARCADOR-UNICO-DE-PRUEBA-9F2C1D4E';
   assert.ok(buildIntakePrompt(marca, {}).includes(marca), 'el levantamiento perdió su entrada');
   assert.ok(buildCvPrompt(marca, {}).includes(marca), 'el análisis de CV perdió su entrada');
+});
+
+// La traducción del informe: cada texto que entra tiene que salir en el prompt, con su
+// clave, y el prompt tiene que decir explícitamente qué NO se traduce (nombres, productos).
+t('la traducción lleva todos los textos con sus claves y protege los nombres', () => {
+  const textos = { 'req.0.n': 'Rollout de SAP PP en producción', 'rec.texto': 'MARCA-TRAD-7A1B', cargo: 'Consultor SAP PP' };
+  const p = buildTranslatePrompt(textos);
+  for (const k of Object.keys(textos)) {
+    assert.ok(p.includes(`"${k}"`), `perdió la clave ${k}`);
+    assert.ok(p.includes(textos[k]), `perdió el texto de ${k}`);
+  }
+  assert.ok(/mismas claves/i.test(p), 'no exige las mismas claves');
+  assert.ok(/nombres de personas/i.test(p) && /SAP PP/.test(p), 'no protege nombres ni productos');
+  assert.ok(/ingl[ée]s/i.test(p), 'no dice a qué idioma');
 });
 
 console.log(`\n${n} pruebas · los prompts no pierden su entrada`);

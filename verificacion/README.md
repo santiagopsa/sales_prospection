@@ -134,6 +134,7 @@ python3 verificacion/test/e2e_perfil.py    # tope de 3 requisitos, dos preguntas
 python3 verificacion/test/print_check.py   # el PDF que recibe el cliente, en los 4 casos reales
 python3 verificacion/test/e2e_paralelo.py  # el análisis en segundo plano: pegar, irse, seguir con otro
 python3 verificacion/test/e2e_salir.py     # salir de la sesión nunca se queda pegado, ni con el servidor caído
+python3 verificacion/test/e2e_idioma.py    # el informe en español o en inglés: emitir, alternar, reabrir, PDF
 ```
 
 Y una herramienta que no afirma nada, solo deja mirar el resultado — capturas de cada pantalla y el PDF del informe:
@@ -175,6 +176,20 @@ Va a dos columnas, formato `v4-2026-09`:
 El contexto y la recomendación se llenan en la fase **Contexto**; la conducta y las tarjetas, en la fase **Conducta**, después de leer la transcripción.
 
 **Ojo con el formato.** El snapshot congela los *datos* de un informe emitido, que es lo que promete la firma de integridad. La maqueta no: un informe emitido bajo `v3-2026-08` se vuelve a dibujar con la de `v4`, con su mismo contenido. Si mañana hace falta que un informe viejo se vea exactamente como el día que se entregó, hay que guardar también el HTML, no solo los datos.
+
+### El informe en español o en inglés
+
+El reclutador elige el idioma en el cierre (selector **Español / English**, español por defecto) y puede cambiarlo después desde el informe emitido, con el botón *Ver en English / Ver en español*. El PDF sale en el idioma que se está viendo, con el título y el membrete en ese idioma.
+
+Cómo está hecho, porque importa para no romperlo:
+
+- **El snapshot sigue siendo uno y en español.** Lo que se congela al emitir no cambia. La traducción es una capa encima: `sessions.traducciones` guarda `{en:{textos, huella, at}}` y `sessions.idioma` recuerda en cuál se dejó.
+- **Dos clases de texto.** Los **rótulos fijos** (títulos de sección, niveles CUMPLE/MEETS, sellos, fechas, la garantía, el pie) viven en la pantalla, en `ROTULOS` de `public/app.js`, en los dos idiomas. El **contenido** (requisitos, párrafos del análisis, cargo, rasgos de conducta, impacto, riesgos, lo declarado) lo traduce Claude una sola vez: `textosDelInforme()` arma un objeto plano `{clave: texto}` con exactamente lo que se imprime, `POST /api/sessions/:id/traduccion` lo manda con `buildTranslatePrompt` y guarda la respuesta. Al dibujar, `tx(clave, original)` devuelve la traducción si el informe está en inglés y el original si no.
+- **Lo que no se traduce:** nombres de personas y empresas, productos y tecnologías, cifras, monedas, niveles A1…C1. Está en el prompt, y `prompts.test.js` comprueba que siga estando.
+- **Nunca un documento a medias.** Si la traducción falla, el informe se queda en español y se avisa. Si el modelo devuelve una clave vacía, esa frase sale en español antes que en blanco. La traducción se reutiliza mientras los textos no cambien (huella), así que alternar idiomas o reabrir no vuelve a pagar tokens.
+- **La página pública de verificación** (`/verificacion/v/:code`) sigue en español: certifica que el informe existe, no lo reproduce.
+
+`test/e2e_idioma.py` recorre emitir en inglés, comprobar que no se cuela español ni se pierde un nombre propio, alternar sin volver a traducir, reabrir en el idioma en que se dejó, el PDF en inglés en dos hojas, y una traducción que falla.
 
 ### Salir de la sesión nunca se queda pegado
 

@@ -237,6 +237,39 @@ const server = http.createServer(async (req, res) => {
     }));
   }
 
+  // Traducción del informe: mismo contrato que el servidor real, con un traductor de
+  // mentira determinista para que las pruebas puedan afirmar qué salió en inglés.
+  mm = p.match(/^\/api\/sessions\/(\d+)\/traduccion$/);
+  if(mm && m==='POST'){
+    const b = await body(req);
+    const s = db.sessions.find(x=>x.id===+mm[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    const idioma = b.idioma === 'en' ? 'en' : 'es';
+    s.idioma = idioma;
+    if(idioma === 'es') return json(res,200,{ok:true, idioma});
+    if(db.simular && db.simular.traduccion_falla) return json(res,502,{error:'No se pudo traducir el informe. El modelo no respondió.'});
+    const textos = b.textos || {};
+    if(!Object.keys(textos).length && s.traducciones && s.traducciones.en){
+      return json(res,200,{ok:true, idioma, textos:s.traducciones.en.textos, reutilizada:true});
+    }
+    const huella = Object.keys(textos).sort().map(k=>k+'='+textos[k]).join('|');
+    if(s.traducciones && s.traducciones.en && s.traducciones.en.huella === huella){
+      return json(res,200,{ok:true, idioma, textos:s.traducciones.en.textos, reutilizada:true});
+    }
+    db.traducciones_hechas = (db.traducciones_hechas||0)+1;
+    const DIC = [[/Consultor/g,'Consultant'],[/rollout de PP en producci[oó]n/g,'PP rollout in production'],
+                 [/Demostr[oó]/g,'Demonstrated'],[/Sostuvo/g,'Sustained'],[/con un caso propio/g,'with a first-hand case'],
+                 [/Medell[ií]n/g,'Medellin'],[/h[ií]brido/g,'hybrid'],[/inmediata/g,'immediate']];
+    const out = {};
+    for(const k of Object.keys(textos)){
+      let t = String(textos[k]);
+      for(const [re, en] of DIC) t = t.replace(re, en);
+      out[k] = (t === String(textos[k])) ? '[en] ' + t : t;
+    }
+    s.traducciones = {...(s.traducciones||{}), en:{textos:out, huella, at:new Date().toISOString()}};
+    return json(res,200,{ok:true, idioma, textos:out});
+  }
+
   mm = p.match(/^\/api\/sessions\/(\d+)\/beacon$/);
   if(mm && m==='POST'){
     const b = await body(req);
@@ -468,7 +501,7 @@ const server = http.createServer(async (req, res) => {
     return json(res,200,{ok:true, sesion:s.id, diditStatus:s.didit_status, veredicto:s.face_verdict, score:s.face_score});
   }
 
-  if(p === '/api/__simular' && m==='POST'){ db.simular = await body(req); return json(res,200,{ok:true, colgados: db.colgados||0}); }
+  if(p === '/api/__simular' && m==='POST'){ db.simular = await body(req); return json(res,200,{ok:true, colgados: db.colgados||0, traducciones_hechas: db.traducciones_hechas||0}); }
 
   // Solo para pruebas: deja una sesión emitida como quedaban las de antes del snapshot,
   // que es exactamente la fila que hay hoy en producción para los informes ya entregados.
