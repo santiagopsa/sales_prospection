@@ -254,6 +254,9 @@ const server = http.createServer(async (req, res) => {
   mm = p.match(/^\/api\/sessions\/(\d+)$/);
   if(mm && m==='PATCH'){
     const b = await body(req);
+    // Simula un servidor que no contesta (Postgres sin conexiones, Render dormido): la
+    // respuesta nunca llega. Se activa con __simular {guardar_colgado:true}.
+    if(db.simular && db.simular.guardar_colgado){ db.colgados = (db.colgados||0)+1; return; }
     const s = db.sessions.find(x=>x.id===+mm[1]);
     if(!s) return json(res,404,{error:'not found'});
     const ctx = {kind:s.kind, faceVerdict:s.face_verdict, diditStatus:s.didit_status, idNote:s.id_note};
@@ -465,7 +468,7 @@ const server = http.createServer(async (req, res) => {
     return json(res,200,{ok:true, sesion:s.id, diditStatus:s.didit_status, veredicto:s.face_verdict, score:s.face_score});
   }
 
-  if(p === '/api/__simular' && m==='POST'){ db.simular = await body(req); return json(res,200,{ok:true}); }
+  if(p === '/api/__simular' && m==='POST'){ db.simular = await body(req); return json(res,200,{ok:true, colgados: db.colgados||0}); }
 
   // Solo para pruebas: deja una sesión emitida como quedaban las de antes del snapshot,
   // que es exactamente la fila que hay hoy en producción para los informes ya entregados.

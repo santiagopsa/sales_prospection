@@ -187,11 +187,23 @@ function fechaCorta(s){
   return d.getDate()+' '+M[d.getMonth()];
 }
 async function api(path, opts={}){
-  const r = await fetch(BASE + path, {
-    method: opts.method || 'GET',
-    headers: opts.body ? {'Content-Type':'application/json'} : undefined,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
+  // opts.tope (ms): la llamada se corta sola si el servidor no contesta en ese tiempo. Sin
+  // esto, un fetch puede quedarse esperando para siempre y lo que el reclutador ve es una
+  // pantalla que no reacciona. Solo lo usan las llamadas que no deben bloquear a nadie.
+  const ac = opts.tope ? new AbortController() : null;
+  const tm = ac ? setTimeout(() => ac.abort(), opts.tope) : null;
+  let r;
+  try{
+    r = await fetch(BASE + path, {
+      method: opts.method || 'GET',
+      headers: opts.body ? {'Content-Type':'application/json'} : undefined,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      signal: ac ? ac.signal : undefined,
+    });
+  }catch(e){
+    if(ac && ac.signal.aborted) throw Object.assign(new Error('el servidor no respondió a tiempo'), {tope:true});
+    throw e;
+  }finally{ if(tm) clearTimeout(tm); }
   let j = null;
   try { j = await r.json(); } catch(e){}
   if(!r.ok) throw Object.assign(new Error((j && j.error) || ('HTTP '+r.status)), {payload:j, status:r.status});
@@ -1382,20 +1394,63 @@ function sync(){
 
 // Guarda ya, sin esperar el retardo. Se llama al salir de la sesión: si el reclutador
 // escribe y cierra enseguida, ese último medio segundo no se puede perder.
-async function flush(){
-  if(!S || !S.sid || S.soloLectura) return;
+// Devuelve true si el servidor confirmó el guardado. Tiene tope de tiempo: al salir de una
+// sesión, un servidor que no contesta (Postgres sin conexiones libres, Render dormido) no
+// puede dejar al reclutador mirando un botón que no hace nada. Si se vence, la copia local
+// y el beacon de pagehide siguen siendo la red de seguridad.
+async function flush(tope = 8000){
+  if(!S || !S.sid || S.soloLectura) return true;
   clearTimeout(saveTimer);
-  try{ await api('/api/sessions/'+S.sid, {method:'PATCH', body: cuerpoSesion()}); }catch(e){}
+  try{ await api('/api/sessions/'+S.sid, {method:'PATCH', body: cuerpoSesion(), tope}); return true; }
+  catch(e){ console.warn('[guardar]', e.message); return false; }
 }
 
-// Y si cierra la pestaña de golpe, se manda con sendBeacon, que sí sobrevive al cierre.
-window.addEventListener('pagehide', () => {
+function beaconSesion(){
   if(!S || !S.sid || S.soloLectura) return;
   try{
     navigator.sendBeacon?.(BASE + '/api/sessions/' + S.sid + '/beacon',
       new Blob([JSON.stringify(cuerpoSesion())], {type:'application/json'}));
   }catch(e){}
-});
+}
+
+/* Pregunta propia en la página (ver index.html: confirm() del navegador puede quedar
+   silenciado y entonces el botón parece muerto). Resuelve true/false. */
+function preguntar(titulo, texto, si = 'Guardar y salir', no = 'Seguir aquí'){
+  return new Promise(ok => {
+    const box = $('#pregunta');
+    $('#pgTitulo').textContent = titulo; $('#pgTexto').textContent = texto;
+    $('#pgSi').textContent = si; $('#pgNo').textContent = no;
+    const cerrar = v => { box.classList.remove('on'); $('#pgSi').onclick = $('#pgNo').onclick = null; ok(v); };
+    $('#pgSi').onclick = () => cerrar(true);
+    $('#pgNo').onclick = () => cerrar(false);
+    box.classList.add('on');
+    $('#pgSi').focus();
+  });
+}
+
+/* Salir de la sesión en curso. Nunca se queda esperando al servidor: guarda con tope,
+   y si el servidor no contesta, la sesión sigue en este navegador (se retoma al recargar
+   y el beacon la manda al cerrar la pestaña) y se dice claramente. */
+async function salirDeSesion(){
+  if(!S){ loadTablero(); return; }
+  if(S.soloLectura){ S = null; loadTablero(); return; }
+  overlay(true, 'Guardando la sesión…', 'Queda en el tablero y puedes retomarla después.');
+  const ok = await flush(8000);
+  overlay(false);
+  if(ok){
+    S = null; VAC = null; clearLocal();
+    toast('Sesión guardada');
+  } else {
+    // No se borra la copia local: es lo único que garantiza que no se pierda nada.
+    beaconSesion();
+    toast('El servidor no respondió. La sesión queda guardada en este navegador: al recargar la página se retoma.');
+    S = null; VAC = null;
+  }
+  loadTablero();
+}
+
+// Y si cierra la pestaña de golpe, se manda con sendBeacon, que sí sobrevive al cierre.
+window.addEventListener('pagehide', beaconSesion);
 function touch(){ saveLocal(); sync(); }
 
 /* Qué pantalla hay que repintar cuando algo cambia por debajo — subir la captura, crear
@@ -2504,7 +2559,7 @@ function propuestaDe(i){
 
 async function marcarFinEntrevista(){
   if(!S.sid) return;
-  try{ await api(`/api/sessions/${S.sid}/entrevista-fin`, {method:'POST', body:{}}); }
+  try{ await api(`/api/sessions/${S.sid}/entrevista-fin`, {method:'POST', body:{}, tope: 8000}); }
   catch(e){ console.warn('[fin-entrevista]', e.message); }
   await flush();
 }
@@ -2597,7 +2652,9 @@ function pantallaTranscripcion(err){
   }
 
   $('#transStage').querySelector('[data-salir]').addEventListener('click', async () => {
-    await marcarFinEntrevista(); loadTablero();
+    overlay(true, 'Guardando la sesión…', 'Queda en el tablero esperando la transcripción.');
+    await marcarFinEntrevista();
+    salirDeSesion();
   });
 
   const file = $('#transFile'), drop = $('#transDrop');
@@ -2684,7 +2741,7 @@ function pantallaProcesando(){
       </div>
     </div>`;
   const parar = () => { clearTimeout(PROCESANDO_TIMER); PROCESANDO_TIMER = null; };
-  $('#btnSeguirOtro').addEventListener('click', async () => { parar(); await flush(); loadTablero(); });
+  $('#btnSeguirOtro').addEventListener('click', async () => { parar(); salirDeSesion(); });
   $('#btnQuedarme').addEventListener('click', () => {
     $('#btnQuedarme').disabled = true; $('#btnQuedarme').textContent = 'Esperando…';
   });
@@ -3187,7 +3244,10 @@ async function salud(){
 function init(){
   initIntake();
   $('#btnHome').addEventListener('click', async () => {
-    if(S && !S.fin && !S.soloLectura && !confirm('Hay una sesión en curso. ¿Salir de todos modos? Queda guardada.')) return;
+    if(S && !S.fin && !S.soloLectura){
+      if(!await preguntar('Hay una sesión en curso', 'Queda guardada en el tablero y puedes retomarla después.')) return;
+      return salirDeSesion();
+    }
     await flush();
     loadTablero();
   });
@@ -3205,11 +3265,11 @@ function init(){
     setTimeout(() => c.classList.remove('destacar'), 1400);
   });
   document.querySelectorAll('[data-home]').forEach(b => b.addEventListener('click', loadTablero));
-  $('#btnReset').addEventListener('click', () => {
+  $('#btnReset').addEventListener('click', async () => {
     if(S && S.soloLectura){ S = null; loadTablero(); return; }
-    if(confirm('¿Salir de esta sesión? Queda guardada en la base de datos y puedes seguir después.')){
-      flush().then(() => { S = null; VAC = null; clearLocal(); loadTablero(); });
-    }
+    // Un acta ya emitida no tiene nada que perder: se sale directo.
+    if(S && S.fin) return salirDeSesion();
+    if(await preguntar('¿Salir de esta sesión?', 'Queda guardada y puedes seguir después desde el tablero.')) salirDeSesion();
   });
 
   const prev = loadLocal();

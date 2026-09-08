@@ -29,6 +29,20 @@ const FORMATO_ACTA = 'v4-2026-09';
 const mem = { companies: [], vacancies: [], requirements: [], sessions: [], ratings: [], seq: 1 };
 const nextId = () => mem.seq++;
 
+// El pool es del host (Sandler) y no tiene tope de espera: si todas las conexiones están
+// ocupadas, pool.connect() espera para siempre y la petición nunca contesta — desde el
+// navegador eso es un botón de "Salir" que no hace nada. Aquí se espera un tiempo razonable
+// y después se contesta 503: el cliente conserva su copia local y lo reintenta.
+const POOL_ESPERA_MS = 10000;
+async function conectar(pool) {
+  let tm;
+  const espera = new Promise((_, no) => { tm = setTimeout(() => {
+    no(Object.assign(new Error('La base de datos está ocupada. Intenta de nuevo en un momento.'), { status: 503 }));
+  }, POOL_ESPERA_MS); });
+  try { return await Promise.race([pool.connect(), espera]); }
+  finally { clearTimeout(tm); }
+}
+
 // --- Auxiliares de identidad -------------------------------------------------
 
 // Trae también cargo, cliente y trayectoria porque al emitir hay que congelarlos en el acta.
@@ -297,7 +311,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       if (reqs.length > MAX_REQ) return res.status(400).json({ error: `Máximo ${MAX_REQ} requisitos excluyentes por vacante.` });
 
       if (pool) {
-        const c = await pool.connect();
+        const c = await conectar(pool);
         try {
           await c.query('BEGIN');
           let companyId;
@@ -443,7 +457,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       const perfil = Array.isArray(b.perfil) ? b.perfil.filter(x => x && clean(x.rasgo)) : null;
 
       if (pool) {
-        const c = await pool.connect();
+        const c = await conectar(pool);
         try {
           await c.query('BEGIN');
 
@@ -1117,7 +1131,7 @@ ${!code ? `
       const sem = semaforo({ identity, signals, ...ctx });
 
       if (pool) {
-        const c = await pool.connect();
+        const c = await conectar(pool);
         try {
           await c.query('BEGIN');
           const up = await c.query(
@@ -1183,7 +1197,7 @@ ${!code ? `
       res.json({ ok: true, id, semaforo: sem, identidad: estadoIdentidad(ctx) });
     } catch (e) {
       console.error('[verificacion/sessions.patch]', e.message);
-      if (!res.headersSent) res.status(500).json({ error: e.message });
+      if (!res.headersSent) res.status(e.status || 500).json({ error: e.message });
     }
   }
 

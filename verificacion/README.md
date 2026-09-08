@@ -133,6 +133,7 @@ python3 verificacion/test/e2e_ingles.py    # el inglés se mide escuchando, no p
 python3 verificacion/test/e2e_perfil.py    # tope de 3 requisitos, dos preguntas y el perfil de conducta
 python3 verificacion/test/print_check.py   # el PDF que recibe el cliente, en los 4 casos reales
 python3 verificacion/test/e2e_paralelo.py  # el análisis en segundo plano: pegar, irse, seguir con otro
+python3 verificacion/test/e2e_salir.py     # salir de la sesión nunca se queda pegado, ni con el servidor caído
 ```
 
 Y una herramienta que no afirma nada, solo deja mirar el resultado — capturas de cada pantalla y el PDF del informe:
@@ -174,6 +175,16 @@ Va a dos columnas, formato `v4-2026-09`:
 El contexto y la recomendación se llenan en la fase **Contexto**; la conducta y las tarjetas, en la fase **Conducta**, después de leer la transcripción.
 
 **Ojo con el formato.** El snapshot congela los *datos* de un informe emitido, que es lo que promete la firma de integridad. La maqueta no: un informe emitido bajo `v3-2026-08` se vuelve a dibujar con la de `v4`, con su mismo contenido. Si mañana hace falta que un informe viejo se vea exactamente como el día que se entregó, hay que guardar también el HTML, no solo los datos.
+
+### Salir de la sesión nunca se queda pegado
+
+Pasó en producción: "Salir de la sesión" no hacía nada. Dos causas, y se cerraron las dos.
+
+- **La pregunta ya no es un `confirm()` del navegador.** Chrome deja de mostrar los diálogos de una página cuando el usuario marcó "no permitir más" —y una entrevista larga con varios avisos invita a marcarlo—; desde ese momento `confirm()` devuelve `false` en silencio y el botón parece muerto. La pregunta ahora es un cuadro propio (`#pregunta`), que no depende de nada del navegador. Un acta ya emitida sale sin preguntar: no tiene nada que perder.
+- **Guardar tiene tope de tiempo.** `flush()` esperaba al servidor sin límite; si Postgres no tenía conexiones libres o Render estaba dormido, la petición nunca contestaba y el reclutador se quedaba mirando la pantalla. Ahora `api()` acepta `tope` (ms) y `salirDeSesion()` guarda con 8 segundos de tope mostrando "Guardando la sesión…". Si el servidor no contesta, **se sale igual**, se avisa, se manda el `beacon`, y la copia local **no se borra**: al recargar la página la sesión se retoma. Con el servidor sano, se sale, se guarda y la copia local se limpia. "Ir al tablero y seguir con otro" y "Guardar y salir" de la sala de espera pasan por el mismo camino, así que ya no dejan una sesión fantasma que se retomaba sola al recargar.
+- **En el servidor, `pool.connect()` también tiene tope** (`conectar()`, 10 s): el pool es del host y no tiene `connectionTimeoutMillis`, así que una petición podía esperar una conexión para siempre. Ahora contesta `503` y el navegador conserva su copia.
+
+`test/e2e_salir.py` corre con los diálogos del navegador bloqueados y con el guardado colgado a propósito (`__simular {guardar_colgado:true}` en el stub).
 
 ### El análisis corre en segundo plano
 

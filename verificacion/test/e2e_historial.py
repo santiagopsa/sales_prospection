@@ -65,7 +65,10 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(1300)   # el autoguardado tiene 900 ms de retardo
 
     # --- volver al tablero y abrir las dos ---
-    pg.click("#btnHome"); pg.wait_for_timeout(900)
+    pg.click("#btnHome"); pg.wait_for_timeout(300)
+    # La pregunta es de la página, no un confirm() del navegador (ver e2e_salir.py).
+    if pg.is_visible("#pregunta"): pg.click("#pgSi")
+    pg.wait_for_selector("#vTablero.on", timeout=12000); pg.wait_for_timeout(600)
     filas = pg.query_selector_all("[data-ses]")
     if len(filas) != 2: errs.append(f"el tablero muestra {len(filas)} verificaciones, se esperaban 2")
 

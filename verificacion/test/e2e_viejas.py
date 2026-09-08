@@ -56,7 +56,9 @@ def simular(**kw):
 
 
 def abrir(pg, nombre):
-    pg.click("#btnHome"); pg.wait_for_timeout(900)
+    pg.click("#btnHome"); pg.wait_for_timeout(300)
+    if pg.is_visible("#pregunta"): pg.click("#pgSi")
+    pg.wait_for_selector("#vTablero.on", timeout=12000); pg.wait_for_timeout(600)
     pg.click(f'[data-ses]:has-text("{nombre}")'); pg.wait_for_timeout(1200)
     return pg.inner_text("#actaStage")
 
