@@ -135,6 +135,7 @@ python3 verificacion/test/print_check.py   # el PDF que recibe el cliente, en lo
 python3 verificacion/test/e2e_paralelo.py  # el análisis en segundo plano: pegar, irse, seguir con otro
 python3 verificacion/test/e2e_salir.py     # salir de la sesión nunca se queda pegado, ni con el servidor caído
 python3 verificacion/test/e2e_idioma.py    # el informe en español o en inglés: emitir, alternar, reabrir, PDF
+python3 verificacion/test/e2e_una_hoja.py  # el caso de José cabe en UNA hoja de Oficio; mide cada bloque
 ```
 
 Y una herramienta que no afirma nada, solo deja mirar el resultado — capturas de cada pantalla y el PDF del informe:
@@ -206,6 +207,16 @@ Pasó en producción: "Salir de la sesión" no hacía nada. Dos causas, y se cer
 Pegar la transcripción dejó de bloquear. Antes el navegador esperaba los 30-40 segundos del análisis con un velo encima y el reclutador no podía abrir la siguiente entrevista; con entrevistas de 30 minutos una tras otra, eso era tiempo muerto real. Ahora `POST /api/sessions/:id/transcript` contesta `202 {estado:'procesando'}` de inmediato y el análisis sigue solo en el servidor, con su estado en la sesión (`transcript_status`: `procesando` → `lista` | `error`). La pantalla de espera ofrece dos salidas: irse al tablero y empezar con otro candidato, o quedarse — en cuyo caso consulta cada cuatro segundos y salta sola a la calificación. El tablero muestra la sesión como *analizando* y se refresca solo mientras haya algo en curso; al terminar aparece como *lista para calificar*, y al abrirla las propuestas se aplican una sola vez (si ya hay niveles, el evaluador ya pasó por ahí y no se le pisa nada).
 
 Un análisis en `procesando` desde hace más de seis minutos se reporta como interrumpido —Render reinicia el proceso al desplegar— y se ofrece volver a pegar. La transcripción no se guarda en ningún momento: vive en memoria mientras dura el análisis. `test/e2e_paralelo.py` recorre el caso completo: pegar, irse, abrir otra entrevista, volver a la primera ya lista, y un análisis que falla.
+
+### Una hoja
+
+El objetivo del informe es una hoja. Con la carga de un caso real —el de José: tres requisitos con recomendación, cinco tarjetas, tres rasgos, experiencia verificada— salía en dos páginas de Oficio con el respaldo solo en la segunda. Tres cosas lo resolvieron, y conviene saberlas antes de tocar el CSS de papel:
+
+- **Estructura antes que tamaño de letra.** La fila del requisito en papel es de dos columnas (nombre con su nota debajo, y el párrafo), no de tres: la columna del medio con la nota sola le quitaba 60px de ancho al párrafo. La experiencia va como fila a lo ancho, no como columna de la banda de tres: en un tercio de hoja el cargo se partía en tres renglones y el porqué en seis, y esa columna fijaba la altura de toda la banda. Los factores de cierre, cuando son solo lo que dijo el candidato, entran como columna de esa banda. Las cinco tarjetas van en una fila (`.imps.n5`); en 4+1 la segunda fila era una tarjeta y tres huecos.
+- **Ajuste a una hoja (`ajustarAUnaHoja()` en `public/app.js`).** Antes de imprimir, la pantalla copia las reglas de `@media print` a un ámbito `.papelmedida`, clona el acta ahí a lo ancho de una hoja y mide su altura. Si cabe en Carta, zoom 1. Si se pasa por poco, `--ajuste` toma la fracción justa (Chrome reacomoda el texto con `zoom`, a diferencia de `transform`). Si haría falta encoger más del **piso (0.88)** se intenta Oficio, y si tampoco, se queda a tamaño natural y son dos páginas: por debajo del piso el cuerpo queda en 7 puntos, y un informe ilegible es peor que uno de dos hojas. El QR compensa el zoom (`--ajusteqr`) y sigue midiendo 104px: esa es la garantía de que un celular lo lee del papel.
+- **Márgenes de documento.** `@page` bajó de 14/13/15 a 12/12/13 mm.
+
+Lo que NO se hace: recortar contenido para caber. `test/e2e_una_hoja.py` comprueba que el caso de José cabe en una hoja de Oficio, no pasa de dos en Carta, el ajuste queda dentro del piso, el QR no se encoge y el PDF sigue diciendo todo lo que tiene que decir; además imprime cuánto mide cada bloque, que es la regla con la que se mide este trabajo. En Carta, un informe con esa carga sigue siendo de dos páginas: a 8.5×11 no cabe sin bajar del piso.
 
 ### El PDF, que es lo que de verdad recibe el cliente
 

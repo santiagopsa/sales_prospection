@@ -597,6 +597,15 @@ input,textarea,select{font:inherit;color:inherit}
   .hint{display:none!important}
   .acta .hint{display:block!important;font-size:10.5px;color:var(--ink2)}
   .acta{border:none;box-shadow:none;padding:0}
+  /* Ajuste a una hoja. Antes de imprimir, la pantalla mide cuánto ocupa el informe con
+     estas reglas de papel y, si se pasa de una hoja Carta por poco, lo encoge lo justo
+     con zoom (que sí reacomoda el texto, a diferencia de transform). Tiene piso: por
+     debajo de ~0.88 el cuerpo queda en 7 puntos y un informe ilegible es peor que uno de
+     dos páginas. Lo calcula ajustarAUnaHoja() en app.js; sin JS vale 1. */
+  .acta{zoom:var(--ajuste,1)}
+  /* El QR NO se encoge con el resto: a 104px y 33 módulos queda a 0.83 mm por módulo, y
+     ese margen es el que garantiza que un celular lo lea del papel. Se compensa el zoom. */
+  .acta .abqr svg{zoom:var(--ajusteqr,1)}
   .card{box-shadow:none}
   .stage{padding:0}
 
@@ -624,7 +633,9 @@ input,textarea,select{font:inherit;color:inherit}
 }
 .printhd,.printft{display:none}
 
-@page{ margin:14mm 13mm 15mm }
+/* Márgenes de documento. Bajaron un poco (14/13/15 → 12/12/13) porque cada milímetro de
+   margen es un renglón menos en una hoja que tiene que cerrar en una página. */
+@page{ margin:12mm 12mm 13mm }
 
 /* Señal de que un botón de navegación sí hizo algo, aunque la página no tenga scroll. */
 .destacar{animation:destello 1.4s ease-out}
@@ -819,28 +830,58 @@ input,textarea,select{font:inherit;color:inherit}
   .ahd .bajada{font-size:11.5px}
   /* En papel el objetivo es UNA página, dos como máximo: márgenes de documento, tipo de
      documento. Lo que en pantalla es cómodo en la hoja es aire desperdiciado. */
-  .acta{font-size:10.6px}
+  .acta{font-size:10.3px}
   .acta .ahd h2{font-size:18px}
   .acta .ahd .cert{font-size:9.5px}
   .acta .ahd .rl2{font-size:11.5px}
   .acta .ahd .mt{font-size:10px;line-height:1.5}
   .acta .actaiso{width:38px;margin-bottom:6px}
-  .acta .zona{margin:9px 0 5px;padding:4px 9px}
+  .acta .zona{margin:7px 0 4px;padding:3px 9px}
   .acta .zona .zn,.acta .zona h3{font-size:9px}
   .acta .zona .zs{font-size:8.5px}
-  .acta .zbox{padding:7px 10px;border-radius:7px}
-  .acta .req{padding:5px 0;gap:9px;grid-template-columns:minmax(0,.8fr) 66px minmax(0,2.8fr)}
-  .acta .reqn{font-size:11px;line-height:1.3}
+  .acta .zbox{padding:6px 9px;border-radius:7px}
+  /* La columna del nombre del requisito va más ancha en papel: con .8fr un requisito de
+     doce palabras se partía en seis renglones y era ÉL, no el párrafo, el que fijaba la
+     altura de la fila. */
+  /* En papel la fila del requisito es de DOS columnas: a la izquierda el nombre con su
+     nota debajo ("4 / 5  CUMPLE"), a la derecha el párrafo. La columna del medio con la
+     nota sola le quitaba 60px de ancho al párrafo, y en papel cada renglón cuenta. */
+  .acta .req{padding:3px 0;gap:2px 10px;grid-template-columns:minmax(0,1.35fr) minmax(0,3fr);grid-template-rows:auto auto auto}
+  .acta .reqn{grid-row:1}
+  .acta .reqv{grid-column:1;grid-row:2;flex-direction:row;align-items:baseline;justify-content:flex-start;gap:6px;text-align:left}
+  .acta .req .aex{grid-column:2;grid-row:1 / span 2}
+  .acta .req .afalta{grid-column:2;grid-row:3;margin-top:2px;padding-left:8px}
+  /* La fila de la experiencia: el cargo es largo y va con la empresa debajo, así que su
+     columna es más ancha que la de un requisito. */
+  .acta .req.exp{grid-template-columns:minmax(0,1.9fr) minmax(0,2.4fr)}
+  /* En la banda de tres, cada renglón de integridad vuelve a ser rótulo a la izquierda y
+     sello a la derecha: apilados (rótulo, y el sello en el renglón de abajo) cada uno
+     medía tres renglones y la columna fijaba la altura de la banda. */
+  .acta .banda3 .res{display:flex;align-items:flex-start;gap:8px;padding:4px 0}
+  .acta .banda3 .res .vd{float:none;margin:0;flex:none}
+  .acta .banda3 .res .rn{flex:1;font-size:10.6px}
+  .acta .banda3 .res .rn small{font-size:9.2px}
+  .acta .banda3 .res .vd{font-size:8.5px;padding:2px 6px}
+  .acta .banda3 .zbox{padding:6px 9px}
+  /* La categoría de la tarjeta en un renglón: en dos se comía la mitad de la tarjeta. */
+  .acta .imp .isub{font-size:7.5px;letter-spacing:.03em}
+  .acta .reqn{font-size:10.6px;line-height:1.28}
   .acta .reqv .rl{font-size:12.5px}
   .acta .reqv .vd{font-size:8.5px;padding:2px 6px}
-  .acta .aex{font-size:10.4px;line-height:1.42}
+  .acta .aex{font-size:10.1px;line-height:1.35}
   .acta .afalta{font-size:10px;margin-top:5px}
   .acta .hint.escala{font-size:9px;margin-top:6px;padding-top:5px}
-  .acta .imps{gap:6px}
+  /* Las tarjetas de "lo que demostró" van todas en UNA fila: cinco tarjetas en 4+1 dejan
+     una fila entera con una sola tarjeta y tres huecos, y eso en una hoja que tiene que
+     cerrar en una página es el espacio que faltaba. */
+  .acta .imps{gap:6px;grid-template-columns:repeat(auto-fit,minmax(118px,1fr))}
+  .acta .imps.n5{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .acta .imps.n4{grid-template-columns:repeat(4,minmax(0,1fr))}
   .acta .imp{padding:6px 9px}
   .acta .imp b{font-size:11px}
   .acta .imp .isub{font-size:8.5px}
-  .acta .imp p{font-size:9.8px;line-height:1.35}
+  .acta .imp p{font-size:9.6px;line-height:1.3;margin-top:3px}
+  .acta .imp{padding:5px 8px}
   /* La cintilla y los sellos en UNA fila cada uno: en dos filas se comen 60px de una hoja
      que tiene que cerrar en dos páginas. Con cinco chips a cinco columnas cada uno mide
      ~130px, suficiente para "Disponibilidad: dos semanas" sin partir. */
@@ -848,7 +889,8 @@ input,textarea,select{font:inherit;color:inherit}
   .acta .chips{gap:5px;margin-top:6px}
   .acta .sello{font-size:9px;padding:2px 7px}
   .acta .sellos{gap:5px}
-  .acta .ahd{padding-bottom:8px}
+  .acta .ahd{padding-bottom:6px}
+  .acta .actaiso{margin-bottom:3px}
   .acta .ahd .bajada{margin-top:4px}
   .acta .abqr svg{width:104px;height:104px}
   .acta .aback{padding:9px 12px}
@@ -860,7 +902,7 @@ input,textarea,select{font:inherit;color:inherit}
   .acta .posic{margin-top:9px;padding:7px 11px}
   .acta .posic p{font-size:11px;line-height:1.45}
   .acta .mini{font-size:8.5px;margin-bottom:3px}
-  .acta .dtx{font-size:10.4px;line-height:1.42}
+  .acta .dtx{font-size:10.1px;line-height:1.35}
   .acta .lst{font-size:10.8px;line-height:1.45}
   .acta .riesgo{padding:5px 0;font-size:10.8px}
   .acta .riesgo span{font-size:10.2px}
@@ -874,10 +916,12 @@ input,textarea,select{font:inherit;color:inherit}
   .banda3 .ingniv{font-size:15px;width:34px;height:34px}
   .banda3 .ingtx b{font-size:10.2px}
   .acta .hint{font-size:9.2px!important;margin-top:5px}
-  .acta .aback{padding:10px 13px;gap:12px}
+  .acta .aback{padding:8px 11px;gap:10px;margin-top:8px}
   .acta .aback h4{font-size:11.5px}
-  .acta .aback p{font-size:10.2px}
-  .acta .cierrepie{margin-top:10px}
+  .acta .aback p{font-size:9.8px;line-height:1.4}
+  .acta .cierrepie{margin-top:6px}
+  .acta .ahd .mt{line-height:1.4}
+  .acta .ahd .bajada{font-size:11px;line-height:1.35}
   /* Dentro de las dos columnas, los recuadros SÍ se pueden partir entre páginas. Con
      break-inside:avoid —que es lo correcto en el resto del documento— un recuadro que no
      cabía se iba entero a la página siguiente y dejaba media hoja en blanco. Lo que no se
@@ -892,9 +936,9 @@ input,textarea,select{font:inherit;color:inherit}
      informe corto eso deja una hoja con un solo recuadro, que se lee como un error de
      impresión. A 104px y 33 módulos el QR queda a 0.84 mm por módulo, muy por encima del
      medio milímetro que necesita un celular para leerlo del papel. */
-  .cierrepie{break-inside:avoid;page-break-inside:avoid;margin-top:10px}
-  .acta .hint.alcance{margin-top:8px;font-size:9.5px}
-  .abqr{padding:6px 6px 4px}
+  .cierrepie{break-inside:avoid;page-break-inside:avoid;margin-top:6px}
+  .acta .hint.alcance{margin-top:4px;font-size:9px}
+  .abqr{padding:4px 4px 3px}
   .abqr svg{width:104px;height:104px}
   .abqr span{font-size:7.5px;margin-top:3px}
   .aback h4{font-size:12.5px}
@@ -951,9 +995,12 @@ input,textarea,select{font:inherit;color:inherit}
    sección con tres cajas. Con dos columnas —sin inglés, por ejemplo— se reparte en dos. */
 .banda3{display:grid;gap:14px;align-items:start;margin-top:4px}
 .banda3.n3{grid-template-columns:repeat(3,1fr)}
+.banda3.n4{grid-template-columns:repeat(4,1fr)}
 .banda3.n2{grid-template-columns:repeat(2,1fr)}
 .banda3.n1{grid-template-columns:1fr}
 .banda3 .tres{min-width:0}
+/* La fila de experiencia: nombre del cargo con la empresa debajo, sello, y el porqué. */
+.req.exp .reqn small{display:block;font-weight:400;color:var(--ink3);font-size:.85em;margin-top:2px;line-height:1.35}
 @media screen{ .banda3 .zona{margin-top:16px} .banda3 .zbox{padding:11px 13px} }
 .banda3 .zona .zs{display:none}
 /* En una columna angosta, la etiqueta y su sello no caben lado a lado sin que la etiqueta

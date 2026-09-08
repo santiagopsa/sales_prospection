@@ -2987,7 +2987,68 @@ function aplicarTranscripcion(an){
 // Llena el membrete y el pie que se repiten en cada página impresa. Se hace al momento de
 // imprimir y no al dibujar el acta, porque también aplica cuando el usuario imprime con
 // Ctrl+P sin tocar el botón.
+/* ---- ajuste a una hoja ----
+   El informe se mide con las MISMAS reglas que usa el papel: se copian las reglas de
+   @media print a un ámbito .papelmedida (una sola vez), se clona el acta ahí, a lo ancho
+   de una hoja Carta, y se lee su altura. Con eso se decide el zoom: 1 si cabe, la fracción
+   justa si se pasa por poco, y nada (dos páginas) si haría falta encoger más del piso.
+   Se calcula sobre Carta: lo que cabe en Carta cabe en Oficio. */
+// A 96px por pulgada, con los márgenes de @page (12/12/13 mm): Carta 8.5×11in deja
+// 725×961px; Oficio 8.5×14in deja 725×1249px. El acta impresa mide ~690px de ancho (el
+// contenedor conserva un poco de aire a los lados), y con ese ancho se mide el clon.
+const HOJA = { anchoPx: 690, altoCartaPx: 961, altoOficioPx: 1249, piso: 0.88, holgura: 0.98 };
+function reglasDePapel(){
+  if(document.getElementById('cssPapelMedida')) return;
+  const out = [];
+  for(const sh of document.styleSheets){
+    let rules; try{ rules = sh.cssRules; }catch(e){ continue; }
+    for(const r of rules){
+      if(!(r instanceof CSSMediaRule) || !/print/.test(r.media.mediaText) || /not/.test(r.media.mediaText)) continue;
+      for(const q of r.cssRules){
+        if(!(q instanceof CSSStyleRule)) continue;
+        const sel = q.selectorText.split(',').map(x => x.trim())
+          .map(x => /^:root/.test(x) ? '.papelmedida' + x.replace(/^:root/, '') : '.papelmedida ' + x).join(',');
+        out.push(sel + '{' + q.style.cssText + '}');
+      }
+    }
+  }
+  const st = document.createElement('style'); st.id = 'cssPapelMedida';
+  st.textContent = out.join('\n'); document.head.appendChild(st);
+}
+function ajustarAUnaHoja(){
+  const acta = document.querySelector('#actaStage .acta');
+  const raiz = document.documentElement;
+  if(!acta){ raiz.style.removeProperty('--ajuste'); return 1; }
+  let k = 1;
+  try{
+    reglasDePapel();
+    const caja = document.createElement('div');
+    caja.className = 'papelmedida';
+    caja.style.cssText = `position:absolute;left:-20000px;top:0;width:${HOJA.anchoPx}px;visibility:hidden;pointer-events:none`;
+    const clon = acta.cloneNode(true);
+    clon.style.zoom = '1';
+    caja.appendChild(clon); document.body.appendChild(caja);
+    const alto = clon.getBoundingClientRect().height;
+    caja.remove();
+    HOJA.ultimoAlto = alto;
+    // Primero Carta (lo que cabe en Carta cabe en Oficio); si en Carta haría falta
+    // encoger más del piso, se intenta Oficio, que es el otro papel que se usa aquí. Si
+    // tampoco, se queda a tamaño natural y son dos páginas: mejor eso que ilegible.
+    for(const altoHoja of [HOJA.altoCartaPx, HOJA.altoOficioPx]){
+      const cabe = altoHoja * HOJA.holgura;
+      if(alto <= cabe){ k = 1; break; }
+      const f = Math.floor((cabe / alto) * 1000) / 1000;
+      if(f >= HOJA.piso){ k = f; break; }
+    }
+    HOJA.ultimoK = k;
+  }catch(e){ k = 1; }
+  raiz.style.setProperty('--ajuste', String(k));
+  raiz.style.setProperty('--ajusteqr', (1 / k).toFixed(4));
+  return k;
+}
+
 function prepararImpresion(){
+  ajustarAUnaHoja();
   const doc = S && S.doc ? S.doc : null;
   /* Si el reclutador deja activada la casilla "Encabezados y pies de página" del diálogo de
      Chrome, lo que se imprime arriba de cada hoja es el <title> del documento. Sin esto sale
@@ -3170,6 +3231,13 @@ function verActa(){
             `<b>${cumple} quedó${cumple===1?'':'ron'} sostenido${cumple===1?'':'s'}</b> con evidencia de la sesión` +
             (parcial ? `, ${parcial} parcialmente` : '') + '.');
 
+  // Los factores de cierre, cuando son solo lo que dijo el candidato (sin veredicto ni
+  // riesgos), son un bloque corto: entran como columna de la banda de tres en vez de abrir
+  // una banda entera para dos renglones. Con veredicto y riesgos siguen aparte, en dos
+  // columnas, porque ahí sí hay texto. Solo si en la banda queda sitio (menos de tres).
+  const cierreCorto = !!((dec.motivacion || nogo.length) && !(VER || riesgos.length));
+  const cierreEnBanda = cierreCorto && ((ingA ? 1 : 0) + 1) < 3;
+
   // Sellos: solo lo que de verdad se midió en esta sesión.
   const nR = S.reqs.length;
   const selloReq = EN ? `${nR} requirement${nR>1?'s':''} measured` : `${nR} requisito${nR>1?'s':''} medido${nR>1?'s':''}`;
@@ -3256,7 +3324,7 @@ function verActa(){
         ${impacto.length ? `
         <div class="zona"><span class="zn">${R('z_impacto')}</span><h3>${R('z_impacto_h')}</h3>
           <span class="zs">${R('z_impacto_s')}</span></div>
-        <div class="imps">
+        <div class="imps n${Math.min(impacto.length, 5)}">
           ${impacto.map(x => `<div class="imp">
             <b>${esc(tx(`imp.${x.i}.t`, x.titulo||''))}</b>
             ${x.sub?`<span class="isub">${esc(tx(`imp.${x.i}.s`, x.sub))}</span>`:''}
@@ -3289,16 +3357,20 @@ function verActa(){
            para que ninguna columna quede vacía. -->
       ${(() => {
         const cols = [];
-        if(ultima) cols.push(`
-          <div class="tres">
-            <div class="zona"><span class="zn">${R('z_exp')}</span><h3>${ultima.ok ? R('exp_verificada_h') : R('exp_reciente_h')}</h3></div>
-            <div class="zbox">
-              <div class="res"><div class="rn">${esc(tx('exp.cargo', ultima.cargo||'—'))}<small>${esc(ultima.empresa||'')}${ultima.periodo?' · '+esc(tx('exp.periodo', ultima.periodo)):''}</small></div>
-                <span class="vd ${ultima.ok?'ok':'nv'}">${ultima.ok?R('exp_verificada'):R('exp_no_verificada')}</span></div>
-              ${(ultima.porque || ultima.resumen) ? `<p class="dtx">${esc(tx('exp.porque', ultima.porque || ultima.resumen))}</p>` : ''}
-              ${ultima.ok ? '' : `<p class="hint">${R('exp_nota_no')}</p>`}
+        // La experiencia va como FILA a lo ancho, con la misma anatomía que un requisito
+        // (qué · cómo salió · por qué), no como columna: en un tercio de hoja el cargo se
+        // partía en tres renglones y el porqué en seis, y esa columna alta fijaba la altura
+        // de toda la banda. En fila ocupa un tercio de eso.
+        const filaExp = !ultima ? '' : `
+          <div class="zona"><span class="zn">${R('z_exp')}</span><h3>${ultima.ok ? R('exp_verificada_h') : R('exp_reciente_h')}</h3></div>
+          <div class="zbox">
+            <div class="req exp">
+              <div class="reqn">${esc(tx('exp.cargo', ultima.cargo||'—'))}<small>${esc(ultima.empresa||'')}${ultima.periodo?' · '+esc(tx('exp.periodo', ultima.periodo)):''}</small></div>
+              <div class="reqv"><span class="vd ${ultima.ok?'ok':'nv'}">${ultima.ok?R('exp_verificada'):R('exp_no_verificada')}</span></div>
+              ${(ultima.porque || ultima.resumen) ? `<div class="aex">${esc(tx('exp.porque', ultima.porque || ultima.resumen))}</div>` : ''}
+              ${ultima.ok ? '' : `<div class="afalta">${R('exp_nota_no')}</div>`}
             </div>
-          </div>`);
+          </div>`;
         if(ingA) cols.push(`
           <div class="tres">
             <div class="zona"><span class="zn">${R('z_ing')}</span><h3>${ingA.confirmado ? R('ing_oido') : R('ing_no_evaluado')}</h3></div>
@@ -3316,6 +3388,20 @@ function verActa(){
               `}
             </div>
           </div>`);
+        // Los factores de cierre, cuando son solo lo que dijo el candidato (sin veredicto ni
+        // riesgos), son un bloque corto: entran como columna de esta banda en vez de abrir
+        // una banda entera para dos renglones. Con veredicto y riesgos siguen aparte, en dos
+        // columnas, porque ahí sí hay texto.
+        if(cierreEnBanda) cols.push(`
+          <div class="tres">
+            <div class="zona"><span class="zn">${R('z_cierre')}</span><h3>${R('cierre_s1')}</h3></div>
+            <div class="zbox">
+              ${dec.motivacion ? `<div class="mini">${R('motivacion')}</div>
+                <p class="dtx">${esc(tx('dec.motivacion', dec.motivacion))}</p>` : ''}
+              ${nogo.length ? `<div class="mini" style="margin-top:8px">${R('nogo')}</div>
+                <ul class="lst">${nogo.map((x, i)=>`<li>${esc(tx(`dec.nogo.${i}`, x))}</li>`).join('')}</ul>` : ''}
+            </div>
+          </div>`);
         cols.push(`
           <div class="tres">
             <div class="zona"><span class="zn">${R('z_integridad')}</span><h3>${R('z_integridad_h')}</h3></div>
@@ -3326,13 +3412,13 @@ function verActa(){
               ${nSig?`<div class="aev">${R('senales_pre')} ${SIGNALS.filter(s=>S.sig[s.id]).map(s=>esc(nombreSenal(s))).join(' · ')}. ${R('senales_post')}</div>`:''}
             </div>
           </div>`);
-        return `<div class="banda3 n${cols.length}">${cols.join('')}</div>`;
+        return filaExp + `<div class="banda3 n${cols.length}">${cols.join('')}</div>`;
       })()}
 
       <!-- Factores de cierre: lo que el cliente necesita para mover la oferta. Va al final
            porque es lo último que se decide, y en dos columnas porque son dos lecturas
            distintas — lo que lo atrae y lo que puede salir mal. -->
-      ${(dec.motivacion || nogo.length || VER || riesgos.length) ? `
+      ${((dec.motivacion || nogo.length || VER || riesgos.length) && !cierreEnBanda) ? `
       <div class="zona"><span class="zn">${R('z_cierre')}</span><h3>${R('cierre_h')} ${esc((S.cand||'').split(' ')[0])}${(VER||riesgos.length)?R('cierre_h2'):''}</h3>
         <span class="zs">${(VER||riesgos.length) ? R('cierre_s2') : R('cierre_s1')}</span></div>
       <div class="zbox${(VER||riesgos.length)?' dos':''}">
