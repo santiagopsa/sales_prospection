@@ -764,7 +764,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         if (!q.rows.length) return res.status(404).json({ error: 'not found' });
         cargo = q.rows[0].title || ''; empresa = q.rows[0].company || ''; candidato = q.rows[0].candidate || '';
         if (q.rows[0].vid) {
-          const rq = await pool.query(`SELECT text, criterio, detalles FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`, [q.rows[0].vid]);
+          const rq = await pool.query(`SELECT text, criterio, detalles, q_escena, c_escena FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`, [q.rows[0].vid]);
           excluyentes = rq.rows;
         }
       } else {

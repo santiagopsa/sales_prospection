@@ -402,7 +402,7 @@ const server = http.createServer(async (req, res) => {
         demostro: i === 1
           ? ''
           : 'Lleva un rollout de producción completo con fechas, alcance y rol propio, y resolvió la caída del maestro de materiales con criterio propio.',
-        brecha: i === 1 ? '' : (i === 0 ? '' : 'Describió la integración con calidad sin un caso propio de lo que rehízo, que era lo que la pregunta pedía.'),
+        brecha: i === 1 ? '' : (i === 0 ? '' : 'Sin embargo, describió la integración con calidad sin el caso propio de lo que rehízo, que era lo que la pregunta pedía.'),
         recomendacion: i === 1
           ? ''
           : 'Rinde más con autonomía sobre el módulo y un par en calidad para la integración.',

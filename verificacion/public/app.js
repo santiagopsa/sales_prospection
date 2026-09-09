@@ -1843,7 +1843,7 @@ function render(){
         <div class="f" style="margin-top:12px"><label>Qué demostró — se imprime en el informe</label>
           <textarea class="notes" data-porque rows="3" placeholder="Máximo 30 palabras: los criterios que cumplió, con el hecho que lo muestra. El sujeto es el candidato. Nunca lo que la entrevista dejó de hacer.">${esc(r.exp||'')}</textarea></div>
         <div class="f" style="margin-top:8px"><label>${r.lvl && r.lvl < 5 ? `Qué lo separa del ${r.lvl+1}` : 'Qué lo separa del nivel siguiente'} — se imprime; vacío solo en nivel 5</label>
-          <textarea class="notes" data-brecha rows="2" placeholder="Máximo 25 palabras, en términos del criterio que quedó parcial o sin cumplir: 'Su relato no incluyó el resultado que la pregunta pedía'.">${esc(r.brecha||'')}</textarea></div>
+          <textarea class="notes" data-brecha rows="2" placeholder="Máximo 25 palabras, a continuación de lo que demostró: 'Sin embargo, su relato no incluyó el resultado que la pregunta pedía'. Solo lo que una pregunta le pidió: no se le puede reprochar lo que nadie le preguntó.">${esc(r.brecha||'')}</textarea></div>
         <div class="evnote" id="evNote"></div>
         <details class="guionbox" style="margin-top:10px">
           <summary>Rastro interno de auditoría (opcional, no se imprime)</summary>
@@ -3339,13 +3339,12 @@ function verActa(){
               const p = porQue(r, i);
               const cuerpo = (!p.esAncla && p.texto) ? p.texto
                            : ((r.ev || '').trim() || NIVEL_CLIENTE[r.lvl] || '');
-              // Con brecha (análisis nuevos) el cuerpo son dos renglones rotulados: qué demostró
-              // y qué lo separa del nivel siguiente. Sin brecha (actas anteriores) es el párrafo.
-              const brecha = (r.brecha || '').trim();
-              const cuerpoHtml = !cuerpo ? '' : brecha || r.lvl === 5
-                ? `<div class="aex dl"><div class="dln"><b class="dk ok">✓ ${R('demostro')}</b><span>${esc(tx(`req.${i}.cuerpo`, cuerpo))}</span></div>
-                   ${brecha && r.lvl < 5 ? `<div class="dln"><b class="dk par">△ ${R('para')} ${r.lvl + 1}</b><span>${esc(tx(`req.${i}.brecha`, brecha))}</span></div>` : ''}</div>`
-                : `<div class="aex">${esc(tx(`req.${i}.cuerpo`, cuerpo))}</div>`;
+              // Lo positivo y lo que faltó van en UN párrafo, sin rótulos: "demostró X. Sin
+              // embargo, Y". Quien lo lee entiende por qué no llegó al nivel de arriba sin que
+              // el documento se lo deletree. La brecha se escribe para leerse a continuación.
+              const brecha = (r.lvl < 5 ? (r.brecha || '') : '').trim();
+              const texto = [tx(`req.${i}.cuerpo`, cuerpo), brecha ? tx(`req.${i}.brecha`, brecha) : ''].filter(Boolean).join(' ');
+              const cuerpoHtml = texto ? `<div class="aex">${esc(texto)}</div>` : '';
               return `<div class="req">
                 <div class="reqn">${esc(tx(`req.${i}.n`, r.n))}</div>
                 <div class="reqv"><span class="rl">${r.lvl} / 5</span>${barra5(r.lvl, v)}<span class="vd ${v}">${LVL[r.lvl]}</span></div>

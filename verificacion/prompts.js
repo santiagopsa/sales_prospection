@@ -57,12 +57,29 @@ PARA CADA EXCLUYENTE, construye el material de verificación. Esta es la parte m
 - "detalles_verificables": exactamente 3 hechos duros que solo conoce quien lo hizo de verdad (versión de la herramienta, tamaño típico del equipo, cuánto suele durar, con qué se integra, qué se rompe primero, qué nombre real tiene un paso del proceso). Son las anclas que el evaluador no técnico compara contra tu propia respuesta. Para cada uno escribe la respuesta esperada, corta.
 
 LAS PREGUNTAS — DOS POR REQUISITO, TRES COMO MÁXIMO ABSOLUTO:
-Se leen EN VOZ ALTA, tal cual, sin adaptarlas. El reclutador las lee mientras escucha al candidato
-y observa cómo responde. No tiene tiempo de reformular ni de construir nada en el momento. Así que
-escríbelas como se van a decir: en segunda persona, dirigidas al candidato, completas, y que se
-entiendan solas sin haber leído el resto de la ficha. Nada de instrucciones al reclutador dentro de
-la pregunta, nada de corchetes para rellenar, nada de "pídele que...". Una sola pregunta por campo,
-no tres encadenadas. Cortas: si no se puede decir de un tirón sin tomar aire, está mal escrita.
+Se leen EN VOZ ALTA, tal cual, sin adaptarlas. El reclutador las lee LITERALES mientras escucha al
+candidato y observa cómo responde. No tiene tiempo de reformular ni de construir nada en el momento.
+Así que escríbelas como las diría una persona en una conversación: en segunda persona, dirigidas al
+candidato, y que se entiendan solas sin haber leído el resto de la ficha. Nada de instrucciones al
+reclutador dentro de la pregunta, nada de corchetes para rellenar, nada de "pídele que...".
+
+COMPLETAS Y NATURALES — las dos cosas a la vez, y esta es la regla que decide si la pregunta sirve:
+- COMPLETA: la pregunta pide, con palabras, TODO lo que su criterio de validación va a exigir. Si
+  el criterio espera empresa, época y qué hizo él, la pregunta lo pide: "cuéntame del último
+  rollout que hiciste: en qué empresa fue, más o menos cuándo, y qué parte te tocó a ti
+  directamente". El candidato tiene que oír lo que se le va a evaluar; lo que la pregunta no pide
+  no se le puede reprochar después.
+- NATURAL: suena a alguien hablando, no a formulario ni a examen. Una sola pregunta, que puede
+  llevar sus dos o tres partes hilvanadas con naturalidad ("…: cuándo fue, qué se les cayó y qué
+  hiciste tú para resolverlo"), no tres preguntas pegadas con punto y coma. Se puede decir de un
+  tirón sin tomar aire. Léela mentalmente en voz alta: si suena a "Describa una situación en la
+  que…", reescríbela.
+  ✗ "Describe tu experiencia optimizando consultas SQL sobre tablas grandes."
+  ✓ "Si una consulta se te pone lenta sobre una tabla de millones de registros, ¿qué es lo primero
+     que revisas y qué dos o tres cosas harías para acelerarla?"
+  ✗ "Experiencia gestionando proveedores. Caso concreto, fechas, resultado."
+  ✓ "Cuéntame de un proveedor con el que hayas tenido que ponerte firme: quién era, qué estaba
+     pasando y cómo terminó la cosa."
 - "pregunta_escena" (OBLIGATORIA): pide un caso concreto — cuándo, en qué empresa, qué hizo ÉL y no el equipo.
 - "pregunta_friccion" (OBLIGATORIA): pide la cicatriz — qué salió mal, qué tocó rehacer. La experiencia real siempre tiene fricción; la inventada es lisa.
 
@@ -100,9 +117,10 @@ contra tickets necesita algo distinto de uno que le explica una decisión al cli
   que inventarlos.
 - NADA de "trabajo en equipo", "proactividad", "buena comunicación" a secas. Eso no distingue a
   nadie. El rasgo tiene que poder fallar: si es imposible que un candidato NO lo tenga, no sirve.
-- "pregunta" es UNA sola, literal, para leer en voz alta. Pide una situación pasada, no una opinión
-  sobre sí mismo: "cuéntame de la última vez que…" sirve; "¿te consideras organizado?" no sirve para
-  nada, porque todo el mundo contesta que sí.
+- "pregunta" es UNA sola, literal, para leer en voz alta, y suena a conversación. Pide una situación
+  pasada completa, no una opinión sobre sí mismo: "cuéntame de la última vez que te cambiaron las
+  reglas a mitad de un proyecto: qué pasó y qué hiciste tú" sirve; "¿te consideras organizado?" no
+  sirve para nada, porque todo el mundo contesta que sí.
 - "se_ve_asi" y "no_se_ve_asi": qué respuesta indica que el rasgo está y cuál indica que no. Es lo
   que el evaluador contrasta después contra la transcripción.
 
@@ -188,7 +206,7 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL NI BLOQUES DE CÓDIGO. Forma
 function buildCvPrompt(cvText, { cargo, empresa, excluyentes = [], candidato } = {}) {
   const reqs = excluyentes.map((r, i) => {
     const dets = (r.detalles || []).map(d => `      · ${d.detalle} → ${d.respuesta_esperada}`).join('\n');
-    return `  ${i + 1}. ${r.text}${r.criterio ? `\n     Qué debe poder narrar: ${r.criterio}` : ''}${dets ? '\n     Detalles verificables:\n' + dets : ''}`;
+    return `  ${i + 1}. ${r.text}${r.criterio ? `\n     Qué debe poder narrar: ${r.criterio}` : ''}${r.q_escena ? `\n     Pregunta genérica del cargo (la tuya la reemplaza): “${r.q_escena}”` : ''}${r.c_escena ? `\n     LA RESPUESTA SE DA POR BUENA SI: ${r.c_escena} — tu pregunta tiene que pedir exactamente eso` : ''}${dets ? '\n     Detalles verificables:\n' + dets : ''}`;
   }).join('\n');
 
   return `Eres un analista senior de selección de PeakU. Vas a leer el CV de un finalista y prepararle a un evaluador NO TÉCNICO la munición para una sesión de verificación de 30 minutos.
@@ -221,8 +239,12 @@ QUÉ BUSCAR:
 
 1. **Para cada requisito excluyente**, UNA O DOS preguntas —no más— que solo tengan sentido para ESTE
    candidato, citando la empresa, el proyecto o el periodo concreto donde dice haberlo hecho. Se leen en
-   voz alta tal cual: en segunda persona, completas, sin corchetes ni instrucciones adentro. La primera
-   reemplaza a la pregunta genérica del cargo, así que tiene que servir para abrir el tema por sí sola. Si el CV NO menciona
+   voz alta LITERALES, así que suenan a conversación, no a formulario: en segunda persona, de un tirón,
+   sin corchetes ni instrucciones adentro. La primera reemplaza a la pregunta genérica del cargo, así
+   que tiene que servir para abrir el tema por sí sola Y PEDIR CON PALABRAS todo lo que el criterio de
+   validación de ese requisito va a exigir (viene arriba como "la respuesta se da por buena si"): si el
+   criterio espera qué hizo él y con qué resultado, la pregunta lo pide. Después se califica contra ese
+   criterio, y lo que la pregunta no pidió no se le puede reprochar al candidato. Si el CV NO menciona
    nada relacionado con ese requisito, dilo: eso es lo más importante que puedes reportar, porque significa
    que el evaluador va a tener que sondear a ciegas.
 
@@ -344,6 +366,17 @@ contestar las dos preguntas que él se hace: ¿qué demostró? y ¿por qué ESE 
     alcance ni el resultado que la pregunta pedía" · "Nombró una técnica de optimización; el criterio
     esperaba dos". Es la respuesta a "¿por qué 4 y no 5?". Vacía SOLO en nivel 5. Sujeto: el
     candidato o su respuesta, NUNCA la entrevista.
+    En el informe los dos campos se imprimen SEGUIDOS, como un solo párrafo, sin rótulos: primero lo
+    positivo y después lo que faltó. Escribe la brecha para que se lea a continuación de "demostro"
+    sin sonar a lista: empieza con un conector natural ("Sin embargo, …", "Lo que no llegó a mostrar
+    fue…", "Quedó corto en…") y nunca con "Brecha:" ni "Para llegar a 5:".
+
+REGLA DE LO NO PEDIDO — inviolable:
+Solo se le puede reprochar al candidato lo que una pregunta o su criterio le PIDIÓ. Antes de
+escribir cada brecha, señala qué pregunta o qué criterio de los de arriba pedía exactamente eso.
+Si ninguno lo pedía, esa información NO va en la brecha y NO baja el nivel, aunque a ti te parezca
+que un experto la habría mencionado: no se puede decir que no sabe algo que nadie le preguntó. En
+"criterios[].como" cita el criterio, no tu expectativa.
 
 ═══════════════════════════════════════════════════════════
 REGLA DEL SUJETO — la más importante de este prompt, léela dos veces:
@@ -465,7 +498,7 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL NI BLOQUES DE CÓDIGO:
         {"pregunta": "escena | friccion | cruce", "estado": "cumplido | parcial | no_cumplido", "como": "en una frase, qué de la respuesta lo cumple o le falta"}
       ],
       "demostro": "máximo 30 palabras: los criterios que cumplió con el hecho que lo muestra. Se imprime. Sujeto: el candidato",
-      "brecha": "máximo 25 palabras: qué lo separa del nivel inmediatamente superior, en términos del criterio parcial o no cumplido. Se imprime. Vacío solo en nivel 5",
+      "brecha": "máximo 25 palabras: qué lo separa del nivel inmediatamente superior, SOLO en términos de un criterio que la pregunta pedía y quedó parcial o sin cumplir. Se imprime a continuación de demostro, como un solo párrafo: empieza con un conector natural. Vacío solo en nivel 5",
       "recomendacion": "UNA frase, máximo 20 palabras, OPCIONAL. Un consejo práctico al cliente sobre cómo aprovechar o complementar este perfil ('Encajaría mejor con un par técnico en redes durante los primeros meses'). NUNCA una tarea de verificación pendiente —'conviene confirmar', 'validar con una prueba'— porque eso le pregunta al cliente por qué no lo confirmamos nosotros. Vacío si no hay nada que valga la pena decir; vacío es lo normal",
       "detalles": [{"detalle": "el detalle verificable", "respondio": "lo que contestó, citado", "correcto": true}],
       "senales": ["señal de impostor observada en este tema, con la cita que la sostiene"],

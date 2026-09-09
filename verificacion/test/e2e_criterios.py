@@ -7,7 +7,7 @@ Lo que hay que sostener:
   · la calificación muestra el criterio por criterio (cumplido/parcial) que propuso el análisis,
     y precarga "qué demostró" y "qué lo separa del nivel siguiente";
   · el informe muestra una barra por requisito (en el encabezado y en cada fila), y el
-    porqué como dos renglones: "Demostró" y "Para llegar a N"; en nivel 5 no hay brecha;
+    porqué como UN párrafo con lo positivo y lo que faltó, sin rótulos; en nivel 5 no hay brecha;
   · la brecha sobrevive a emitir y reabrir (va en el snapshot);
   · la bajada del encabezado conjuga bien ("quedaron", no "quedóron").
 """
@@ -102,7 +102,7 @@ with sync_playwright() as pw:
     pg.click('[data-lv="4"]'); pg.wait_for_timeout(120)
     if not pg.input_value("[data-porque]").strip():
         pg.fill("[data-porque]", "Explicó la integración con un caso propio y precisó los quiebres.")
-    pg.fill("[data-brecha]", "Describió el quiebre sin decir qué rehízo, que era lo que la pregunta pedía.")
+    pg.fill("[data-brecha]", "Sin embargo, describió el quiebre sin decir qué rehízo, que era lo que la pregunta pedía.")
     pg.wait_for_timeout(200)
     pg.click("[data-next]"); pg.wait_for_timeout(350)
     for _ in range(6):
@@ -122,12 +122,15 @@ with sync_playwright() as pw:
     llenos = pg.eval_on_selector_all("#actaStage .score .sc:nth-child(2) .b5 i.on", "els => els.length")
     if llenos != 5:
         errs.append(f"la barra del primer requisito (nivel 5) tiene {llenos} tramos llenos")
-    if "Demostró" not in acta:
-        errs.append("el informe no rotula 'Demostró'")
-    if "Para llegar a 5" not in acta or "sin decir qué rehízo" not in acta:
-        errs.append("el informe no muestra la brecha del requisito en 4 ('Para llegar a 5')")
-    if acta.count("Para llegar a") != 1:
-        errs.append(f"'Para llegar a' aparece {acta.count('Para llegar a')} veces: el nivel 5 no lleva brecha")
+    # Lo positivo y lo que faltó van en el mismo párrafo, sin rótulos que lo deletreen.
+    if "Para llegar a" in acta or "Demostró:" in acta or "Brecha" in acta:
+        errs.append("el informe rotula el porqué ('Para llegar a 5', 'Brecha'): tiene que ser un solo párrafo")
+    fila2 = pg.inner_text("#actaStage .req:nth-of-type(2) .aex")
+    if "precisó los quiebres" not in fila2 or "sin decir qué rehízo" not in fila2:
+        errs.append(f"la fila en 4 no lleva lo positivo y lo que faltó en un mismo párrafo: {fila2!r}")
+    fila1 = pg.inner_text("#actaStage .req:nth-of-type(1) .aex")
+    if "Sin embargo" in fila1:
+        errs.append("el requisito en 5 lleva brecha, y en 5 no hay brecha")
     if "quedóron" in acta or "quederón" in acta:
         errs.append("la bajada sigue mal conjugada")
     if "2 quedaron sostenidos" not in acta:

@@ -117,13 +117,21 @@ t('la transcripción lleva cada pregunta con su criterio y pide demostro/brecha'
   assert.ok(p.includes('Debe mencionar al menos dos de'), 'perdió el criterio de la pregunta');
   assert.ok(/"demostro"/.test(p) && /"brecha"/.test(p), 'no pide demostro y brecha');
   assert.ok(/por qué 4 y no 5/i.test(p), 'no explica que la brecha es el "por qué no el nivel de arriba"');
-  assert.ok(/no baja el nivel/i.test(p), 'no protege al candidato de lo que la pregunta no pidió');
+  assert.ok(/no baja el nivel/i.test(p) && /REGLA DE LO NO PEDIDO/.test(p), 'no protege al candidato de lo que la pregunta no pidió');
+  assert.ok(/conector natural/.test(p) && /nunca con "Brecha:"/.test(p), 'no pide que la brecha se lea seguida de lo positivo');
 });
 
 t('el levantamiento pide un criterio por pregunta y exige que estén alineados', () => {
   const p = buildIntakePrompt('JD de prueba', {});
   for (const k of ['criterio_escena', 'criterio_friccion', 'criterio_cruce']) assert.ok(p.includes(`"${k}"`), `falta ${k}`);
   assert.ok(/ALINEACI[ÓO]N/.test(p) && /solo puede exigir lo que la pregunta PIDE/.test(p), 'no exige alinear pregunta y criterio');
+  assert.ok(/COMPLETAS Y NATURALES/.test(p) && /LITERALES/.test(p), 'no pide preguntas completas y naturales para leer literales');
+});
+
+t('las preguntas del CV piden lo mismo que el criterio de la pregunta que reemplazan', () => {
+  const p = buildCvPrompt('CV de prueba', { excluyentes: [{ text: 'Rollout de PP', q_escena: '¿Cuándo fue tu último rollout?', c_escena: 'Debe decir empresa, época y qué hizo él' }] });
+  assert.ok(p.includes('Debe decir empresa, época y qué hizo él'), 'no lleva el criterio de la pregunta');
+  assert.ok(/tu pregunta tiene que pedir exactamente eso/.test(p) && /LITERALES/.test(p), 'no exige que la pregunta personalizada pida lo que el criterio espera');
 });
 
 console.log(`\n${n} pruebas · los prompts no pierden su entrada`);
