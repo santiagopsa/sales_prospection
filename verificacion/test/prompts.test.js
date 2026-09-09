@@ -100,9 +100,30 @@ t('la traducción lleva todos los textos con sus claves y protege los nombres', 
     assert.ok(p.includes(`"${k}"`), `perdió la clave ${k}`);
     assert.ok(p.includes(textos[k]), `perdió el texto de ${k}`);
   }
-  assert.ok(/mismas claves/i.test(p), 'no exige las mismas claves');
+  assert.ok(/MISMO "id"/.test(p) && /"traducciones"/.test(p), 'no exige devolver la lista con el mismo id');
   assert.ok(/nombres de personas/i.test(p) && /SAP PP/.test(p), 'no protege nombres ni productos');
   assert.ok(/ingl[ée]s/i.test(p), 'no dice a qué idioma');
+});
+
+// La transcripción se juzga contra las preguntas que se hicieron y sus criterios, y pide
+// las dos frases que el cliente lee: qué demostró y por qué no el nivel de arriba.
+t('la transcripción lleva cada pregunta con su criterio y pide demostro/brecha', () => {
+  const { buildTranscriptPrompt } = require('../prompts');
+  const p = buildTranscriptPrompt('MARCA-TRANS-4D2E', { requisitos: [{ text: 'Optimizar consultas',
+    q_escena: '¿Qué técnicas aplicarías para optimizar una consulta lenta?', c_escena: 'Debe mencionar al menos dos de: índices, filtrado temprano, evitar SELECT *',
+    q_friccion: '¿Qué salió mal la última vez?', c_friccion: 'Debe narrar un caso propio con lo que rehízo' }] });
+  assert.ok(p.includes('MARCA-TRANS-4D2E'), 'perdió la transcripción');
+  assert.ok(p.includes('¿Qué técnicas aplicarías'), 'perdió la pregunta');
+  assert.ok(p.includes('Debe mencionar al menos dos de'), 'perdió el criterio de la pregunta');
+  assert.ok(/"demostro"/.test(p) && /"brecha"/.test(p), 'no pide demostro y brecha');
+  assert.ok(/por qué 4 y no 5/i.test(p), 'no explica que la brecha es el "por qué no el nivel de arriba"');
+  assert.ok(/no baja el nivel/i.test(p), 'no protege al candidato de lo que la pregunta no pidió');
+});
+
+t('el levantamiento pide un criterio por pregunta y exige que estén alineados', () => {
+  const p = buildIntakePrompt('JD de prueba', {});
+  for (const k of ['criterio_escena', 'criterio_friccion', 'criterio_cruce']) assert.ok(p.includes(`"${k}"`), `falta ${k}`);
+  assert.ok(/ALINEACI[ÓO]N/.test(p) && /solo puede exigir lo que la pregunta PIDE/.test(p), 'no exige alinear pregunta y criterio');
 });
 
 console.log(`\n${n} pruebas · los prompts no pierden su entrada`);

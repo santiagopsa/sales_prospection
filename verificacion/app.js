@@ -10,7 +10,7 @@
 // No toca deals ni wishlist: sus tablas viven en el schema "verificacion".
 const express = require('express');
 const path = require('path');
-const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt } = require('./prompts');
+const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt, leerTraduccion } = require('./prompts');
 const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode } = require('./rules');
 const didit = require('./didit');
 const { T, initSchema } = require('./schema');
@@ -345,12 +345,13 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
           for (let i = 0; i < reqs.length; i++) {
             const q = reqs[i];
             await c.query(
-              `INSERT INTO ${T.requirements} (vacancy_id,ord,text,kind,years,evidence_quote,criterio,detalles,q_escena,q_friccion,q_cruce,senales)
-               VALUES ($1,$2,$3,'excluyente',$4,$5,$6,$7,$8,$9,$10,$11)`,
+              `INSERT INTO ${T.requirements} (vacancy_id,ord,text,kind,years,evidence_quote,criterio,detalles,q_escena,q_friccion,q_cruce,senales,c_escena,c_friccion,c_cruce)
+               VALUES ($1,$2,$3,'excluyente',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
               [vacancyId, i, clean(q.requisito), q.anos_experiencia ?? null, clean(q.evidencia_cita) || null,
                clean(q.criterio_cumple) || null, JSON.stringify(q.detalles_verificables || []),
                clean(q.pregunta_escena) || null, clean(q.pregunta_friccion) || null, clean(q.pregunta_cruce) || null,
-               JSON.stringify(q.senales_impostor || [])]
+               JSON.stringify(q.senales_impostor || []),
+               clean(q.criterio_escena) || null, clean(q.criterio_friccion) || null, clean(q.criterio_cruce) || null]
             );
           }
           await c.query('COMMIT');
@@ -379,6 +380,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         years: q.anos_experiencia ?? null, evidence_quote: clean(q.evidencia_cita), criterio: clean(q.criterio_cumple),
         detalles: q.detalles_verificables || [], q_escena: clean(q.pregunta_escena),
         q_friccion: clean(q.pregunta_friccion), q_cruce: clean(q.pregunta_cruce), senales: q.senales_impostor || [],
+        c_escena: clean(q.criterio_escena), c_friccion: clean(q.criterio_friccion), c_cruce: clean(q.criterio_cruce),
       }));
       res.json({ ok: true, id: vv.id, company_id: company.id });
     } catch (e) {
@@ -492,17 +494,19 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
               const datos = [clean(q.text), i, clean(q.kind) || 'excluyente',
                 q.years == null || q.years === '' ? null : Number(q.years),
                 clean(q.criterio) || null, clean(q.q_escena) || null, clean(q.q_friccion) || null,
-                clean(q.q_cruce) || null, jsonb(q.detalles || null), jsonb(q.senales || null)];
+                clean(q.q_cruce) || null, jsonb(q.detalles || null), jsonb(q.senales || null),
+                clean(q.c_escena) || null, clean(q.c_friccion) || null, clean(q.c_cruce) || null];
               if (Number(q.id)) {
                 await c.query(
                   `UPDATE ${T.requirements} SET text=$3, ord=$4, kind=$5, years=$6, criterio=$7,
-                          q_escena=$8, q_friccion=$9, q_cruce=$10, detalles=$11::jsonb, senales=$12::jsonb
+                          q_escena=$8, q_friccion=$9, q_cruce=$10, detalles=$11::jsonb, senales=$12::jsonb,
+                          c_escena=$13, c_friccion=$14, c_cruce=$15
                    WHERE id=$2 AND vacancy_id=$1`, [id, Number(q.id), ...datos]);
               } else {
                 await c.query(
                   `INSERT INTO ${T.requirements} (vacancy_id, text, ord, kind, years, criterio,
-                     q_escena, q_friccion, q_cruce, detalles, senales)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb)`, [id, ...datos]);
+                     q_escena, q_friccion, q_cruce, detalles, senales, c_escena, c_friccion, c_cruce)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14)`, [id, ...datos]);
               }
             }
           }
@@ -532,7 +536,8 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
             years: q.years == null || q.years === '' ? null : Number(q.years),
             criterio: clean(q.criterio) || null, q_escena: clean(q.q_escena) || null,
             q_friccion: clean(q.q_friccion) || null, q_cruce: clean(q.q_cruce) || null,
-            detalles: q.detalles || null, senales: q.senales || null };
+            detalles: q.detalles || null, senales: q.senales || null,
+            c_escena: clean(q.c_escena) || null, c_friccion: clean(q.c_friccion) || null, c_cruce: clean(q.c_cruce) || null };
           const ya = Number(q.id) && mem.requirements.find(x => x.id === Number(q.id));
           if (ya) Object.assign(ya, base); else mem.requirements.push({ id: nextId(), ...base });
         });
@@ -649,7 +654,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         perfil = Array.isArray(q.rows[0].perfil) ? q.rows[0].perfil : [];
         if (q.rows[0].vid) {
           const rq = await pool.query(
-            `SELECT id, text, criterio, detalles, senales FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`,
+            `SELECT id, text, criterio, detalles, senales, q_escena, q_friccion, q_cruce, c_escena, c_friccion, c_cruce FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`,
             [q.rows[0].vid]);
           excluyentes = rq.rows;
         }
@@ -1162,11 +1167,11 @@ ${!code ? `
           for (let i = 0; i < ratings.length; i++) {
             const q = ratings[i];
             await c.query(
-              `INSERT INTO ${T.ratings} (session_id, requirement_id, req_text, ord, level, verdict, evidence, analisis, falta)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+              `INSERT INTO ${T.ratings} (session_id, requirement_id, req_text, ord, level, verdict, evidence, analisis, falta, brecha)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
               [id, q.requirement_id || null, clean(q.req_text), i, q.level || null,
                q.level ? LVLTXT[q.level] : null, clean(q.evidence) || null,
-               clean(q.analisis) || null, clean(q.falta) || null]
+               clean(q.analisis) || null, clean(q.falta) || null, clean(q.brecha) || null]
             );
           }
           await c.query('COMMIT');
@@ -1192,7 +1197,7 @@ ${!code ? `
       ratings.forEach((q, i) => mem.ratings.push({
         id: nextId(), session_id: id, requirement_id: q.requirement_id || null, req_text: clean(q.req_text),
         ord: i, level: q.level || null, verdict: q.level ? LVLTXT[q.level] : null, evidence: clean(q.evidence),
-        analisis: clean(q.analisis), falta: clean(q.falta),
+        analisis: clean(q.analisis), falta: clean(q.falta), brecha: clean(q.brecha),
       }));
       res.json({ ok: true, id, semaforo: sem, identidad: estadoIdentidad(ctx) });
     } catch (e) {
@@ -1236,7 +1241,7 @@ ${!code ? `
         evaluador: clean(b.evaluator) || s0.evaluator || null,
         kind: s0.kind,
         ratings: ratings.map(x => ({ req_text: x.req_text, level: x.level, evidence: x.evidence || '',
-                                     analisis: x.analisis || '', falta: x.falta || '' })),
+                                     analisis: x.analisis || '', falta: x.falta || '', brecha: x.brecha || '' })),
         identity, signals,
         identidad,
         face_score: s0.face_score ?? null,
@@ -1354,10 +1359,19 @@ ${!code ? `
       const entrada = {}; for (const k of claves) entrada[k] = String(textos[k]);
       const out = await pedirJson(buildTranslatePrompt(entrada), { etiqueta: 'traduccion', maxTokens: 6000 });
       if (out && out.error) return res.status(502).json({ error: 'No se pudo traducir el informe. ' + out.error, motivo: out.motivo });
-      // Lo que el modelo no devolvió, o devolvió vacío, se queda en español antes que en
-      // blanco: un hueco en el informe es peor que una frase sin traducir.
+      // pedirJson devuelve {datos}: el JSON del modelo va adentro. (Leerlo directo dejaba el
+      // informe con los rótulos en inglés y todo el contenido en español, sin ningún error.)
+      const leido = leerTraduccion(out && out.datos, claves);
+      const nLeidas = Object.keys(leido).length;
+      // Si el modelo devolvió menos de la mitad, algo se rompió en la forma de la respuesta:
+      // mejor decirlo que entregar un informe a medias como si fuera la traducción.
+      if (nLeidas < Math.ceil(claves.length / 2)) {
+        console.error('[verificacion/traduccion] respuesta incompleta:', nLeidas, 'de', claves.length);
+        return res.status(502).json({ error: `No se pudo traducir el informe: el modelo devolvió ${nLeidas} de ${claves.length} textos.`, motivo: 'incompleta' });
+      }
+      // Lo que falte puntualmente se queda en español antes que en blanco.
       const salida = {};
-      for (const k of claves) salida[k] = clean(out && out[k]) ? String(out[k]) : entrada[k];
+      for (const k of claves) salida[k] = leido[k] || entrada[k];
       trads.en = { textos: salida, huella, at: new Date().toISOString() };
       await guardar(trads);
       res.json({ ok: true, idioma, textos: salida });

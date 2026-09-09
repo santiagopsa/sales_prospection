@@ -65,6 +65,23 @@ la pregunta, nada de corchetes para rellenar, nada de "pídele que...". Una sola
 no tres encadenadas. Cortas: si no se puede decir de un tirón sin tomar aire, está mal escrita.
 - "pregunta_escena" (OBLIGATORIA): pide un caso concreto — cuándo, en qué empresa, qué hizo ÉL y no el equipo.
 - "pregunta_friccion" (OBLIGATORIA): pide la cicatriz — qué salió mal, qué tocó rehacer. La experiencia real siempre tiene fricción; la inventada es lisa.
+
+CADA PREGUNTA LLEVA SU CRITERIO DE VALIDACIÓN — y la pregunta y el criterio tienen que estar
+ALINEADOS. Esta es la regla que más se rompe, así que léela con cuidado:
+- "criterio_escena", "criterio_friccion", "criterio_cruce": qué tiene que contener la respuesta para
+  darla por buena. Concreto, enumerable, en 2 o 3 elementos: "Debe nombrar la empresa y el periodo,
+  decir qué parte hizo él y qué resultado tuvo" · "Debe mencionar al menos dos de: selección
+  explícita de campos, índices, filtrado temprano en el WHERE, filtrado por partición, revisión
+  de joins" · "Debe describir cómo aisló los registros corruptos (tabla de cuarentena o log) y que
+  los datos limpios siguieron su flujo".
+- ALINEACIÓN: el criterio solo puede exigir lo que la pregunta PIDE. Si el criterio espera fecha,
+  empresa y alcance, la pregunta tiene que pedir fecha, empresa y alcance. Si el criterio espera
+  dos técnicas, la pregunta pregunta por técnicas. Un criterio que exige algo que la pregunta no
+  pidió castiga al candidato por no adivinar, y ese nivel no se puede defender ante nadie. Antes
+  de escribir cada par, pregúntate: ¿alguien que sí sabe, y responde exactamente a lo que le
+  pregunté, cumpliría este criterio? Si no, arregla la pregunta o el criterio hasta que sí.
+- El criterio es lo que el evaluador lee mientras escucha, y contra lo que se califica después.
+  Sin criterio la pregunta no sirve: no se sabe qué respuesta es buena.
 - "pregunta_cruce" (OPCIONAL — déjala en "" salvo que se gane el puesto): una pregunta técnica corta
   cuya respuesta correcta conoces. Solo tiene sentido cuando existe un hecho duro, propio de ESTE
   requisito, que separa a quien lo hizo de quien lo leyó, y que además no queda ya cubierto por los
@@ -119,8 +136,11 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL NI BLOQUES DE CÓDIGO. Forma
         {"detalle": "el hecho duro a preguntar", "respuesta_esperada": "la respuesta correcta, corta"}
       ],
       "pregunta_escena": "…",
+      "criterio_escena": "qué debe contener la respuesta para darla por buena — solo lo que la pregunta pide",
       "pregunta_friccion": "…",
+      "criterio_friccion": "qué debe contener la respuesta para darla por buena",
       "pregunta_cruce": "vacío si no aporta — casi siempre lo correcto",
+      "criterio_cruce": "qué debe contener la respuesta; vacío si no hay pregunta de cruce",
       "senales_impostor": ["…", "…"]
     }
   ],
@@ -272,8 +292,14 @@ ${x.pregunta ? `      Se le preguntó: “${x.pregunta}”\n` : ''}${x.se_ve_asi
   const reqs = requisitos.map((r, i) => {
     const dets = (r.detalles || []).map(d => `        · ${d.detalle} → esperado: ${d.respuesta_esperada}`).join('\n');
     const sen = (r.senales || []).map(x => `        · ${x}`).join('\n');
+    // Las preguntas que se hicieron, cada una con su criterio: el nivel se juzga contra esto,
+    // no contra lo que la pregunta no pidió.
+    const pregs = [['escena', r.q_escena, r.c_escena], ['fricción', r.q_friccion, r.c_friccion], ['cruce', r.q_cruce, r.c_cruce]]
+      .filter(([, q]) => q && String(q).trim())
+      .map(([t, q, c]) => `        · Pregunta de ${t}: “${String(q).trim()}”\n          Criterio de validación: ${c && String(c).trim() ? String(c).trim() : 'sin criterio escrito — juzga contra lo que la pregunta pide'}`)
+      .join('\n');
     return `  [${i + 1}] ${r.text}
-${r.criterio ? `      Qué debía poder narrar: ${r.criterio}\n` : ''}${dets ? `      Detalles verificables:\n${dets}\n` : ''}${sen ? `      Señales de impostor a vigilar:\n${sen}\n` : ''}`;
+${r.criterio ? `      Qué debía poder narrar: ${r.criterio}\n` : ''}${pregs ? `      Preguntas que se hicieron y qué debía contener cada respuesta:\n${pregs}\n` : ''}${dets ? `      Detalles verificables:\n${dets}\n` : ''}${sen ? `      Señales de impostor a vigilar:\n${sen}\n` : ''}`;
   }).join('\n');
 
   return `Eres un analista senior de selección de PeakU. Acabas de recibir la transcripción de una entrevista de verificación de 30 minutos. Tu trabajo es extraer, para cada requisito, LA EVIDENCIA que quedó en la conversación y proponer un nivel según una rúbrica anclada.
@@ -294,8 +320,30 @@ FIN_DE_LA_TRANSCRIPCION>>>
 ═══════════════════════════════════════════════════════════
 
 QUÉ SE IMPRIME Y QUÉ NO — importa para saber cómo escribir cada campo:
-- "por_que_ese_nivel" y "recomendacion" VAN AL INFORME que lee el cliente. Se escriben en tu voz de analista, completos, para alguien que no estuvo en la llamada.
+- "demostro", "brecha" y "recomendacion" VAN AL INFORME que lee el cliente. Se escriben en tu voz de analista, completos, para alguien que no estuvo en la llamada. NUNCA son cita ni resumen de la transcripción: son el JUICIO y sus razones.
 - "evidencia" NO va al informe: queda como rastro de auditoría para quien revise la sesión. Por eso sí es cita literal.
+
+EL NIVEL SE JUZGA CONTRA LOS CRITERIOS DE LAS PREGUNTAS QUE SE HICIERON — no contra lo que la
+pregunta no pidió. Cada pregunta trae arriba su "criterio de validación": qué tenía que contener la
+respuesta. Para cada pregunta decide si el criterio quedó CUMPLIDO, PARCIAL o NO CUMPLIDO, con la
+frase del candidato que lo muestra, y el nivel sale de ahí:
+  · 5: todos los criterios cumplidos, con un caso propio y detalle de quien lo vivió.
+  · 4: todos cumplidos, alguno de forma parcial o superficial.
+  · 3: la mitad cumplida, o cumplidos pero con un caso genérico sin fricción propia.
+  · 2: casi ninguno, aunque muestre conocimiento del tema.
+  · 1: ninguno, evasivas o incoherencias.
+Si la pregunta no pidió una fecha, que no la haya dicho NO baja el nivel. Si un criterio exige dos
+técnicas y nombró dos, está cumplido aunque no nombrara la tercera.
+
+"demostro" y "brecha" — el cliente lee esto y nada más de cada requisito, así que tienen que
+contestar las dos preguntas que él se hace: ¿qué demostró? y ¿por qué ESE nivel y no el de arriba?
+  · "demostro": MÁXIMO 30 PALABRAS. Los criterios que cumplió, con el hecho concreto que lo
+    muestra. Afirmativo. Sujeto: el candidato.
+  · "brecha": MÁXIMO 25 PALABRAS. Lo que separa esta respuesta del nivel inmediatamente superior,
+    en términos del criterio que quedó parcial o sin cumplir: "Su relato del rollout no incluyó el
+    alcance ni el resultado que la pregunta pedía" · "Nombró una técnica de optimización; el criterio
+    esperaba dos". Es la respuesta a "¿por qué 4 y no 5?". Vacía SOLO en nivel 5. Sujeto: el
+    candidato o su respuesta, NUNCA la entrevista.
 
 ═══════════════════════════════════════════════════════════
 REGLA DEL SUJETO — la más importante de este prompt, léela dos veces:
@@ -320,9 +368,8 @@ por más cierta que sea. Eso vive en el rastro interno, no en el informe.
 LARGO — tan importante como el sujeto:
 El informe es de UNA página, dos como máximo. Cada campo que se imprime tiene un tope de
 palabras y se cumple. Un párrafo largo no es más riguroso: es un párrafo que el cliente no lee.
-  · "por_que_ese_nivel": 2 o 3 frases, MÁXIMO 55 PALABRAS. Un solo caso que respalde el nivel,
-    no la lista de todo lo que mencionó. Sin enumerar marcas, herramientas ni cifras salvo que
-    UNA sea la que decide el veredicto.
+  · "demostro": MÁXIMO 30 PALABRAS. "brecha": MÁXIMO 25 PALABRAS. Sin enumerar marcas,
+    herramientas ni cifras salvo que UNA sea la que decide el veredicto.
   · "recomendacion": UNA frase, MÁXIMO 20 PALABRAS, y solo si de verdad aporta.
   · "perfil[].observado": 1 o 2 frases, MÁXIMO 35 PALABRAS.
   · "experiencia_reciente.por_que_verificada": UNA frase, MÁXIMO 30 PALABRAS.
@@ -394,12 +441,13 @@ primero que mira el cliente, así que cada una tiene que ganarse el espacio.
 - No repitas aquí los tres requisitos: eso ya tiene su propia sección. Estas tarjetas son lo que
   apareció ALREDEDOR — la herramienta que mencionó de paso, el tamaño de la operación que manejaba.
 
-RÚBRICA ANCLADA (es la misma que aparece impresa en el acta, respétala al pie de la letra):
-- Nivel 5: escena específica (empresa, fecha, alcance) + rol individual claro + fricción real narrada con detalle + los 3 detalles verificables correctos + cruce respondido con criterio propio.
-- Nivel 4: escena y rol claros + fricción real + al menos 2 detalles verificables correctos; el cruce correcto aunque superficial.
-- Nivel 3: experiencia plausible pero la escena es genérica o la fricción es vaga; detalles parciales; el cruce se responde con generalidades correctas.
-- Nivel 2: solo definiciones y contexto; no produce escena propia ni fricción; confunde al menos un detalle verificable.
+RÚBRICA DE REFERENCIA (lo que suele distinguir cada nivel cuando una pregunta no trae criterio escrito):
+- Nivel 5: escena específica + rol individual claro + fricción real narrada con detalle + detalles verificables correctos + cruce con criterio propio.
+- Nivel 4: escena y rol claros + fricción real + la mayoría de los detalles correctos; el cruce correcto aunque superficial.
+- Nivel 3: experiencia plausible pero escena genérica o fricción vaga; detalles parciales.
+- Nivel 2: solo definiciones y contexto; sin escena propia ni fricción; confunde algún detalle.
 - Nivel 1: no sostiene el tema: evasivas, incoherencias con su CV, o detalles claramente incorrectos.
+Cuando la pregunta SÍ trae criterio, manda el criterio: es lo que se le pidió al candidato.
 
 El nivel que propongas tiene que poder justificarse SOLO con la cita que adjuntas. Si la cita no alcanza para el nivel, baja el nivel — no la adornes.
 
@@ -413,7 +461,11 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL NI BLOQUES DE CÓDIGO:
       "cubierto": true,
       "nivel": 4,
       "evidencia": "cita textual de lo que dijo el candidato, recortada con … si hace falta. USO INTERNO: es el rastro de auditoría, no se imprime en el informe",
-      "por_que_ese_nivel": "2 o 3 frases, máximo 55 palabras: lo único que el cliente lee de este requisito. Qué demostró el candidato y el caso que lo respalda. Tu voz de analista, no cita textual. Sujeto: el candidato",
+      "criterios": [
+        {"pregunta": "escena | friccion | cruce", "estado": "cumplido | parcial | no_cumplido", "como": "en una frase, qué de la respuesta lo cumple o le falta"}
+      ],
+      "demostro": "máximo 30 palabras: los criterios que cumplió con el hecho que lo muestra. Se imprime. Sujeto: el candidato",
+      "brecha": "máximo 25 palabras: qué lo separa del nivel inmediatamente superior, en términos del criterio parcial o no cumplido. Se imprime. Vacío solo en nivel 5",
       "recomendacion": "UNA frase, máximo 20 palabras, OPCIONAL. Un consejo práctico al cliente sobre cómo aprovechar o complementar este perfil ('Encajaría mejor con un par técnico en redes durante los primeros meses'). NUNCA una tarea de verificación pendiente —'conviene confirmar', 'validar con una prueba'— porque eso le pregunta al cliente por qué no lo confirmamos nosotros. Vacío si no hay nada que valga la pena decir; vacío es lo normal",
       "detalles": [{"detalle": "el detalle verificable", "respondio": "lo que contestó, citado", "correcto": true}],
       "senales": ["señal de impostor observada en este tema, con la cita que la sostiene"],
@@ -453,18 +505,22 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL NI BLOQUES DE CÓDIGO:
 
 /* Traducción del informe al inglés. Entra un objeto plano {clave: texto en español} con
    todo lo que el informe imprime y que no es un rótulo fijo (los rótulos los tiene la
-   pantalla en los dos idiomas). Sale el mismo objeto, mismas claves, en inglés.
+   pantalla en los dos idiomas). Al modelo se le manda como LISTA de {id, es}: las claves
+   llevan puntos ("req.0.cuerpo") y un objeto con esas claves invita al modelo a anidarlas
+   en {"req":{"0":{…}}}; una lista con id no se puede anidar. Sale la misma lista con "en".
    Lo que NO se traduce: nombres de personas y empresas, productos y tecnologías (SAP PP,
    Excel), cifras, monedas, fechas en formato numérico, códigos. Lo que sí: cargos, párrafos,
    rasgos, periodos escritos con palabras ("marzo a noviembre de 2023"). */
 function buildTranslatePrompt(textos) {
+  const lista = Object.keys(textos || {}).map(id => ({ id, es: String(textos[id]) }));
   return `Traduce al inglés profesional (Estados Unidos) los textos de un informe de verificación de
 candidato que una firma de reclutamiento entrega a su cliente. El lector es el gerente que
 decide la contratación.
 
 REGLAS
-- Devuelve SOLO un objeto JSON con EXACTAMENTE las mismas claves que recibes; cada valor es la
-  traducción del valor recibido. Ninguna clave nueva, ninguna clave menos.
+- Devuelve SOLO un JSON con esta forma exacta: {"traducciones":[{"id":"…","en":"…"}, …]}.
+  Un elemento por cada elemento recibido, con el MISMO "id" copiado tal cual (es un código,
+  no lo cambies ni lo traduzcas) y la traducción en "en". Ninguno de más, ninguno de menos.
 - Traduce el sentido, no palabra por palabra. Registro profesional, directo, sin adornos.
 - Conserva la longitud: una frase no se vuelve un párrafo ni un párrafo una frase.
 - NO traduzcas ni cambies: nombres de personas, de empresas y de clientes; nombres de
@@ -479,8 +535,36 @@ REGLAS
 - Si un texto ya está en inglés, devuélvelo igual.
 - Sin comillas tipográficas, sin notas del traductor, sin texto fuera del JSON.
 
-TEXTOS (JSON):
-${JSON.stringify(textos, null, 2)}`;
+TEXTOS A TRADUCIR (JSON):
+${JSON.stringify(lista, null, 2)}`;
 }
 
-module.exports = { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt };
+/* Lee lo que el modelo devolvió, venga como venga, y lo convierte en {id: en}. Acepta la
+   lista pedida, una lista suelta, un objeto plano {id: en}, o un objeto anidado por los
+   puntos del id ({"req":{"0":{"cuerpo":…}}}). Lo que no reconoce, lo ignora. */
+function leerTraduccion(datos, ids) {
+  const out = {};
+  if (!datos || typeof datos !== 'object') return out;
+  const quiere = new Set(ids);
+  const toma = (id, en) => { if (quiere.has(id) && typeof en === 'string' && en.trim()) out[id] = en.trim(); };
+  const lista = Array.isArray(datos) ? datos
+    : Array.isArray(datos.traducciones) ? datos.traducciones
+    : Array.isArray(datos.textos) ? datos.textos : null;
+  if (lista) {
+    for (const x of lista) if (x && typeof x === 'object') toma(String(x.id), x.en != null ? x.en : x.texto);
+    return out;
+  }
+  const raiz = (datos.traducciones && typeof datos.traducciones === 'object') ? datos.traducciones
+    : (datos.textos && typeof datos.textos === 'object') ? datos.textos : datos;
+  const anda = (obj, pref) => {
+    for (const k of Object.keys(obj)) {
+      const v = obj[k], id = pref ? pref + '.' + k : k;
+      if (typeof v === 'string') toma(id, v);
+      else if (v && typeof v === 'object') anda(v, id);
+    }
+  };
+  anda(raiz, '');
+  return out;
+}
+
+module.exports = { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt, leerTraduccion };

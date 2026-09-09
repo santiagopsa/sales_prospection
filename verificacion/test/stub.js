@@ -39,15 +39,21 @@ const FAKE = {
        {detalle:'¿Cuánto suele durar un rollout de PP?', respuesta_esperada:'entre 6 y 12 meses'},
        {detalle:'¿Qué se rompe primero en el go-live?', respuesta_esperada:'MRP y los datos maestros de material'}],
      pregunta_escena:'Llévame al último rollout de PP que hiciste: ¿cuándo fue, en qué empresa, y qué hiciste tú?',
+     criterio_escena:'Debe nombrar la empresa y el periodo, y decir qué parte del rollout hizo él y no el equipo.',
      pregunta_friccion:'¿Qué se te cayó en ese go-live y cómo lo resolviste?',
+     criterio_friccion:'Debe narrar una falla concreta del arranque y la decisión propia con la que la resolvió.',
      pregunta_cruce:'¿Qué diferencia hay entre una lista de materiales y una hoja de ruta?',
+     criterio_cruce:'Debe distinguir componentes (lista) de operaciones y centros de trabajo (hoja de ruta).',
      senales_impostor:['Define PP de manual pero no dice qué pasa cuando falla el MRP','Nombra la transacción pero no describe la pantalla']},
     {requisito:'Integración PP con MM y QM', evidencia_cita:'tiene que entender cómo se conversa con compras y con calidad',
      anos_experiencia:null, criterio_cumple:'Debe explicar los puntos de quiebre entre módulos con un caso propio.',
      detalles_verificables:[{detalle:'¿Qué documento conecta PP con MM?', respuesta_esperada:'la reserva de materiales'}],
      pregunta_escena:'Cuéntame una integración PP-MM que hayas configurado tú.',
+     criterio_escena:'Debe describir una integración concreta con el documento o transacción que la conecta.',
      pregunta_friccion:'¿Dónde se les rompió la integración?',
+     criterio_friccion:'Debe narrar un punto de quiebre propio y qué rehízo para resolverlo.',
      pregunta_cruce:'¿Qué pasa con el lote si QM rechaza la inspección?',
+     criterio_cruce:'Debe decir que el lote queda bloqueado y no disponible para producción.',
      senales_impostor:['Habla de integración en abstracto sin nombrar documentos']}
   ],
   ingles:{requerido:true, nivel:'conversacional para reuniones con el cliente',
@@ -148,7 +154,8 @@ const server = http.createServer(async (req, res) => {
     db.vacancies.push(v);
     reqs.forEach((r,i)=>db.requirements.push({id:nid(), vacancy_id:v.id, ord:i, text:clean(r.requisito),
       criterio:clean(r.criterio_cumple), detalles:r.detalles_verificables||[], q_escena:clean(r.pregunta_escena),
-      q_friccion:clean(r.pregunta_friccion), q_cruce:clean(r.pregunta_cruce), senales:r.senales_impostor||[]}));
+      q_friccion:clean(r.pregunta_friccion), q_cruce:clean(r.pregunta_cruce), senales:r.senales_impostor||[],
+      c_escena:clean(r.criterio_escena), c_friccion:clean(r.criterio_friccion), c_cruce:clean(r.criterio_cruce)}));
     return json(res,200,{ok:true, id:v.id, company_id:c.id});
   }
 
@@ -194,7 +201,8 @@ const server = http.createServer(async (req, res) => {
         const base = {vacancy_id:v.id, text:clean(q.text), ord:i, kind:clean(q.kind)||'excluyente',
           criterio:clean(q.criterio)||null, q_escena:clean(q.q_escena)||null,
           q_friccion:clean(q.q_friccion)||null, q_cruce:clean(q.q_cruce)||null,
-          detalles:q.detalles||null, senales:q.senales||null};
+          detalles:q.detalles||null, senales:q.senales||null,
+          c_escena:clean(q.c_escena)||null, c_friccion:clean(q.c_friccion)||null, c_cruce:clean(q.c_cruce)||null};
         const ya = Number(q.id) && db.requirements.find(x=>x.id===Number(q.id));
         if(ya) Object.assign(ya, base); else db.requirements.push({id:nid(), ...base});
       });
@@ -305,7 +313,7 @@ const server = http.createServer(async (req, res) => {
     db.ratings = db.ratings.filter(r=>r.session_id!==s.id);
     (b.ratings||[]).forEach((r,i)=>db.ratings.push({id:nid(), session_id:s.id, req_text:r.req_text,
       requirement_id:r.requirement_id, ord:i, level:r.level, verdict:r.level?LVLTXT[r.level]:null,
-      evidence:r.evidence, analisis:r.analisis||'', falta:r.falta||''}));
+      evidence:r.evidence, analisis:r.analisis||'', falta:r.falta||'', brecha:r.brecha||''}));
     return json(res,200,{ok:true, id:s.id, semaforo:sem, identidad:estadoIdentidad(ctx)});
   }
 
@@ -326,7 +334,7 @@ const server = http.createServer(async (req, res) => {
       candidato:b.candidate, cargo:(v&&v.title)||null, cliente:(v&&v.company_name)||null,
       evaluador:b.evaluator||s.evaluator||null, kind:s.kind,
       ratings:ratings.map(r=>({req_text:r.req_text, level:r.level, evidence:r.evidence||'',
-                               analisis:r.analisis||'', falta:r.falta||''})),
+                               analisis:r.analisis||'', falta:r.falta||'', brecha:r.brecha||''})),
       identity:b.identity||{}, signals:b.signals||{}, identidad,
       face_score:s.face_score??null, declara:b.declara||{}, recomendacion:b.recomendacion||{},
       trayectoria:b.trayectoria||s.trayectoria||[], semaforo:sem.color, integrity_hash:hash,
@@ -387,9 +395,14 @@ const server = http.createServer(async (req, res) => {
         cubierto: i !== 1,
         nivel: i === 1 ? null : (i === 0 ? 5 : 4),
         evidencia: i === 1 ? '' : 'En Alpina, entre marzo y noviembre de 2023, yo llevé el rollout de PP… lo que se nos cayó fue el maestro de materiales la primera semana.',
-        por_que_ese_nivel: i === 1
+        criterios: i === 1 ? [] : [
+          {pregunta:'escena', estado:'cumplido', como:'Nombró Alpina, el periodo y su rol de líder del rollout.'},
+          {pregunta:'friccion', estado: i === 0 ? 'cumplido' : 'parcial', como: i === 0 ? 'Narró la caída del maestro de materiales y cómo la resolvió.' : 'Describió el problema pero no lo que rehízo.'},
+        ],
+        demostro: i === 1
           ? ''
-          : 'Lleva un rollout de producción completo con fechas, alcance y rol propio. Resolvió la caída del maestro de materiales en el arranque con criterio propio y maneja las transacciones de uso diario con soltura.',
+          : 'Lleva un rollout de producción completo con fechas, alcance y rol propio, y resolvió la caída del maestro de materiales con criterio propio.',
+        brecha: i === 1 ? '' : (i === 0 ? '' : 'Describió la integración con calidad sin un caso propio de lo que rehízo, que era lo que la pregunta pedía.'),
         recomendacion: i === 1
           ? ''
           : 'Rinde más con autonomía sobre el módulo y un par en calidad para la integración.',

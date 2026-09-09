@@ -74,7 +74,7 @@ const ROTULOS = {
     chip_ubicacion: 'Ubicación', chip_disponibilidad: 'Disponibilidad', chip_pretension: 'Aspiración', chip_ingles: 'Inglés', chip_procesos: 'Otros procesos',
     posicionamiento: 'Posicionamiento',
     z_ajuste: 'Ajuste al rol', z_ajuste_h: 'Requisito por requisito', z_ajuste_s: 'Lo que definió el cliente, contrastado en la entrevista',
-    recomendacion: 'Recomendación',
+    recomendacion: 'Recomendación', demostro: 'Demostró', para: 'Para llegar a', score_t: 'Ajuste al rol',
     escala: 'Escala 1-5 sobre evidencia de la sesión: <b>4-5</b> caso propio con alcance y resultado · <b>3</b> experiencia real con alcance parcial · <b>1-2</b> sin caso propio que lo sostenga.',
     z_impacto: 'Lo que demostró', z_impacto_h: 'En la entrevista', z_impacto_s: 'Sostenido en la conversación, no tomado de la hoja de vida',
     z_conducta: 'Conducta', z_conducta_h: 'Cómo se comportó en la sesión', z_conducta_s: 'Evidenciado en la entrevista',
@@ -125,7 +125,7 @@ const ROTULOS = {
     chip_ubicacion: 'Location', chip_disponibilidad: 'Availability', chip_pretension: 'Salary expectation', chip_ingles: 'English', chip_procesos: 'Other processes',
     posicionamiento: 'Positioning',
     z_ajuste: 'Fit for the role', z_ajuste_h: 'Requirement by requirement', z_ajuste_s: 'What the client defined, tested in the interview',
-    recomendacion: 'Recommendation',
+    recomendacion: 'Recommendation', demostro: 'Demonstrated', para: 'To reach', score_t: 'Fit for the role',
     escala: '1-5 scale on evidence from the session: <b>4-5</b> first-hand case with scope and outcome · <b>3</b> real experience with partial scope · <b>1-2</b> no first-hand case to support it.',
     z_impacto: 'What was demonstrated', z_impacto_h: 'In the interview', z_impacto_s: 'Sustained in conversation, not taken from the résumé',
     z_conducta: 'Behavior', z_conducta_h: 'How the candidate behaved in the session', z_conducta_s: 'Evidenced in the interview',
@@ -452,7 +452,7 @@ async function verSesion(id){
     const fuente = snap || s;
     const reqs = (snap ? snap.ratings : (s.ratings || [])).map(r => ({
       rid: r.requirement_id, n: r.req_text, lvl: r.level, ev: r.evidence || '',
-      exp: r.analisis || '', falta: r.falta || '', r: {},
+      exp: r.analisis || '', falta: r.falta || '', brecha: r.brecha || '', r: {},
     }));
     S = {
       sid: s.id, id: s.report_code,
@@ -834,9 +834,8 @@ function drawEx(){
           <div class="dets">${dets.map(d => `<div class="det"><span class="dq">${esc(d.detalle||'')}</span><span class="da">${esc(d.respuesta_esperada||'')}</span></div>`).join('')}</div>` : ''}
         <div class="mini">Preguntas de la sesión</div>
         <div class="qs">
-          <p><b>Escena:</b> ${esc(r.pregunta_escena||'—')}</p>
-          <p><b>Fricción:</b> ${esc(r.pregunta_friccion||'—')}</p>
-          <p><b>Cruce:</b> ${esc(r.pregunta_cruce||'—')}</p>
+          ${[['Escena', r.pregunta_escena, r.criterio_escena], ['Fricción', r.pregunta_friccion, r.criterio_friccion], ['Cruce', r.pregunta_cruce, r.criterio_cruce]]
+            .map(([t, q, c]) => `<p><b>${t}:</b> ${esc(q||'—')}${q && c ? `<span class="crit">Se da por buena si: ${esc(c)}</span>` : ''}</p>`).join('')}
         </div>
         ${sen.length ? `<div class="mini">Señales de impostor en este tema</div>
           <div class="sflags">${sen.map(s => `<span class="sflag">${esc(s)}</span>`).join('')}</div>` : ''}
@@ -1028,6 +1027,7 @@ function editarVacante(v){
     reqs: (v.requirements || []).map(r => ({
       id: r.id, text: r.text || '', criterio: r.criterio || '',
       q_escena: r.q_escena || '', q_friccion: r.q_friccion || '', q_cruce: r.q_cruce || '',
+      c_escena: r.c_escena || '', c_friccion: r.c_friccion || '', c_cruce: r.c_cruce || '',
       detalles: Array.isArray(r.detalles) ? r.detalles.map(d => ({...d})) : [],
       senales: Array.isArray(r.senales) ? r.senales.slice() : [],
       abierto: false,
@@ -1122,7 +1122,7 @@ function pintarEdicion(){
   if(bAdd) bAdd.addEventListener('click', () => {
     if(EDIT.reqs.length >= MAX_REQ){ toast(`Tres es el máximo para una sesión de 30 minutos.`); return; }
     EDIT.reqs.push({ id:null, text:'', criterio:'', q_escena:'', q_friccion:'', q_cruce:'',
-                     detalles:[], senales:[], abierto:true });
+                     c_escena:'', c_friccion:'', c_cruce:'', detalles:[], senales:[], abierto:true });
     pintarEdicion();
     const ult = $('#reqEdit').querySelector('.rq:last-child [data-r="text"]');
     if(ult) ult.focus();
@@ -1161,14 +1161,15 @@ function filaRequisito(r, i, total){
     ${r.abierto ? `<div class="rqbd">
       <div class="frow one"><div class="f"><label>Qué debe poder narrar</label>
         <textarea data-r="criterio" data-i="${i}" rows="2">${esc(r.criterio)}</textarea></div></div>
+      <!-- Cada pregunta con su criterio al lado: lo que se pregunta y lo que se espera oír
+           se editan juntos, para que no se desalineen. El nivel se califica contra el criterio. -->
+      ${[['escena','Pregunta de escena'],['friccion','Pregunta de fricción'],['cruce','Pregunta de cruce']].map(([k, t]) => `
       <div class="frow">
-        <div class="f"><label>Pregunta de escena</label>
-          <textarea data-r="q_escena" data-i="${i}" rows="2">${esc(r.q_escena)}</textarea></div>
-        <div class="f"><label>Pregunta de fricción</label>
-          <textarea data-r="q_friccion" data-i="${i}" rows="2">${esc(r.q_friccion)}</textarea></div>
-      </div>
-      <div class="frow one"><div class="f"><label>Pregunta de cruce</label>
-        <textarea data-r="q_cruce" data-i="${i}" rows="2">${esc(r.q_cruce)}</textarea></div></div>
+        <div class="f"><label>${t}</label>
+          <textarea data-r="q_${k}" data-i="${i}" rows="2">${esc(r['q_'+k])}</textarea></div>
+        <div class="f"><label>Se da por buena si…</label>
+          <textarea data-r="c_${k}" data-i="${i}" rows="2" placeholder="Qué tiene que contener la respuesta. Solo lo que la pregunta pide.">${esc(r['c_'+k])}</textarea></div>
+      </div>`).join('')}
 
       <div class="fttl" style="margin-top:14px">Detalles verificables</div>
       ${det.map((d,j) => `<div class="frow">
@@ -1263,6 +1264,7 @@ async function guardarEdicion(){
       requirements: e.reqs.map(r => ({
         id: r.id, text: r.text, criterio: r.criterio,
         q_escena: r.q_escena, q_friccion: r.q_friccion, q_cruce: r.q_cruce,
+        c_escena: r.c_escena, c_friccion: r.c_friccion, c_cruce: r.c_cruce,
         detalles: r.detalles.filter(d => (d.detalle||'').trim()),
         senales: r.senales,
       })),
@@ -1505,7 +1507,7 @@ function cuerpoSesion(){
     declara: S.dec || {}, recomendacion: S.rec || {}, trayectoria: S.tray || null,
     perfil: S.perfil || null, impacto: S.impacto || null, experiencia: S.exp || null,
     ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||'',
-                               analisis:r.exp||'', falta:r.falta||''})),
+                               analisis:r.exp||'', falta:r.falta||'', brecha:r.brecha||''})),
     // El inglés se guarda entero en la sesión —si se evalúa, qué se marcó y de dónde salió—
     // y no se recalcula desde la vacante: la vacante puede cambiar después, y el evaluador
     // pudo apagarlo para este candidato. La sesión manda sobre la vacante.
@@ -1654,6 +1656,7 @@ function render(){
             <div class="pb">
               <div class="pt">${esc(x.t)}${x.cv?`<span class="pcv">del CV${x.donde?' · '+esc(x.donde):''}</span>`:''}</div>
               <p class="px">“${esc(x.q)}”</p>
+              ${x.c ? `<p class="crit"><b>Se da por buena si:</b> ${esc(x.c)}</p>` : ''}
             </div>
           </div>`).join('')}
           ${qs.length ? '' : '<p class="hint" style="margin:0">Esta vacante no trae preguntas cargadas. Sondea con el criterio de arriba: pide una escena concreta, la fricción, y contrasta un detalle.</p>'}
@@ -1810,9 +1813,13 @@ function render(){
         ${prop && prop.evidencia ? `<div class="cita">
           <div class="dt">Lo que dijo el candidato — cita de la transcripción</div>
           <blockquote>${esc(prop.evidencia)}</blockquote>
-          ${prop.por_que_ese_nivel ? `<p class="pq">Por qué el nivel propuesto: ${esc(prop.por_que_ese_nivel)}</p>` : ''}
           ${prop.nota ? `<p class="pq av">${esc(prop.nota)}</p>` : ''}
         </div>` : ''}
+
+        ${prop && Array.isArray(prop.criterios) && prop.criterios.length ? `<div class="detbox"><div class="dt">Criterio por criterio — contra lo que se preguntó</div>
+          <div class="dets">${prop.criterios.map(c => `<div class="det ${c.estado==='cumplido'?'ok':(c.estado==='parcial'?'par':'no')}">
+            <span class="dq">${esc({escena:'Escena', friccion:'Fricción', cruce:'Cruce'}[c.pregunta] || c.pregunta || '')} · ${esc({cumplido:'cumplido', parcial:'parcial', no_cumplido:'no cumplido'}[c.estado] || c.estado || '')}</span>
+            <span class="da">${esc(c.como||'')}</span></div>`).join('')}</div></div>` : ''}
 
         ${prop && (prop.detalles||[]).length ? `<div class="detbox"><div class="dt">Detalles verificables — lo que contestó</div>
           <div class="dets">${prop.detalles.map(d => `<div class="det ${d.correcto?'ok':'no'}">
@@ -1833,8 +1840,10 @@ function render(){
         <!-- El porqué es lo que se imprime, así que es el campo principal y el que se exige.
              La transcripción lo propone; si no lo propuso —o no gustó— el evaluador lo escribe
              aquí. El rastro de auditoría queda debajo, plegado y opcional. -->
-        <div class="f" style="margin-top:12px"><label>Por qué ${r.lvl ? (r.lvl>=4?'cumple':(r.lvl===3?'cumple parcialmente':'no cumple')) : 'cumple o no'} — este párrafo se imprime en el informe</label>
-          <textarea class="notes" data-porque rows="4" placeholder="Dos o tres frases, con el caso que lo sostiene. El sujeto es el candidato: qué demostró y con qué. Nunca lo que la entrevista dejó de hacer.">${esc(r.exp||'')}</textarea></div>
+        <div class="f" style="margin-top:12px"><label>Qué demostró — se imprime en el informe</label>
+          <textarea class="notes" data-porque rows="3" placeholder="Máximo 30 palabras: los criterios que cumplió, con el hecho que lo muestra. El sujeto es el candidato. Nunca lo que la entrevista dejó de hacer.">${esc(r.exp||'')}</textarea></div>
+        <div class="f" style="margin-top:8px"><label>${r.lvl && r.lvl < 5 ? `Qué lo separa del ${r.lvl+1}` : 'Qué lo separa del nivel siguiente'} — se imprime; vacío solo en nivel 5</label>
+          <textarea class="notes" data-brecha rows="2" placeholder="Máximo 25 palabras, en términos del criterio que quedó parcial o sin cumplir: 'Su relato no incluyó el resultado que la pregunta pedía'.">${esc(r.brecha||'')}</textarea></div>
         <div class="evnote" id="evNote"></div>
         <details class="guionbox" style="margin-top:10px">
           <summary>Rastro interno de auditoría (opcional, no se imprime)</summary>
@@ -1861,6 +1870,7 @@ function render(){
         : (n ? 'Muy corto — sin el porqué no se puede emitir' : 'Sin el porqué no se puede emitir el informe');
     };
     st.querySelector('[data-porque]').addEventListener('input', e => { r.exp = e.target.value; evNote(); touch(); });
+    st.querySelector('[data-brecha]').addEventListener('input', e => { r.brecha = e.target.value; touch(); });
     st.querySelector('[data-notes]').addEventListener('input', e => { r.ev = e.target.value; evNote(); touch(); });
     evNote();
   }
@@ -2367,15 +2377,15 @@ function preguntasDe(r){
     (x.requisito||'').trim().toLowerCase() === (r.n||'').trim().toLowerCase());
   const delCv = ((cv && cv.preguntas) || []).filter(Boolean);
   const qs = [];
-  if(delCv[0]) qs.push({t:'Escena', q:delCv[0], cv:true, donde:(cv && cv.donde) || ''});
-  else if(meta.q_escena) qs.push({t:'Escena', q:meta.q_escena});
-  if(meta.q_friccion) qs.push({t:'Fricción', q:meta.q_friccion});
-  else if(delCv[1]) qs.push({t:'Fricción', q:delCv[1], cv:true});
+  if(delCv[0]) qs.push({t:'Escena', q:delCv[0], cv:true, donde:(cv && cv.donde) || '', c:meta.c_escena || ''});
+  else if(meta.q_escena) qs.push({t:'Escena', q:meta.q_escena, c:meta.c_escena || ''});
+  if(meta.q_friccion) qs.push({t:'Fricción', q:meta.q_friccion, c:meta.c_friccion || ''});
+  else if(delCv[1]) qs.push({t:'Fricción', q:delCv[1], cv:true, c:meta.c_friccion || ''});
   // La tercera NO se rellena. Antes, si la vacante no traía cruce, se metía aquí la segunda
   // pregunta del CV solo para llegar a tres — y tres preguntas leídas de corrido dejan sin
   // tiempo la repregunta, que es donde se cae un impostor. El cruce entra si existe; si no,
   // el tramo son dos preguntas y seis minutos de seguimiento.
-  if(meta.q_cruce) qs.push({t:'Cruce', q:meta.q_cruce});
+  if(meta.q_cruce) qs.push({t:'Cruce', q:meta.q_cruce, c:meta.c_cruce || ''});
   return qs.slice(0, 3);
 }
 
@@ -2934,7 +2944,10 @@ function aplicarTranscripcion(an){
     if(prop.evidencia) r.ev = String(prop.evidencia);
     // Lo que de verdad se lee en el informe: la explicación del analista y lo que quedó
     // sin comprobar. La cita se queda como rastro, no como cuerpo del documento.
-    if(prop.por_que_ese_nivel) r.exp = String(prop.por_que_ese_nivel);
+    // "demostro" (qué demostró) y "brecha" (por qué no el nivel de arriba) son lo que se
+    // imprime. "por_que_ese_nivel" es el nombre de análisis anteriores ya guardados.
+    if(prop.demostro || prop.por_que_ese_nivel) r.exp = String(prop.demostro || prop.por_que_ese_nivel);
+    if(prop.brecha != null) r.brecha = String(prop.brecha || '');
     // "recomendacion" es el nombre vigente. Los otros dos son de análisis anteriores que ya
     // están guardados: se leen pero el informe los rotula igual, como recomendación.
     if(prop.recomendacion || prop.por_confirmar || prop.falta_por_verificar)
@@ -3082,7 +3095,7 @@ async function emitirActa(){
                        confirmado:S.ingNivel||null, nota:S.ingNota||'', minuto:S.ingMin||'',
                        fuente:'evaluador_en_vivo'} : null,
       ratings: S.reqs.map(r => ({requirement_id:r.rid, req_text:r.n, level:r.lvl||null, evidence:r.ev||'',
-                                 analisis:r.exp||'', falta:r.falta||''})),
+                                 analisis:r.exp||'', falta:r.falta||'', brecha:r.brecha||''})),
     }});
     S.fin = true; S.fecha = Date.now(); S.hash = out.integrity_hash;
     S.doc = out.documento || null;
@@ -3101,6 +3114,11 @@ function firmaCorta(){
   return h ? h.slice(0,16).match(/.{1,4}/g).join('-') : '—';
 }
 
+// La nota de un requisito como barra de cinco tramos, pintada del color del veredicto. Es lo
+// que se lee de un vistazo antes que cualquier texto: llena hasta 4, verde, es "cumple".
+function barra5(lvl, v){
+  return `<span class="b5 ${v}" aria-label="${lvl} de 5">${[1,2,3,4,5].map(i => `<i class="${i <= lvl ? 'on' : ''}"></i>`).join('')}</span>`;
+}
 const ISO_PEAKU = `<svg class="iso actaiso" viewBox="0 0 174.8 90.4" role="img" aria-label="PeakU" focusable="false"><path class="b" d="M 126.84 54.14 C 131.82 58.32 139.23 57.67 143.40 52.70 L 125.39 37.59 C 121.22 42.56 121.87 49.97 126.84 54.14"/><path class="b" d="M 167.13 6.13 C 162.16 1.96 154.75 2.61 150.58 7.58 L 168.58 22.69 C 172.75 17.71 172.11 10.30 167.13 6.13"/><path class="b" d="M 152.02 24.14 C 147.05 19.96 146.40 12.55 150.58 7.58 L 125.39 37.59 C 129.57 32.62 136.98 31.97 141.95 36.14 C 146.93 40.31 147.57 47.73 143.40 52.70 L 168.58 22.69 C 164.41 27.66 157.00 28.31 152.02 24.14"/><path class="b" d="M 141.95 36.14 C 136.98 31.97 129.57 32.62 125.39 37.59 L 143.40 52.70 C 147.57 47.73 146.93 40.31 141.95 36.14"/><path class="b" d="M 152.02 24.14 C 157.00 28.31 164.41 27.66 168.58 22.69 L 150.58 7.58 C 146.40 12.55 147.05 19.96 152.02 24.14"/><path class="a" d="M 73.12 6.13 C 68.14 1.96 60.73 2.61 56.56 7.58 L 44.90 21.48 L 62.62 36.92 L 74.56 22.69 C 78.73 17.71 78.09 10.30 73.12 6.13"/><path class="a" d="M 120.12 6.13 C 115.15 1.96 107.74 2.61 103.57 7.58 L 121.57 22.69 C 125.75 17.71 125.10 10.30 120.12 6.13"/><path class="a" d="M 105.02 24.14 C 109.99 28.31 117.40 27.66 121.57 22.69 L 103.57 7.58 C 99.39 12.55 100.04 19.96 105.02 24.14"/><path class="a" d="M 53.21 67.60 L 62.98 55.95 C 60.76 58.59 56.82 58.94 54.17 56.72 C 51.53 54.50 51.18 50.55 53.40 47.91 L 24.20 82.71 C 23.55 83.49 22.80 84.15 22.00 84.72 L 21.99 84.75 C 21.99 84.75 33.67 76.08 34.11 75.75 C 36.51 74.02 39.46 72.99 42.66 72.99 C 42.65 72.99 42.65 72.99 42.64 72.99 L 42.68 72.99 C 42.67 72.99 42.66 72.99 42.66 72.99 C 46.39 73.00 50.01 74.67 50.94 78.48 L 50.94 78.48 C 49.87 74.83 50.58 70.73 53.21 67.60"/><path class="a" d="M 58.01 24.14 C 53.04 19.96 52.39 12.55 56.56 7.58 L 6.20 67.60 C 10.37 62.62 17.78 61.98 22.75 66.15 C 25.79 68.70 27.20 72.45 26.90 76.12 C 26.71 78.46 25.83 80.77 24.20 82.71 L 53.40 47.91 L 74.56 22.69 C 70.39 27.66 62.98 28.31 58.01 24.14"/><path class="a" d="M 22.75 66.15 C 17.78 61.98 10.37 62.62 6.20 67.60 C 2.02 72.57 2.67 79.98 7.64 84.16 C 11.84 87.67 17.75 87.75 22.01 84.72 C 22.80 84.15 23.55 83.49 24.20 82.71 C 25.83 80.77 26.71 78.46 26.90 76.12 C 27.20 72.45 25.79 68.70 22.75 66.15"/><path class="a" d="M 121.57 22.69 C 117.40 27.66 109.99 28.31 105.02 24.14 C 100.04 19.96 99.39 12.55 103.57 7.58 L 62.98 55.95 L 53.21 67.60 C 54.60 65.94 56.35 64.77 58.25 64.10 C 62.05 62.74 66.45 63.37 69.76 66.15 C 74.73 70.32 75.38 77.73 71.21 82.71 Z M 121.57 22.69"/><path class="a" d="M 69.76 66.15 C 66.45 63.37 62.05 62.74 58.25 64.10 C 56.35 64.77 54.60 65.94 53.21 67.60 C 50.58 70.73 49.87 74.83 50.94 78.48 C 51.57 80.62 52.82 82.61 54.66 84.16 C 59.62 88.33 67.04 87.68 71.21 82.71 C 75.38 77.73 74.73 70.32 69.76 66.15"/></svg>`;
 
 /* Todo lo que el informe imprime y que NO es un rótulo fijo, como un objeto plano. Es lo que
@@ -3117,6 +3135,7 @@ function textosDelInforme(){
     const p = porQue(r, i);
     const cuerpo = (!p.esAncla && p.texto) ? p.texto : ((r.ev || '').trim() || NIVEL_CLIENTE[r.lvl] || '');
     pon(`req.${i}.cuerpo`, cuerpo);
+    pon(`req.${i}.brecha`, r.brecha);
     pon(`req.${i}.falta`, r.falta);
   });
   pon('rec.texto', rec.texto);
@@ -3223,12 +3242,12 @@ function verActa(){
     : EN
       ? (nReq === 1
           ? `The only requirement ${quien} defined <b>${cumple ? 'was supported' : (parcial ? 'was partially supported' : 'was not supported')}</b> with evidence from the session.`
-          : `Of the ${nReq} requirements ${quien} defined, <b>${cumple} ${cumple===1?'was':'were'} supported</b> with evidence from the session` +
+          : `Of the ${nReq} requirements ${quien} defined, <b>${cumple===0?'none was':cumple===1?'1 was':cumple+' were'} supported</b> with evidence from the session` +
             (parcial ? `, ${parcial} partially` : '') + '.')
       : (nReq === 1
           ? `El único requisito que definió ${quien} <b>${cumple ? 'quedó sostenido' : (parcial ? 'quedó sostenido parcialmente' : 'no quedó sostenido')}</b> con evidencia de la sesión.`
           : `De los ${nReq} requisitos que definió ${quien}, ` +
-            `<b>${cumple} quedó${cumple===1?'':'ron'} sostenido${cumple===1?'':'s'}</b> con evidencia de la sesión` +
+            `<b>${cumple===0?'ninguno quedó sostenido':cumple===1?'1 quedó sostenido':cumple+' quedaron sostenidos'}</b> con evidencia de la sesión` +
             (parcial ? `, ${parcial} parcialmente` : '') + '.');
 
   // Los factores de cierre, cuando son solo lo que dijo el candidato (sin veredicto ni
@@ -3257,19 +3276,31 @@ function verActa(){
       ${R('aviso_viejo')}
     </div>` : ''}
     <div class="acta" lang="${EN ? 'en' : 'es'}">
+      <!-- Encabezado en dos columnas: a la izquierda quién es y para qué cargo; a la derecha
+           los datos del informe y el resumen gráfico —una barra por requisito—, que es lo
+           primero que el cliente mira. El detalle de cada barra viene más abajo. -->
       <div class="ahd">
-        <div>
+        <div class="ahl">
           ${ISO_PEAKU}
           <h2>${esc(S.cand)}</h2>
           <div class="cert">${esc(doc.titulo)} · ${R('marca')}</div>
           <div class="rl2">${[esc(tx('cargo', S.rol)), S.cli && '<b>'+esc(S.cli)+'</b>'].filter(Boolean).join(' · ')}</div>
           ${resumenReq ? `<p class="bajada">${resumenReq}</p>` : ''}
         </div>
-        <div class="mt">
-          ${R('informe')} <b class="mono">${esc(S.id)}</b><br>
-          ${R('verificado_el')} <b>${fechaLarga(d, idiomaInforme())}</b><br>
-          ${R('vigente_hasta')} <b>${masSeis(d, idiomaInforme())}</b><br>
-          ${R('sesion_grabada')}
+        <div class="ahr">
+          <div class="mt">
+            ${R('informe')} <b class="mono">${esc(S.id)}</b> · ${R('sesion_grabada')}<br>
+            ${R('verificado_el')} <b>${fechaLarga(d, idiomaInforme())}</b><br>
+            ${R('vigente_hasta')} <b>${masSeis(d, idiomaInforme())}</b>
+          </div>
+          ${S.reqs.length ? `<div class="score">
+            <div class="mini">${R('score_t')}</div>
+            ${S.reqs.map((r, i) => {
+              const v = r.lvl>=4?'ok':(r.lvl===3?'par':'no');
+              const n = tx(`req.${i}.n`, r.n);
+              return `<div class="sc"><span class="scn" title="${esc(n)}">${esc(n.length > 44 ? n.slice(0, 43).trim() + '…' : n)}</span>${barra5(r.lvl || 0, v)}<b class="scl ${v}">${r.lvl || '–'}</b></div>`;
+            }).join('')}
+          </div>` : ''}
         </div>
       </div>
 
@@ -3308,10 +3339,17 @@ function verActa(){
               const p = porQue(r, i);
               const cuerpo = (!p.esAncla && p.texto) ? p.texto
                            : ((r.ev || '').trim() || NIVEL_CLIENTE[r.lvl] || '');
+              // Con brecha (análisis nuevos) el cuerpo son dos renglones rotulados: qué demostró
+              // y qué lo separa del nivel siguiente. Sin brecha (actas anteriores) es el párrafo.
+              const brecha = (r.brecha || '').trim();
+              const cuerpoHtml = !cuerpo ? '' : brecha || r.lvl === 5
+                ? `<div class="aex dl"><div class="dln"><b class="dk ok">✓ ${R('demostro')}</b><span>${esc(tx(`req.${i}.cuerpo`, cuerpo))}</span></div>
+                   ${brecha && r.lvl < 5 ? `<div class="dln"><b class="dk par">△ ${R('para')} ${r.lvl + 1}</b><span>${esc(tx(`req.${i}.brecha`, brecha))}</span></div>` : ''}</div>`
+                : `<div class="aex">${esc(tx(`req.${i}.cuerpo`, cuerpo))}</div>`;
               return `<div class="req">
                 <div class="reqn">${esc(tx(`req.${i}.n`, r.n))}</div>
-                <div class="reqv"><span class="rl">${r.lvl} / 5</span><span class="vd ${v}">${LVL[r.lvl]}</span></div>
-                ${cuerpo?`<div class="aex">${esc(tx(`req.${i}.cuerpo`, cuerpo))}</div>`:''}
+                <div class="reqv"><span class="rl">${r.lvl} / 5</span>${barra5(r.lvl, v)}<span class="vd ${v}">${LVL[r.lvl]}</span></div>
+                ${cuerpoHtml}
                 ${r.falta?`<div class="afalta"><b>${R('recomendacion')}:</b> ${esc(tx(`req.${i}.falta`, r.falta))}</div>`:''}
               </div>`;
             }).join('')}

@@ -185,6 +185,15 @@ async function initSchema(pool) {
     // El informe del cliente dejó de pegar la cita cruda de la transcripción y pasó a
     // explicar el veredicto. `analisis` es esa explicación y `falta` lo que quedó sin
     // comprobar. `evidence` se conserva: es el rastro de auditoría, no el texto que se lee.
+    // Cada pregunta lleva su CRITERIO DE VALIDACIÓN: qué tiene que contener la respuesta para
+    // darla por buena. Antes la rúbrica esperaba cosas (fecha, alcance, fricción) que la
+    // pregunta no pedía, y el nivel bajaba por razones que el candidato nunca oyó.
+    `ALTER TABLE ${T.requirements} ADD COLUMN IF NOT EXISTS c_escena TEXT`,
+    `ALTER TABLE ${T.requirements} ADD COLUMN IF NOT EXISTS c_friccion TEXT`,
+    `ALTER TABLE ${T.requirements} ADD COLUMN IF NOT EXISTS c_cruce TEXT`,
+    // El porqué del nivel se parte en dos: lo que demostró (analisis) y lo que lo separa del
+    // nivel siguiente (brecha). "Por qué 4 y no 5" es lo que el cliente pregunta primero.
+    `ALTER TABLE ${T.ratings} ADD COLUMN IF NOT EXISTS brecha TEXT`,
     `ALTER TABLE ${T.ratings} ADD COLUMN IF NOT EXISTS analisis TEXT`,
     `ALTER TABLE ${T.ratings} ADD COLUMN IF NOT EXISTS falta TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_v_req_vacancy ON ${T.requirements}(vacancy_id)`,

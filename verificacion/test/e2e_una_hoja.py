@@ -45,13 +45,16 @@ CASO = r"""() => {
   S.idc = {grab:true, cam:true};
   S.reqs = [
     {rid:null, n:'Experiencia administrando infraestructura de redes LAN/WAN y equipos como switches, routers, access points y firewalls', lvl:4, ev:'',
-     exp:'Narró una caída real que resolvió por iniciativa propia instalando un backup 4G en un municipio lejano. Sin embargo, la WAN la manejaba centralmente Bogotá y su rol era de primer nivel. No detalló segmentación en VLAN, reglas de firewall propias ni marcas y modelos específicos de switches o routers.',
+     exp:'Narró una caída real que resolvió por iniciativa propia instalando un backup 4G en un municipio lejano, con fecha, lugar y decisión propia.',
+     brecha:'La WAN la manejaba Bogotá y su rol era de primer nivel; no detalló VLAN, reglas de firewall ni equipos concretos, que la pregunta pedía.',
      falta:'Encajaría mejor con un par técnico senior en networking durante los primeros meses.', r:{}},
     {rid:null, n:'Experiencia gestionando proveedores, contratos y acuerdos de nivel de servicio (SLA)', lvl:4, ev:'',
-     exp:'Narró un conflicto real y concreto con el proveedor Saurón, que reclasificaba daños como fallas eléctricas, y describió cómo lo confrontó cruzando datos con mantenimiento. La gestión de SLA la explicó vía tickets por criticidad, pero no citó umbrales numéricos como uptime o tiempos de respuesta ni penalidades contractuales.',
+     exp:'Narró un conflicto real con el proveedor Saurón, que reclasificaba daños como fallas eléctricas, y cómo lo confrontó cruzando datos con mantenimiento.',
+     brecha:'Explicó la gestión de SLA por tickets de criticidad, sin los umbrales numéricos ni las penalidades que el criterio esperaba.',
      falta:'', r:{}},
     {rid:null, n:'Gestión de presupuesto e infraestructura física con control en Excel/Google Sheets avanzado', lvl:4, ev:'',
-     exp:'Distingue OPEX de CAPEX y describió reportes de daños y presentaciones a directivos, pero declaró explícitamente que no manejaba el control de presupuesto, que estaba a cargo de su jefe. No dio cifras del presupuesto, ni funciones avanzadas de Excel ni una optimización con impacto cuantificado.',
+     exp:'Distingue OPEX de CAPEX y describió reportes de daños y presentaciones a directivos con datos propios.',
+     brecha:'El control del presupuesto estaba a cargo de su jefe: sin cifras, funciones avanzadas de Excel ni una optimización cuantificada.',
      falta:'Conviene contemplar apoyo o formación en control presupuestal si el rol lo exige de forma autónoma.', r:{}},
   ];
   S.impacto = [
@@ -124,7 +127,7 @@ with sync_playwright() as pw:
         subprocess.run(["pdftoppm", "-png", "-r", "50", ruta, f"{SALIDA}/jose_{papel.lower()}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print(f"  {papel:7} → {n} página{'s' if n>1 else ''}")
         txt = "".join(("\n".join(pp.extract_text() or "" for pp in r.pages)).split()).lower()
-        for debe in ["backup4G", "Saurón", "OPEXdeCAPEX", "Nagios", "JerónimoMartins", "PeakUrespondeporesteinforme", "Recomendación:", "Escala1-5"]:
+        for debe in ["backup4G", "Saurón", "OPEXdeCAPEX", "Nagios", "JerónimoMartins", "PeakUrespondeporesteinforme", "Recomendación:", "Escala1-5", "Demostró", "Parallegara5"]:
             if "".join(debe.split()).lower() not in txt:
                 errs.append(f"[{papel}] al PDF le falta: {debe}")
     kk = pg.evaluate("() => HOJA.ultimoK")
