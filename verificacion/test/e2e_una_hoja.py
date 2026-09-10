@@ -110,6 +110,8 @@ with sync_playwright() as pw:
     pg.set_viewport_size({"width": 725, "height": 1000}); pg.wait_for_timeout(300)
     real = pg.evaluate("() => { const a=document.querySelector('#actaStage .acta'); const z=a.style.zoom; a.style.zoom='1'; const h=a.getBoundingClientRect().height; a.style.zoom=z; return [h, a.getBoundingClientRect().width]; }")
     print(f"  altura real en papel a 725px de ancho: {real[0]:.0f}px (ancho {real[1]:.0f})")
+    ancho = pg.evaluate("""() => { const de=document.documentElement; const anchos=[]; for(const el of document.querySelectorAll('body *')){ const r=el.getBoundingClientRect(); if(r.right > 726 && getComputedStyle(el).display!=='none') anchos.push([el.tagName+'.'+String(el.className).slice(0,30), Math.round(r.right)]); } return {scrollW: de.scrollWidth, bodyW: document.body.scrollWidth, anchos: anchos.slice(0,8)}; }""")
+    print("  ancho del documento en papel:", ancho)
     partes = pg.evaluate("""() => { const a=document.querySelector('#actaStage .acta'); const z=a.style.zoom; a.style.zoom='1';
       const out = []; const top = a.getBoundingClientRect().top;
       for(const el of a.querySelectorAll(':scope > *, :scope > div > *')){ const b = el.getBoundingClientRect(); if(b.height>0) out.push([(el.className||el.tagName).toString().slice(0,18), Math.round(b.top-top), Math.round(b.height)]); }

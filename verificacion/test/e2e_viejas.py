@@ -119,7 +119,10 @@ with sync_playwright() as pw:
     for debe in ["requisito por requisito", "sesión supervisada", "sap pp en producción", "rollout en alpina"]:
         if debe not in bajo:
             errs.append(f"el informe viejo perdió una parte del acta: {debe}")
-    if "2 requisitos medidos" not in bajo:
+    # La cuenta de requisitos vive en la bajada del encabezado ("De los 2 requisitos que
+    # definió…") y en el resumen gráfico; el sello "2 requisitos medidos" se fue con la franja
+    # de proceso.
+    if "de los 2 requisitos" not in bajo:
         errs.append("el informe viejo perdió la cuenta de requisitos")
     pg.screenshot(path="/tmp/pk/vieja_02_acta_vieja.png", full_page=True)
 

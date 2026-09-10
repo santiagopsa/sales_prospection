@@ -168,14 +168,15 @@ El informe es a la vez el acta de verificación y el documento con el que se pre
 
 Va a dos columnas, formato `v4-2026-09`:
 
-- **Encabezado** con el nombre, el cargo, el cliente y una bajada que es un conteo, no un adjetivo: *de los 3 requisitos que definió el cliente, 2 quedaron sostenidos con evidencia de la sesión*.
-- **Sellos** y **cinta de datos** — identidad, supervisión, señales y requisitos medidos; después ubicación, disponibilidad, pretensión e inglés. Un chip solo aparece si el dato se recogió: un rótulo con nada detrás le dice al cliente que no preguntamos.
+- **Encabezado** en dos columnas: a la izquierda el nombre, el cargo, el cliente y una bajada que es un conteo, no un adjetivo (*de los 3 requisitos que definió el cliente, 2 quedaron sostenidos con evidencia de una entrevista en vivo*); a la derecha los datos del informe y el resumen gráfico, una barra de cinco por requisito y, si el cargo lo pide, la del inglés.
+- **Cómo se verificó** — cuatro celdas justo debajo del encabezado: entrevista en vivo (30 min, grabada y supervisada), identidad verificada (o bitácora archivada, en un sondeo), contrastado en conversación con casos propios —no con la hoja de vida—, y señales de asistencia. Es lo primero que se lee después del nombre porque es lo que distingue este informe de una lectura del CV: quien lo recibe tiene que saber que hubo una conversación real, con la identidad verificada, antes de leer un solo resultado.
+- **Cinta de datos** — ubicación, disponibilidad, pretensión, otros procesos. Un chip solo aparece si el dato se recogió: un rótulo con nada detrás le dice al cliente que no preguntamos.
 - **Posicionamiento** — el párrafo del evaluador, arriba, donde se lee primero.
 - **Columna ancha · Ajuste al rol** — cada requisito con su barra, **un párrafo** con lo que el candidato demostró y, si aplica, si aplica, una *Recomendación* corta sobre cómo aprovechar el perfil. La escala se explica una sola vez al pie de la sección.
 - **Conducta** — los rasgos que el cargo pedía y qué se evidenció de cada uno. Un rasgo sin evidencia sale como *sin evidencia*, sin explicación.
 - **Integridad** — identidad con el puntaje de cotejo, *señales de asistencia por IA o fuente externa*, y la bitácora de la sesión (la transcripción archivada).
 - **Columna angosta · Lo que demostró** — tarjetas con lo que sostuvo en la conversación. Salen de la transcripción, **no del CV**: el CV lo escribió el candidato, la conversación la sostuvo delante de un evaluador.
-- **Columna angosta · Inglés** — el nivel, la conducta que lo define y de dónde salió el dato.
+- **Inglés** — cuando el cargo lo pide, es una fila más de *Ajuste al rol*, con su barra (A1=1 … C1=5) y el veredicto contra el nivel exigido si este trae letra; y aparece también en el resumen gráfico del encabezado. Antes era una columna al pie y se perdía. Si no se evaluó, la fila lo dice.
 - **Experiencia** — el empleo más reciente, con su veredicto y un párrafo de lo que el candidato narró.
 - **Factores de cierre** — qué lo mueve, sus no negociables, las condiciones declaradas, y al lado la recomendación con sus riesgos y mitigación. Lo único del informe que es opinión, y va firmado. El texto lo escribe el evaluador a mano, así que la pantalla le recuerda ahí mismo la regla del sujeto.
 

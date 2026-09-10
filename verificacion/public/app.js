@@ -70,10 +70,20 @@ const ROTULOS = {
     aviso_viejo: 'Lo que ves está reconstruido con los datos que quedaron guardados, así que puede no coincidir exactamente con la copia que se entregó — esa copia es la referencia. Los informes emitidos de ahora en adelante se congelan al emitirse y se ven siempre igual.',
     el_cliente: 'el cliente',
     sello_id_ok: 'Identidad verificada', sello_id_no: 'Identidad no certificada', sello_vivo: 'Sesión supervisada en vivo', sello_sin_senales: 'Sin señales de asistencia',
+    // La franja "cómo se verificó": lo primero que dice el informe es que esto salió de una
+    // conversación real y supervisada, no de la hoja de vida.
+    pr_vivo_t: 'Entrevista en vivo', pr_vivo_s: '30 min, grabada y supervisada por PeakU',
+    pr_id_ok_t: 'Identidad verificada', pr_id_ok_s: 'Documento, prueba de vida y rostro cotejado',
+    pr_id_no_t: 'Identidad no certificada', pr_id_no_s: 'La verificación de identidad no se completó',
+    pr_bit_t: 'Bitácora archivada', pr_bit_s: 'Transcripción guardada y verificable',
+    pr_conv_t: 'Contrastado en conversación', pr_conv_s: 'Casos propios narrados, no la hoja de vida',
+    pr_sen_ok_t: 'Sin señales de asistencia', pr_sen_ok_s: 'Sin lectura de IA ni ayuda externa',
+    pr_sen_no_s: 'Observación factual durante la sesión',
+    ing_exigido_corto: 'El cargo pide', ing_no_eval: 'NO EVALUADO', ing_conv: 'valoración conversacional en vivo, no certificación',
     sello_exp_ok: 'Experiencia reciente verificada', sello_exp_no: 'Experiencia reciente no verificada',
     chip_ubicacion: 'Ubicación', chip_disponibilidad: 'Disponibilidad', chip_pretension: 'Aspiración', chip_ingles: 'Inglés', chip_procesos: 'Otros procesos',
     posicionamiento: 'Posicionamiento',
-    z_ajuste: 'Ajuste al rol', z_ajuste_h: 'Requisito por requisito', z_ajuste_s: 'Lo que definió el cliente, contrastado en la entrevista',
+    z_ajuste: 'Ajuste al rol', z_ajuste_h: 'Requisito por requisito', z_ajuste_s: 'Contrastado en entrevista en vivo, no en la hoja de vida',
     recomendacion: 'Recomendación', demostro: 'Demostró', para: 'Para llegar a', score_t: 'Ajuste al rol',
     escala: 'Escala 1-5 sobre evidencia de la sesión: <b>4-5</b> caso propio con alcance y resultado · <b>3</b> experiencia real con alcance parcial · <b>1-2</b> sin caso propio que lo sostenga.',
     z_impacto: 'Lo que demostró', z_impacto_h: 'En la entrevista', z_impacto_s: 'Sostenido en la conversación, no tomado de la hoja de vida',
@@ -121,10 +131,18 @@ const ROTULOS = {
     aviso_viejo: 'What you see is rebuilt from the data that was saved, so it may not match the copy that was delivered — that copy is the reference. Reports issued from now on are frozen at issue and always look the same.',
     el_cliente: 'the client',
     sello_id_ok: 'Identity verified', sello_id_no: 'Identity not certified', sello_vivo: 'Live supervised session', sello_sin_senales: 'No signs of assistance',
+    pr_vivo_t: 'Live interview', pr_vivo_s: '30 min, recorded and supervised by PeakU',
+    pr_id_ok_t: 'Identity verified', pr_id_ok_s: 'Document, liveness check and face match',
+    pr_id_no_t: 'Identity not certified', pr_id_no_s: 'Identity verification was not completed',
+    pr_bit_t: 'Log archived', pr_bit_s: 'Transcript stored and verifiable',
+    pr_conv_t: 'Tested in conversation', pr_conv_s: 'First-hand cases told, not the résumé',
+    pr_sen_ok_t: 'No signs of assistance', pr_sen_ok_s: 'No AI reading or external help',
+    pr_sen_no_s: 'Factual observation during the session',
+    ing_exigido_corto: 'Role requires', ing_no_eval: 'NOT ASSESSED', ing_conv: 'live conversational assessment, not a certification',
     sello_exp_ok: 'Recent experience verified', sello_exp_no: 'Recent experience not verified',
     chip_ubicacion: 'Location', chip_disponibilidad: 'Availability', chip_pretension: 'Salary expectation', chip_ingles: 'English', chip_procesos: 'Other processes',
     posicionamiento: 'Positioning',
-    z_ajuste: 'Fit for the role', z_ajuste_h: 'Requirement by requirement', z_ajuste_s: 'What the client defined, tested in the interview',
+    z_ajuste: 'Fit for the role', z_ajuste_h: 'Requirement by requirement', z_ajuste_s: 'Tested in a live interview, not on the résumé',
     recomendacion: 'Recommendation', demostro: 'Demonstrated', para: 'To reach', score_t: 'Fit for the role',
     escala: '1-5 scale on evidence from the session: <b>4-5</b> first-hand case with scope and outcome · <b>3</b> real experience with partial scope · <b>1-2</b> no first-hand case to support it.',
     z_impacto: 'What was demonstrated', z_impacto_h: 'In the interview', z_impacto_s: 'Sustained in conversation, not taken from the résumé',
@@ -3116,6 +3134,17 @@ function firmaCorta(){
 
 // La nota de un requisito como barra de cinco tramos, pintada del color del veredicto. Es lo
 // que se lee de un vistazo antes que cualquier texto: llena hasta 4, verde, es "cumple".
+// El inglés en la misma escala de cinco: A1=1 … C1=5 (C2 también 5). Y el veredicto contra
+// lo que el cargo pide, si el nivel exigido trae una letra; si no, se juzga por escala absoluta.
+const NIVEL_ING_N = {A1:1, A2:2, B1:3, B2:4, C1:5, C2:5};
+function veredictoIngles(confirmado, exigido){
+  const n = NIVEL_ING_N[String(confirmado || '').toUpperCase()] || 0;
+  const m = (String(exigido || '').toUpperCase().match(/\b(A1|A2|B1|B2|C1|C2)\b/) || [])[1];
+  const req = m ? NIVEL_ING_N[m] : null;
+  if(!n) return {n:0, v:'nv', cumple:null};
+  if(req) return {n, v: n >= req ? 'ok' : (n === req - 1 ? 'par' : 'no'), cumple: n >= req ? 'ok' : (n === req - 1 ? 'par' : 'no')};
+  return {n, v: n >= 4 ? 'ok' : (n === 3 ? 'par' : 'no'), cumple:null};
+}
 function barra5(lvl, v){
   return `<span class="b5 ${v}" aria-label="${lvl} de 5">${[1,2,3,4,5].map(i => `<i class="${i <= lvl ? 'on' : ''}"></i>`).join('')}</span>`;
 }
@@ -3227,7 +3256,6 @@ function verActa(){
     dec.ubicacion && ['📍', R('chip_ubicacion'), tx('dec.ubicacion', dec.ubicacion)],
     dec.disponibilidad && ['🗓', R('chip_disponibilidad'), tx('dec.disponibilidad', dec.disponibilidad)],
     dec.pretension && ['💰', R('chip_pretension'), tx('dec.pretension', dec.pretension)],
-    (ingA && ingA.confirmado) && ['🗣', R('chip_ingles'), ingA.confirmado],
     dec.procesos && ['⏳', R('chip_procesos'), tx('dec.procesos', dec.procesos)],
   ].filter(Boolean);
 
@@ -3241,13 +3269,13 @@ function verActa(){
   const resumenReq = !nReq ? ''
     : EN
       ? (nReq === 1
-          ? `The only requirement ${quien} defined <b>${cumple ? 'was supported' : (parcial ? 'was partially supported' : 'was not supported')}</b> with evidence from the session.`
-          : `Of the ${nReq} requirements ${quien} defined, <b>${cumple===0?'none was':cumple===1?'1 was':cumple+' were'} supported</b> with evidence from the session` +
+          ? `The only requirement ${quien} defined <b>${cumple ? 'was supported' : (parcial ? 'was partially supported' : 'was not supported')}</b> with evidence from a live interview.`
+          : `Of the ${nReq} requirements ${quien} defined, <b>${cumple===0?'none was':cumple===1?'1 was':cumple+' were'} supported</b> with evidence from a live interview` +
             (parcial ? `, ${parcial} partially` : '') + '.')
       : (nReq === 1
-          ? `El único requisito que definió ${quien} <b>${cumple ? 'quedó sostenido' : (parcial ? 'quedó sostenido parcialmente' : 'no quedó sostenido')}</b> con evidencia de la sesión.`
+          ? `El único requisito que definió ${quien} <b>${cumple ? 'quedó sostenido' : (parcial ? 'quedó sostenido parcialmente' : 'no quedó sostenido')}</b> con evidencia de una entrevista en vivo.`
           : `De los ${nReq} requisitos que definió ${quien}, ` +
-            `<b>${cumple===0?'ninguno quedó sostenido':cumple===1?'1 quedó sostenido':cumple+' quedaron sostenidos'}</b> con evidencia de la sesión` +
+            `<b>${cumple===0?'ninguno quedó sostenido':cumple===1?'1 quedó sostenido':cumple+' quedaron sostenidos'}</b> con evidencia de una entrevista en vivo` +
             (parcial ? `, ${parcial} parcialmente` : '') + '.');
 
   // Los factores de cierre, cuando son solo lo que dijo el candidato (sin veredicto ni
@@ -3255,7 +3283,7 @@ function verActa(){
   // una banda entera para dos renglones. Con veredicto y riesgos siguen aparte, en dos
   // columnas, porque ahí sí hay texto. Solo si en la banda queda sitio (menos de tres).
   const cierreCorto = !!((dec.motivacion || nogo.length) && !(VER || riesgos.length));
-  const cierreEnBanda = cierreCorto && ((ingA ? 1 : 0) + 1) < 3;
+  const cierreEnBanda = cierreCorto;   // la banda queda con integridad y, si cabe, el cierre
 
   // Sellos: solo lo que de verdad se midió en esta sesión.
   const nR = S.reqs.length;
@@ -3300,12 +3328,24 @@ function verActa(){
               const n = tx(`req.${i}.n`, r.n);
               return `<div class="sc"><span class="scn" title="${esc(n)}">${esc(n.length > 44 ? n.slice(0, 43).trim() + '…' : n)}</span>${barra5(r.lvl || 0, v)}<b class="scl ${v}">${r.lvl || '–'}</b></div>`;
             }).join('')}
+            ${(ingA && ingA.confirmado) ? (() => { const vi = veredictoIngles(ingA.confirmado, ingA.nivel_exigido);
+              const letra = (String(ingA.nivel_exigido || '').toUpperCase().match(/\b(A1|A2|B1|B2|C1|C2)\b/) || [])[1];
+              return `<div class="sc"><span class="scn">${R('chip_ingles')}${letra ? ` · ${R('ing_exigido_corto')} ${letra}` : ''}</span>${barra5(vi.n, vi.v)}<b class="scl ${vi.v}">${esc(ingA.confirmado)}</b></div>`; })() : ''}
           </div>` : ''}
         </div>
       </div>
 
-      <div class="sellos">
-        ${sellos.map(([ok,t]) => `<span class="sello ${ok?'ok':'nv'}">${ok?'✓':'○'} ${esc(t)}</span>`).join('')}
+      <!-- CÓMO SE VERIFICÓ. Va antes que cualquier resultado porque es lo que le da valor a
+           todo lo demás: esto salió de una conversación real, grabada y supervisada, con la
+           identidad verificada, y no de leer una hoja de vida. Cuatro celdas, una por pilar. -->
+      <div class="proceso">
+        ${[
+          ['🎙', R('pr_vivo_t'), R('pr_vivo_s'), 'ok'],
+          cierre ? [idOk ? '🪪' : '○', idOk ? R('pr_id_ok_t') : R('pr_id_no_t'), idOk ? R('pr_id_ok_s') : R('pr_id_no_s'), idOk ? 'ok' : 'nv']
+                 : ['📼', R('pr_bit_t'), R('pr_bit_s'), 'ok'],
+          ['💬', R('pr_conv_t'), R('pr_conv_s'), 'ok'],
+          nSig === 0 ? ['🛡', R('pr_sen_ok_t'), R('pr_sen_ok_s'), 'ok'] : ['⚠', selloSen, R('pr_sen_no_s'), 'nv'],
+        ].map(([ic, t, sub, cl]) => `<div class="pr ${cl}"><span class="pri">${ic}</span><div><b>${esc(t)}</b><span>${esc(sub)}</span></div></div>`).join('')}
       </div>
 
       <!-- La cinta de datos: lo que el cliente mira antes de decidir si sigue leyendo.
@@ -3352,6 +3392,21 @@ function verActa(){
                 ${r.falta?`<div class="afalta"><b>${R('recomendacion')}:</b> ${esc(tx(`req.${i}.falta`, r.falta))}</div>`:''}
               </div>`;
             }).join('')}
+            ${ingA ? (() => {
+              // El inglés es un requisito del cargo y va con los demás, en su misma fila y
+              // con su barra, no escondido en una columna al pie. Se midió distinto —se oyó
+              // en vivo—, y la fila lo dice.
+              const vi = veredictoIngles(ingA.confirmado, ingA.nivel_exigido);
+              const badge = !ingA.confirmado ? `<span class="vd nv">${R('ing_no_eval')}</span>`
+                : vi.cumple ? `<span class="vd ${vi.v}">${LVL[{ok:5,par:3,no:1}[vi.v]]}</span>` : `<span class="vd ${vi.v}">${esc(ingA.confirmado)}</span>`;
+              const cuerpo = !ingA.confirmado ? R('ing_no_texto')
+                : [esc(anclaIng[ingA.confirmado] || ''), ingA.nota ? esc(tx('ing.nota', ingA.nota)) : ''].filter(Boolean).join(' ');
+              return `<div class="req ing">
+                <div class="reqn">${R('chip_ingles')}${ingA.nivel_exigido ? `<small>${R('ing_exigido_corto')}: ${esc(tx('ing.exigido', ingA.nivel_exigido))}</small>` : ''}</div>
+                <div class="reqv">${ingA.confirmado ? `<span class="rl">${esc(ingA.confirmado)}</span>${barra5(vi.n, vi.v)}` : ''}${badge}</div>
+                <div class="aex">${cuerpo}${ingA.confirmado ? ` <small class="ingnota">${R('ing_calificado')} ${esc(S.eval || R('el_evaluador'))}${ingA.minuto ? ` (${R('ing_min')} ${esc(ingA.minuto)})` : ''}; ${R('ing_conv')}.</small>` : ''}</div>
+              </div>`;
+            })() : ''}
             <!-- La nota de la escala va DENTRO del recuadro. Suelta debajo, se quedaba
                  huérfana al principio de la página siguiente, lejos de los números que
                  explica. -->
@@ -3408,23 +3463,6 @@ function verActa(){
               ${ultima.ok ? '' : `<div class="afalta">${R('exp_nota_no')}</div>`}
             </div>
           </div>`;
-        if(ingA) cols.push(`
-          <div class="tres">
-            <div class="zona"><span class="zn">${R('z_ing')}</span><h3>${ingA.confirmado ? R('ing_oido') : R('ing_no_evaluado')}</h3></div>
-            <div class="zbox">
-              ${!ingA.confirmado ? `
-                <p class="dtx">${R('ing_no_texto')}</p>
-              ` : `
-                <div class="ingfila">
-                  <div class="ingniv">${esc(ingA.confirmado)}</div>
-                  <div class="ingtx"><b>${esc(anclaIng[ingA.confirmado] || '')}</b></div>
-                </div>
-                ${ingA.nivel_exigido ? `<p class="dtx"><b>${R('ing_pide')}</b> ${esc(tx('ing.exigido', ingA.nivel_exigido))}.</p>` : ''}
-                ${ingA.nota ? `<p class="dtx">${esc(tx('ing.nota', ingA.nota))}</p>` : ''}
-                <p class="hint">${R('ing_calificado')} ${esc(S.eval || R('el_evaluador'))}${ingA.minuto ? ` (${R('ing_min')} ${esc(ingA.minuto)})` : ''}; ${R('ing_nota')}</p>
-              `}
-            </div>
-          </div>`);
         // Los factores de cierre, cuando son solo lo que dijo el candidato (sin veredicto ni
         // riesgos), son un bloque corto: entran como columna de esta banda en vez de abrir
         // una banda entera para dos renglones. Con veredicto y riesgos siguen aparte, en dos
@@ -3478,7 +3516,7 @@ function verActa(){
       <div class="aback">
         <div class="abtx">
           <h4>${R('responde')}</h4>
-          <p>${(doc.tipo === 'acta') ? R('garantia_acta') : R('garantia_sin_id')} ${R('verifique')} <b>${esc(urlVerificacion(S.id))}</b>.</p>
+          <p>${(doc.tipo === 'acta') ? R('garantia_acta') : R('garantia_sin_id')} ${R('verifique')} <b>${esc(urlVerificacion(S.id))}</b>.${doc.alcance ? ` <span class="alc">${esc(doc.alcance)}</span>` : ''}</p>
           <span class="sig">${R('firma')} ${esc(firmaCorta())} · ${R('evaluo')} ${esc(S.eval||'—')} · ${R('revision')} · ${R('escala_anclada')} · ${R('grabada_archivada')}${(doc.tipo === 'acta') ? ' · ' + R('id_externa') : ''}</span>
         </div>
         ${S.id ? `<button class="abqr" type="button" title="${esc(urlVerificacionAbs(S.id))}">
@@ -3486,7 +3524,6 @@ function verActa(){
           <span>${R('escanee')}</span>
         </button>` : ''}
       </div>
-        ${doc.alcance ? `<p class="hint alcance">${esc(doc.alcance)}</p>` : ''}
       </div>
     </div>
     <div class="tools" style="margin-top:14px">
