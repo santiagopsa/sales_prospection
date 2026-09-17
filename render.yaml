@@ -2,7 +2,7 @@ services:
   - type: web
     name: peaku-sandler
     runtime: node
-    plan: free
+    plan: starter   # siempre despierto: webhooks de Voximplant y jobs del SDR no corren dormidos
     buildCommand: npm install
     startCommand: node server.js
     envVars:
@@ -17,6 +17,6 @@ services:
 
 databases:
   - name: peaku-sandler-db
-    plan: free
+    plan: free      # TODO: subir desde la consola de Render (el plan free de Postgres expira); luego reflejarlo aquí
     databaseName: peaku_sandler
     user: peaku

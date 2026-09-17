@@ -523,6 +523,18 @@ try {
   console.error('[verificacion] no se pudo montar:', e.message);
 }
 
+// ---------- SDR Coach ----------
+// Prospección de Angie: cola del día, leads, llamadas y mejora semanal. Sus tablas viven en el
+// schema "sdr". Sin login por decisión de producto: quien tenga el enlace /sdr opera todo.
+try {
+  const sdr = require('./sdr/app');
+  app.use('/sdr', sdr.router({ pool }));
+  sdr.initSchema(pool).catch(e => console.error('[sdr] schema:', e.message));
+  console.log('[sdr] montada en /sdr');
+} catch (e) {
+  console.error('[sdr] no se pudo montar:', e.message);
+}
+
 // SPA fallback
 app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));

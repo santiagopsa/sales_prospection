@@ -5,7 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test:sdr": "node --test sdr/test/*.test.js",
+    "sdr": "node sdr/cli.js",
+    "sdr:dev": "node sdr/dev.js"
   },
   "engines": {
     "node": ">=18.0.0"
