@@ -75,7 +75,7 @@ async function procesar(db, config, env, callId, { deps = {}, forzar = false } =
         else throw e;
       }
     }
-    const n = deepgram.normalizar(respuesta, config.CANAL_ANGIE_EN_GRABACION);
+    const n = deepgram.normalizar(respuesta, config.CANAL_ANGIE_EN_GRABACION, { palabrasAngie: config.PALABRAS_PITCH });
     if (!n.turnos.length) throw error(422, 'La transcripción salió vacía (¿grabación en silencio?)');
     const m = metricas.calcular(n.turnos, config);
     await db.query(
@@ -132,7 +132,7 @@ async function transcripcionDeLlamada(db, callId) {
   const r = await db.query(
     `SELECT k.id, k.lead_id, k.duracion_s, k.record_url, k.pipeline_status, k.pipeline_error, ${ms('COALESCE(k.started_at, k.created_at)')} AS started_ms,
             l.empresa, l.contacto, x.resultado, x.nota, x.usuario,
-            tr.turnos, tr.texto, tr.metricas, tr.modelo, tr.duracion_s AS duracion_audio_s, ${ms('tr.created_at')} AS transcrito_ms
+            tr.turnos, tr.texto, tr.metricas, tr.modelo, tr.meta, tr.duracion_s AS duracion_audio_s, ${ms('tr.created_at')} AS transcrito_ms
      FROM ${T.calls} k JOIN ${T.leads} l ON l.id = k.lead_id
      LEFT JOIN ${T.touches} x ON x.id = k.touch_id
      LEFT JOIN ${T.transcripts} tr ON tr.call_id = k.id

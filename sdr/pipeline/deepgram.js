@@ -16,6 +16,8 @@ function parametros(config) {
     smart_format: 'true',
     utterances: 'true',
     utt_split: '1.2',
+    // Por si la grabación llega en mono (un solo canal con las dos voces): se separan por diarización.
+    diarize: 'true',
   });
   return q.toString();
 }
@@ -56,17 +58,45 @@ async function descargarAudio(url, { fetchFn = fetch, maxBytes = 200 * 1024 * 10
 
 // Respuesta de Deepgram → { turnos, texto, duracion_s, modelo, meta }.
 // `canalAngie` es 'derecho' (canal 1) o 'izquierdo' (canal 0), según CANAL_ANGIE_EN_GRABACION.
-function normalizar(respuesta, canalAngie = 'derecho') {
+// Si la grabación es mono (las dos voces en un canal), quién habló sale de la diarización de
+// Deepgram: Angie es el hablante que dice las palabras del pitch (`palabrasAngie`); si ninguno las
+// dice, el que habla en el segundo turno (el prospecto contesta "aló" primero).
+function normalizar(respuesta, canalAngie = 'derecho', { palabrasAngie = ['peaku', 'te cuento', 'nosotros', 'ofrecemos'] } = {}) {
   const res = (respuesta && respuesta.results) || {};
   const meta = (respuesta && respuesta.metadata) || {};
   const idxAngie = canalAngie === 'izquierdo' ? 0 : 1;
   const quien = ch => (ch === idxAngie ? 'angie' : 'prospecto');
   let turnos = [];
+  let modo = 'canales';
   if (Array.isArray(res.utterances) && res.utterances.length) {
-    turnos = res.utterances.map(u => ({
-      quien: quien(u.channel || 0), inicio: u.start, fin: u.end,
-      texto: u.transcript || '', palabras: Array.isArray(u.words) ? u.words.length : undefined,
-    }));
+    const canales = new Set(res.utterances.map(u => u.channel || 0));
+    if (canales.size >= 2) {
+      turnos = res.utterances.map(u => ({
+        quien: quien(u.channel || 0), inicio: u.start, fin: u.end,
+        texto: u.transcript || '', palabras: Array.isArray(u.words) ? u.words.length : undefined,
+      }));
+    } else {
+      modo = 'diarizacion';
+      const sinAcentos = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const sp = u => (u.speaker == null ? 0 : u.speaker);
+      const hablantes = new Map();
+      res.utterances.forEach(u => {
+        const h = hablantes.get(sp(u)) || { pitch: 0 };
+        const x = sinAcentos(u.transcript);
+        if (palabrasAngie.some(p => p && x.includes(sinAcentos(p)))) h.pitch++;
+        hablantes.set(sp(u), h);
+      });
+      let angieSp = null, max = 0;
+      for (const [k, h] of hablantes) if (h.pitch > max) { max = h.pitch; angieSp = k; }
+      if (angieSp == null) {
+        const segundo = res.utterances.find((u, i) => i > 0 && sp(u) !== sp(res.utterances[0]));
+        angieSp = segundo ? sp(segundo) : 1;
+      }
+      turnos = res.utterances.map(u => ({
+        quien: sp(u) === angieSp ? 'angie' : 'prospecto', inicio: u.start, fin: u.end,
+        texto: u.transcript || '', palabras: Array.isArray(u.words) ? u.words.length : undefined,
+      }));
+    }
   } else if (Array.isArray(res.channels)) {
     // Sin utterances: frases a partir de las palabras de cada canal, cortando en pausas > 1.2 s.
     res.channels.forEach((c, ch) => {
@@ -87,7 +117,7 @@ function normalizar(respuesta, canalAngie = 'derecho') {
     turnos, texto,
     duracion_s: Number.isFinite(meta.duration) ? Number(meta.duration.toFixed(1)) : null,
     modelo,
-    meta: { request_id: meta.request_id, canales: meta.channels, duracion: meta.duration, utterances: !!(res.utterances && res.utterances.length) },
+    meta: { request_id: meta.request_id, canales: meta.channels, duracion: meta.duration, utterances: !!(res.utterances && res.utterances.length), modo },
   };
 }
 

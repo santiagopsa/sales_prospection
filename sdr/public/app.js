@@ -532,7 +532,7 @@
       <div class="kpis">${METRICAS.map(([k, nombre, fmt, ayuda]) => `<div class="kpi" title="${esc(ayuda)}"><b>${esc(String(fmt(m[k])))}</b><span>${nombre}</span></div>`).join('')}</div>
       ${m.muletillas_detalle && Object.keys(m.muletillas_detalle).length ? `<div class="suave" style="font-size:12px;margin:-6px 0 14px">Muletillas: ${Object.entries(m.muletillas_detalle).map(([k, v]) => `${esc(k)} ×${v}`).join(', ')}</div>` : ''}
       <div class="panel">
-        <h2>Transcripción <span class="suave" style="font-weight:400;font-size:12px">${c.modelo ? esc(c.modelo) : ''}${c.transcrito_ms ? ' · ' + fechaHora(c.transcrito_ms) : ''}</span></h2>
+        <h2>Transcripción <span class="suave" style="font-weight:400;font-size:12px">${c.modelo ? esc(c.modelo) : ''}${c.transcrito_ms ? ' · ' + fechaHora(c.transcrito_ms) : ''}${c.meta && c.meta.modo === 'diarizacion' ? ' · grabación mono: voces separadas por diarización (Angie = quien dice Peaku)' : ''}</span></h2>
         <div class="turnos">${(c.turnos || []).map(t => `<div class="turno ${t.quien}"><span class="t">${mmss(t.inicio)}</span><span class="q">${t.quien === 'angie' ? 'Angie' : 'Prospecto'}</span><span class="x">${esc(t.texto)}</span></div>`).join('')}</div>
       </div>`}`;
     const $re = document.getElementById('reprocesar');

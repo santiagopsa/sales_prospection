@@ -23,6 +23,23 @@ test('deepgram.normalizar: el canal derecho es Angie, turnos ordenados con texto
   assert.strictEqual(inv.turnos[0].quien, 'prospecto');
 });
 
+test('deepgram.normalizar: grabación mono → diarización; Angie es quien dice el pitch', () => {
+  const r = { metadata: { duration: 30, channels: 1 }, results: { utterances: [
+    { channel: 0, speaker: 0, start: 0, end: 1, transcript: 'Aló.' },
+    { channel: 0, speaker: 1, start: 1, end: 5, transcript: 'Hola, te habla Angie de Peaku, ¿cómo estás?' },
+    { channel: 0, speaker: 0, start: 5, end: 7, transcript: 'Bien, ¿de dónde?' },
+    { channel: 0, speaker: 1, start: 7, end: 12, transcript: 'De Peaku, hacemos headhunting.' },
+  ] } };
+  const n = require('../pipeline/deepgram').normalizar(r, 'derecho', { palabrasAngie: ['peaku'] });
+  assert.deepStrictEqual(n.turnos.map(t => t.quien), ['prospecto', 'angie', 'prospecto', 'angie']);
+  assert.strictEqual(n.meta.modo, 'diarizacion');
+  // Sin palabras del pitch: Angie es quien habla en el segundo turno
+  const r2 = { results: { utterances: [{ speaker: 0, start: 0, end: 1, transcript: 'Aló.' }, { speaker: 1, start: 1, end: 3, transcript: 'Buenos días.' }, { speaker: 0, start: 3, end: 4, transcript: 'Dime.' }] } };
+  assert.deepStrictEqual(require('../pipeline/deepgram').normalizar(r2, 'derecho', { palabrasAngie: ['zzz'] }).turnos.map(t => t.quien), ['prospecto', 'angie', 'prospecto']);
+  // Estéreo de verdad sigue usando el canal
+  assert.strictEqual(require('../pipeline/deepgram').normalizar(fixture(), 'derecho').meta.modo, 'canales');
+});
+
 test('deepgram.normalizar: sin utterances arma frases con las palabras por canal', () => {
   const r = { metadata: { duration: 5 }, results: { channels: [
     { alternatives: [{ words: [{ word: 'hola', punctuated_word: 'Hola,', start: 0, end: 0.4 }, { word: 'dime', punctuated_word: 'dime.', start: 0.5, end: 0.9 }, { word: 'ok', punctuated_word: 'Ok.', start: 4, end: 4.3 }] }] },
@@ -34,7 +51,7 @@ test('deepgram.normalizar: sin utterances arma frases con las palabras por canal
 
 test('deepgram.parametros: multicanal, español, utterances', () => {
   const q = deepgram.parametros(base);
-  assert.match(q, /multichannel=true/); assert.match(q, /language=es/); assert.match(q, /utterances=true/); assert.match(q, /model=nova-2/);
+  assert.match(q, /multichannel=true/); assert.match(q, /language=es/); assert.match(q, /utterances=true/); assert.match(q, /model=nova-2/); assert.match(q, /diarize=true/);
 });
 
 test('deepgram.transcribir: sin llave falla; con llave manda URL o bytes y traduce errores', async () => {
