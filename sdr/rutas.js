@@ -47,6 +47,7 @@ function rutas({ db, config }) {
       return L.listarLeads(db, { etapa: query.etapa, huerfanos: query.huerfanos === '1', q: query.q });
     }],
     ['get', '/api/leads/:id', async ({ params }) => { sinDb(); return L.detalleLead(db, params.id); }],
+    ['post', '/api/marcar', async ({ body }) => { sinDb(); const b = body || {}; return L.leadParaMarcar(db, config, { telefono: b.telefono, empresa: b.empresa, contacto: b.contacto }); }],
     ['get', '/api/cargas', async () => { sinDb(); return L.cargas(db); }],
     ['get', '/api/cargas/:id', async ({ params }) => { sinDb(); return L.detalleCarga(db, params.id); }],
     ['post', '/api/importar', async ({ body }) => {

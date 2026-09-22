@@ -38,7 +38,7 @@ llamadas hechas por fuera mientras tanto.
 3. Pega las variables en Render → Environment y redespliega.
 4. Abre un lead en `/sdr`, dale **Llamar**, acepta el micrófono. La primera llamada tarda unos segundos más (inicia sesión).
 
-Cada vez que corras `vox:setup` se **rota** la contraseña de Angie: vuelve a pegar `VOX_USER_PASSWORD` en Render.
+Volver a correr `vox:setup` conserva la contraseña y el secreto (los lee de `sdr/voximplant-render.env`), así que no hay que tocar Render; con `--rotar` genera nuevos y entonces sí hay que pegarlos otra vez.
 Para cambiar el aviso de grabación o la voz: edita `AVISO_GRABACION` / `VOZ_AVISO` en `sdr/config.js`, corre
 `vox:setup` (sube el escenario nuevo) y despliega. `node sdr/cli.js vox:escenario` muestra el escenario sin subirlo.
 

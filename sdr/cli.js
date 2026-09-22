@@ -5,7 +5,7 @@
 //   node sdr/cli.js secuencia [--desde 2026-09-21]            fechas de las tareas de un lead nuevo
 //   node sdr/cli.js cola                                        orden de la cola de hoy con el desglose del puntaje
 //   node sdr/cli.js importar archivo.csv [--confirmar]         carga desde la terminal (sin --confirmar, simula)
-//   node sdr/cli.js vox:setup [--key ruta.json] [--url https://…] [--numero +57…]
+//   node sdr/cli.js vox:setup [--key ruta.json] [--url https://…] [--numero +57…] [--rotar]
 //                                                               deja Voximplant listo e imprime las variables de Render
 //   node sdr/cli.js vox:escenario                               imprime el escenario que se subiría (para revisarlo)
 //
@@ -78,7 +78,7 @@ async function main() {
 
   if (cmd === 'vox:setup') {
     const { setup } = require('./vox/setup');
-    await setup({ key: args.key, url: args.url, numero: args.numero, config });
+    await setup({ key: args.key, url: args.url, numero: args.numero, rotar: args.rotar === true, config });
     return;
   }
   if (cmd === 'vox:escenario') {

@@ -82,3 +82,30 @@ async function detalleCarga(db, id) {
 }
 
 module.exports = { pipeline, listarLeads, detalleLead, cargas, detalleCarga };
+
+// Marcación directa: un teléfono escrito a mano. Si ya es de un lead, devuelve ese lead; si no,
+// crea uno nuevo con la secuencia por defecto (la llamada que sigue cumple su paso 1).
+async function leadParaMarcar(db, config, { telefono, empresa, contacto, ahora = new Date() }) {
+  const { normalizarTelefono } = require('./normalizar');
+  const { planificar } = require('./secuencia');
+  const tiempo = require('./tiempo');
+  const tel = normalizarTelefono(telefono);
+  if (!tel.e164) throw error(400, tel.error || 'Escribe un teléfono');
+  const existe = await db.query(`SELECT id, empresa, etapa FROM ${T.leads} WHERE telefono = $1`, [tel.e164]);
+  if (existe.rows.length) return { lead_id: existe.rows[0].id, existente: true, empresa: existe.rows[0].empresa, etapa: existe.rows[0].etapa };
+  const plan = planificar(config, tiempo.fechaBogota(ahora));
+  const r = await db.query(
+    `WITH nuevo AS (
+       INSERT INTO ${T.leads} (empresa, contacto, telefono, telefono_original, fuente)
+       VALUES ($1, $2, $3, $4, 'marcacion directa') RETURNING id
+     ), tareas AS (
+       INSERT INTO ${T.tasks} (lead_id, paso, canal, due_at)
+       SELECT nuevo.id, t.paso, t.canal, t.due_at FROM nuevo CROSS JOIN jsonb_to_recordset($5::jsonb) AS t(paso INT, canal TEXT, due_at TIMESTAMPTZ)
+     )
+     SELECT id FROM nuevo`,
+    [String(empresa || '').trim() || 'Sin empresa', String(contacto || '').trim() || null, tel.e164, String(telefono).trim(),
+     JSON.stringify(plan.map(p => ({ paso: p.paso, canal: p.canal, due_at: p.due_at.toISOString() })))]);
+  return { lead_id: r.rows[0].id, existente: false, telefono: tel.e164 };
+}
+
+module.exports.leadParaMarcar = leadParaMarcar;

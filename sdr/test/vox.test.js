@@ -83,6 +83,18 @@ test('vox:setup: secuencia de llamadas a la API con un fetch falso', async (t) =
     assert.ok(esc.includes(env.VOX_WEBHOOK_SECRET));
     assert.ok(esc.includes('https://peaku-sandler.onrender.com/sdr/api/vox/webhook'));
     assert.ok(fs.readFileSync(path.join(dir, 'voximplant-render.env'), 'utf8').includes('VOX_USER_PASSWORD='));
+    assert.strictEqual(llamadas.find(x => x[0] === 'BindPhoneNumberToApplication')[1].phone_number, '573009138048');
+    // Segunda corrida: reutiliza contraseña y secreto (no invalida Render); con --rotar los cambia
+    respuestas.GetApplications = { result: [{ application_id: 10, application_name: 'sdr.santiagopeaku.voximplant.com' }] };
+    respuestas.GetUsers = { result: [{ user_id: 20 }] }; respuestas.SetUserInfo = { result: 1 };
+    respuestas.GetScenarios = { result: [{ scenario_id: 40, scenario_name: 'sdr-llamada' }] }; respuestas.SetScenarioInfo = { result: 1 };
+    respuestas.GetRules = { result: [{ rule_id: 50, rule_name: 'sdr-saliente' }] };
+    const env2 = await setup({ key: keyPath, url: 'https://peaku-sandler.onrender.com', config: require('../config'), log() {} });
+    assert.strictEqual(env2.VOX_USER_PASSWORD, env.VOX_USER_PASSWORD);
+    assert.strictEqual(env2.VOX_WEBHOOK_SECRET, env.VOX_WEBHOOK_SECRET);
+    assert.ok(!llamadas.slice(12).some(x => x[0].startsWith('Add')));
+    const env3 = await setup({ key: keyPath, url: 'https://peaku-sandler.onrender.com', rotar: true, config: require('../config'), log() {} });
+    assert.notStrictEqual(env3.VOX_USER_PASSWORD, env.VOX_USER_PASSWORD);
   } finally { global.fetch = fetchReal; }
 });
 

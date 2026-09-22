@@ -100,5 +100,17 @@ test('integración con Postgres', { skip: !url && 'sin SDR_TEST_DATABASE_URL' },
     await assert.rejects(L.detalleLead(db, 99999), /no encontrado/);
   });
 
+  await t.test('marcación directa: crea lead con secuencia o devuelve el existente', async () => {
+    const n = await L.leadParaMarcar(db, config, { telefono: '311 222 3344', empresa: '', ahora: jueves });
+    assert.strictEqual(n.existente, false);
+    const l = (await db.query('SELECT empresa, fuente, telefono FROM sdr.leads WHERE id=$1', [n.lead_id])).rows[0];
+    assert.deepStrictEqual(l, { empresa: 'Sin empresa', fuente: 'marcacion directa', telefono: '+573112223344' });
+    assert.strictEqual((await db.query('SELECT COUNT(*)::int AS c FROM sdr.tasks WHERE lead_id=$1', [n.lead_id])).rows[0].c, config.SECUENCIA_POR_DEFECTO.length);
+    const e = await L.leadParaMarcar(db, config, { telefono: '+57 300 123 4567' });
+    assert.strictEqual(e.existente, true);
+    assert.strictEqual(e.empresa, 'ACME');
+    await assert.rejects(L.leadParaMarcar(db, config, { telefono: '12' }), /colombiano/);
+  });
+
   db.end();
 });

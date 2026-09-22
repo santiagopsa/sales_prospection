@@ -442,6 +442,34 @@
     });
   }
 
+  // ---------------------------------------------------------------- marcar
+  function vistaMarcar() {
+    $app.innerHTML = `
+      <div class="cabeza"><div><h1>Marcar</h1><div class="suave">Un número que no está en ninguna lista. Si ya es de un lead, abre su ficha; si no, lo crea con la secuencia normal.</div></div></div>
+      <form class="panel" id="frm-marcar" style="max-width:520px">
+        <label class="suave" style="display:block;font-size:12px;font-weight:600;margin-bottom:4px">Teléfono</label>
+        <input name="telefono" inputmode="tel" autofocus required placeholder="300 123 4567 · +52 55 1234 5678" style="font:inherit;font-size:20px;width:100%;padding:10px 12px;border:1px solid var(--linea);border-radius:9px" />
+        <div class="dos" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+          <div><label class="suave" style="display:block;font-size:12px;font-weight:600;margin-bottom:4px">Empresa (opcional)</label><input name="empresa" style="font:inherit;width:100%;padding:8px 10px;border:1px solid var(--linea);border-radius:8px" /></div>
+          <div><label class="suave" style="display:block;font-size:12px;font-weight:600;margin-bottom:4px">Contacto (opcional)</label><input name="contacto" style="font:inherit;width:100%;padding:8px 10px;border:1px solid var(--linea);border-radius:8px" /></div>
+        </div>
+        <div class="acciones"><button class="btn primario grande" type="submit">📞 Llamar</button><button class="btn" type="button" id="solo-crear">Solo abrir la ficha</button></div>
+        <div id="marcar-error"></div>
+      </form>`;
+    const $f = document.getElementById('frm-marcar');
+    const ir = async llamar => {
+      const d = Object.fromEntries(new FormData($f));
+      if (!d.telefono.trim()) return;
+      try {
+        const r = await api('marcar', { method: 'POST', body: d });
+        if (r.existente) avisar(`Ese número ya es de ${r.empresa} (${etiqueta(meta.etapas, r.etapa)}).`);
+        location.hash = `#/lead/${r.lead_id}${llamar ? '?llamar=1' : ''}`;
+      } catch (e) { document.getElementById('marcar-error').innerHTML = pintarError(e); }
+    };
+    $f.addEventListener('submit', e => { e.preventDefault(); ir(true); });
+    document.getElementById('solo-crear').addEventListener('click', () => ir(false));
+  }
+
   // ---------------------------------------------------------------- router
   async function render() {
     const [ruta, query] = (location.hash.replace(/^#\/?/, '') || 'cola').split('?');
@@ -450,7 +478,15 @@
     try {
       if (partes[0] === 'importar') await vistaImportar();
       else if (partes[0] === 'pipeline') await vistaPipeline(new URLSearchParams(query));
-      else if (partes[0] === 'lead' && partes[1]) await vistaLead(partes[1]);
+      else if (partes[0] === 'marcar') vistaMarcar();
+      else if (partes[0] === 'lead' && partes[1]) {
+        await vistaLead(partes[1]);
+        if (new URLSearchParams(query).get('llamar') === '1') {
+          history.replaceState(null, '', '#/lead/' + partes[1]);
+          const $b = document.getElementById('llamar');
+          if ($b && !$b.disabled) $b.click(); else avisar('No se puede llamar: ' + (($b && $b.title) || 'sin telefonía'), 'aviso');
+        }
+      }
       else await vistaCola();
     } catch (e) {
       $app.innerHTML = pintarError(e);
