@@ -8,7 +8,7 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
   const { initSchema } = require('../schema');
   const { importar } = require('../importar');
   const { consultarCola } = require('../cola');
-  const { registrarToque, registrarEjecutiva, siguienteEtapa } = require('../resultados');
+  const { registrarToque, registrarEjecutiva, siguienteEtapa, agregarAListaNegra } = require('../resultados');
   const L = require('../leads');
   const base = require('../config');
   const tiempo = require('../tiempo');
@@ -240,11 +240,41 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
     const otra = await agregarAListaNegra(db, base, { telefono: '3007777777' });
     assert.strictEqual(otra.existente, true);
     assert.strictEqual((await LN.listar(db)).length, 2);
-    await assert.rejects(agregarAListaNegra(db, base, { nota: 'x' }), /teléfono o un correo/);
+    await assert.rejects(agregarAListaNegra(db, base, { nota: 'x' }), /teléfono, un correo, una empresa o un dominio/);
     // Quitar.
     await LN.quitar(db, m.id);
     assert.strictEqual((await LN.listar(db)).length, 1);
     await assert.rejects(LN.quitar(db, m.id), /No está/);
+  });
+
+  await t.test('lista negra por empresa y dominio: carga masiva, bloquea cargas y reactivación', async () => {
+    const LN = require('../listanegra');
+    assert.strictEqual(LN.normalizarEmpresa('Grupo Éxito S.A.S.'), 'grupo exito');
+    assert.strictEqual(LN.dominioDe('Ana@Acme.COM'), 'acme.com');
+    await db.query(`INSERT INTO sdr.leads (empresa, contacto, telefono, email) VALUES ('Éxito S.A.S.', 'Pat', '+573009990001', 'pat@exito.com'), ('Vetada Ltda', 'Vic', '+573009990002', NULL), ('Dominio Corp', 'Dom', '+573009990003', 'dom@vetado.co')`);
+    const csv = 'Empresa,Correo,Sitio web,Motivo\nGrupo Exito SAS,,https://www.exito.com,Cliente actual\nVETADA LTDA.,,,Competidor\n,,vetado.co,Dominio vetado\nMala fila,,,\nExito,,,repetida';
+    const sim = await LN.importarLista(db, base, { archivo: 'ln.csv', contenido: csv, simular: true, usuario: 'Santiago' });
+    assert.strictEqual(sim.simulado, true);
+    assert.strictEqual(sim.nuevos.length, 5);     // grupo exito, vetada, vetado.co, "mala fila" (empresa sola es válida), exito
+    assert.strictEqual(sim.repetidos.length, 0);
+    assert.strictEqual((await db.query('SELECT COUNT(*)::int AS n FROM sdr.lista_negra')).rows[0].n, 1); // simular no escribe
+    const real = await LN.importarLista(db, base, { archivo: 'ln.csv', contenido: csv, simular: false, usuario: 'Santiago' });
+    assert.strictEqual(real.leads_descartados, 3);
+    for (const e of ['Éxito S.A.S.', 'Vetada Ltda', 'Dominio Corp']) { const l = await lead(e); assert.strictEqual(l.etapa, 'descartado'); assert.strictEqual(l.razon_descarte, 'lista_negra'); }
+    // La carga de leads deja fuera la empresa (con otro sufijo), el dominio, y deja entrar el resto
+    const inf = await importar(db, base, { archivo: 'z.csv', contenido: 'empresa,telefono,email\nGrupo Éxito S.A.,3009990011,\nOtra,3009990012,x@vetado.co\nLibre,3009990013,', simular: true, ahora: lunes });
+    assert.strictEqual(inf.aCrear, 1);
+    assert.deepStrictEqual(inf.listaNegra.map(x => x.motivo), ['empresa en la lista negra', 'dominio vetado.co en la lista negra']);
+    // Reactivar rechazado por empresa
+    await assert.rejects(registrarEjecutiva(db, base, { leadId: await id('Éxito S.A.S.'), accion: 'reactivar' }), /(empresa|dominio exito.com) en la lista negra/);
+    // Segunda carga: todo repetido
+    const otra = await LN.importarLista(db, base, { archivo: 'ln.csv', contenido: csv, simular: true });
+    assert.strictEqual(otra.nuevos.length, 0);
+    // A mano con "toda la empresa" y quitar
+    const m = await agregarAListaNegra(db, base, { empresa: 'Rappi S.A.S', todaEmpresa: true, nota: 'cliente' });
+    assert.strictEqual(m.empresa_norm, 'rappi');
+    await LN.quitar(db, m.id);
+    await assert.rejects(LN.importarLista(db, base, { archivo: 'x.csv', contenido: 'nada,que,ver\n1,2,3', simular: true }), /No encontré columnas/);
   });
 
   await t.test('editar datos: normaliza teléfonos, rechaza choques, deja rastro', async () => {

@@ -5,6 +5,7 @@
 //   node sdr/cli.js secuencia [--desde 2026-09-21]            fechas de las tareas de un lead nuevo
 //   node sdr/cli.js cola                                        orden de la cola de hoy con el desglose del puntaje
 //   node sdr/cli.js importar archivo.csv|.xlsx [--confirmar]   carga desde la terminal (sin --confirmar, simula)
+//   node sdr/cli.js lista-negra archivo.csv|.xlsx [--confirmar] carga la base de lista negra (empresa, teléfono, correo, dominio, motivo)
 //   node sdr/cli.js semana [--fecha 2026-09-22] [--usuario Angie]  resumen semanal (actividad, racha, tasas si MOSTRAR_RATIOS)
 //   node sdr/cli.js limpiar --confirmar                        BORRA todos los leads, toques, llamadas y cargas del
 //                                                               schema sdr (y los deals que el SDR creó en el Sandler).
@@ -175,6 +176,15 @@ async function main() {
       const rs = await P.correrPendientes(db, config, process.env, { limite: Number(args.limite) || 5 });
       if (!rs.length) console.log('No hay llamadas pendientes.');
       for (const r of rs) console.log(r.error ? `Llamada ${r.call_id}: ${r.estado} · ${r.error}` : `Llamada ${r.call_id}: ${r.estado} · ${r.turnos} turnos`);
+    } else if (cmd === 'lista-negra') {
+      const ruta = args._[1];
+      if (!ruta) throw new Error('Falta el archivo: node sdr/cli.js lista-negra archivo.csv|.xlsx [--confirmar]');
+      const bytes = fs.readFileSync(ruta);
+      const inf = await require('./listanegra').importarLista(db, config, { archivo: require('path').basename(ruta), contenido: bytes, simular: !args.confirmar, usuario: args.usuario });
+      console.log(`\n${inf.simulado ? 'Simulación' : 'Carga'} de ${inf.archivo}: ${inf.filas} filas · ${inf.nuevos.length} nuevas · ${inf.repetidos.length} repetidas · ${inf.errores.length} con error${inf.simulado ? '' : ` · ${inf.leads_descartados} leads descartados`}`);
+      console.log('Columnas: ' + Object.entries(inf.columnas).map(([k, v]) => `${k} ← "${v}"`).join(', '));
+      for (const e of inf.errores) console.log(`  error fila ${e.fila}: ${e.motivo}`);
+      if (inf.simulado && inf.nuevos.length) console.log('Para cargar de verdad: agrega --confirmar');
     } else if (cmd === 'evaluar') {
       const P = require('./pipeline');
       if (!args.call) throw new Error('Falta --call N');

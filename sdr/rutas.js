@@ -23,7 +23,7 @@ function rutas({ db, config }) {
       metas: { marcaciones: config.META_MARCACIONES_DIA, conversaciones: config.META_CONVERSACIONES_DIA },
       resultados: D.RESULTADOS_LLAMADA.map(r => ({ id: r, label: D.RESULTADO_LABEL[r] })),
       resultadoLabel: D.RESULTADO_LABEL,
-      razones: D.RAZONES_DESCARTE.filter(r => r !== 'sin_respuesta').map(r => ({ id: r, label: D.RAZON_LABEL[r], definitiva: D.RAZONES_DEFINITIVAS.includes(r), reintento: (config.REINTENTO_POR_RAZON || {})[r] || null })),
+      razones: D.RAZONES_DESCARTE.filter(r => r !== 'sin_respuesta' && r !== 'lista_negra').map(r => ({ id: r, label: D.RAZON_LABEL[r], definitiva: D.RAZONES_DEFINITIVAS.includes(r), reintento: (config.REINTENTO_POR_RAZON || {})[r] || null })),
       razonLabel: D.RAZON_LABEL,
       reintentoMeses: config.OPCIONES_REINTENTO_MESES || [1, 3, 6],
       usuarios: (config.USUARIOS || []).map(u => ({ nombre: u.nombre, rol: u.rol })),
@@ -49,7 +49,15 @@ function rutas({ db, config }) {
     }],
     // Lista negra: ver, agregar a mano (descarta los leads que coincidan) y quitar.
     ['get', '/api/lista-negra', async () => { sinDb(); return LN.listar(db); }],
-    ['post', '/api/lista-negra', async ({ body }) => { sinDb(); const b = body || {}; return agregarAListaNegra(db, config, { telefono: b.telefono, email: b.email, empresa: b.empresa, nota: b.nota, usuario: b.usuario }); }],
+    ['post', '/api/lista-negra', async ({ body }) => { sinDb(); const b = body || {}; return agregarAListaNegra(db, config, { telefono: b.telefono, email: b.email, empresa: b.empresa, dominio: b.dominio, todaEmpresa: !!b.toda_empresa, nota: b.nota, usuario: b.usuario }); }],
+    // Carga masiva de la base de lista negra (CSV/xlsx: empresa, teléfono, correo, dominio, motivo).
+    ['post', '/api/lista-negra/importar', async ({ body }) => {
+      sinDb();
+      const { archivo, contenido, base64, confirmar } = body || {};
+      const entrada = base64 ? Buffer.from(String(base64), 'base64') : contenido;
+      if (!entrada) throw Object.assign(new Error('Falta el contenido del archivo'), { status: 400 });
+      return LN.importarLista(db, config, { archivo, contenido: entrada, simular: !confirmar, usuario: require('./resultados').usuarioValido(config, (body || {}).usuario) });
+    }],
     ['post', '/api/lista-negra/:id/quitar', async ({ params }) => { sinDb(); return LN.quitar(db, params.id); }],
     // Telefonía (Voximplant)
     ['get', '/api/vox/config', async () => vox.configPublica(process.env)],

@@ -295,8 +295,9 @@ async function registrarEjecutiva(db, config, { leadId, accion, razon, nota, usu
       if (resultado === 'pausado') detalle = { pausado_hasta: pausadoHasta, meses };
     } else if (accion === 'reactivar') {
       if (lead.etapa !== 'descartado' && !lead.pausado_hasta) throw error(409, 'El lead no está descartado ni en pausa');
-      const ln = await require('./listanegra').enLista(c, [lead.telefono], [lead.email]);
-      if (ln.telefonos.size || ln.emails.size) throw error(409, 'Está en la lista negra. Quítalo de ahí primero si de verdad hay que volver a llamarlo.');
+      const LN = require('./listanegra');
+      const ln = await LN.enLista(c, [lead.telefono], [lead.email], [lead.empresa], []);
+      if (LN.motivoDe(ln, lead)) throw error(409, `Está en la lista negra (${LN.motivoDe(ln, lead)}). Quítalo de ahí primero si de verdad hay que volver a llamarlo.`);
       await omitirPendientes(c, leadId);
       proxima = await programarReintento(c, config, leadId, tiempo.fechaBogota(ahora));
       // Vuelve a la etapa que tenía antes de descartarlo si es de Angie; si no se sabe, "contactado".
@@ -392,21 +393,23 @@ function paramUsuario(config, usuario) {
 }
 
 // Entrada a mano en la lista negra: guarda la entrada y descarta los leads que coincidan.
-async function agregarAListaNegra(db, config, { telefono, email, empresa, nota, usuario, ahora = new Date() }) {
+async function agregarAListaNegra(db, config, { telefono, email, empresa, dominio, todaEmpresa, nota, usuario, ahora = new Date() }) {
   usuario = usuarioValido(config, usuario);
   const LN = require('./listanegra');
+  // Una persona que pidió no contacto es "no_contactar"; una empresa o dominio vetados, "lista_negra".
+  const razon = todaEmpresa || (!telefono && !email) ? 'lista_negra' : 'no_contactar';
   return enTransaccion(db, async c => {
-    const entrada = await LN.agregar(c, config, { telefono, email, empresa, razon: 'no_contactar', nota, usuario });
+    const entrada = await LN.agregar(c, config, { telefono, email, empresa, dominio, todaEmpresa, razon, nota, usuario });
     const leads = await LN.leadsQueCoinciden(c, entrada);
     let descartados = 0;
     for (const l of leads) {
       if (l.etapa === 'descartado') continue;
       const lead = await leerLead(c, l.id);
       await omitirPendientes(c, l.id);
-      await cambiarEtapa(c, l.id, 'descartado', { razon_descarte: 'no_contactar', pausado_hasta: null });
+      await cambiarEtapa(c, l.id, 'descartado', { razon_descarte: razon, pausado_hasta: null });
       await c.query(
-        `INSERT INTO ${T.touches} (lead_id, canal, resultado, razon_descarte, nota, usuario, created_at) VALUES ($1, 'ejecutiva', 'descartado', 'no_contactar', $2, $3, $4)`,
-        [lead.id, nota || 'Metido a la lista negra', usuario, ahora.toISOString()]);
+        `INSERT INTO ${T.touches} (lead_id, canal, resultado, razon_descarte, nota, usuario, created_at) VALUES ($1, 'ejecutiva', 'descartado', $5, $2, $3, $4)`,
+        [lead.id, nota || 'Metido a la lista negra', usuario, ahora.toISOString(), razon]);
       descartados++;
     }
     if (!entrada.existente && leads.length && !entrada.lead_id) await c.query(`UPDATE ${T.lista_negra} SET lead_id = $2 WHERE id = $1`, [entrada.id, leads[0].id]);

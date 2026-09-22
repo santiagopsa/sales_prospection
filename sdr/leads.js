@@ -171,7 +171,7 @@ async function editarLead(db, config, id, campos, usuario = null) {
 async function fallosDeMarcacion(db, { limite = 200 } = {}) {
   const ms = col => `(EXTRACT(EPOCH FROM ${col}) * 1000)::float8`;
   const r = await db.query(
-    `SELECT k.id, k.uuid, k.lead_id, k.telefono, k.vox_estado, k.vox_codigo, k.vox_motivo, k.vox_intentos, k.reporte,
+    `SELECT k.id, k.uuid, k.lead_id, k.telefono, k.vox_estado, k.vox_codigo, k.vox_motivo, k.vox_intentos, k.vox_call_id, k.reporte,
             ${ms('k.reportado_at')} AS reportado_ms, ${ms('k.revisado_at')} AS revisado_ms, ${ms('COALESCE(k.started_at, k.created_at)')} AS started_ms,
             l.empresa, l.contacto,
             (SELECT COUNT(*)::int FROM ${T.calls} k2 WHERE COALESCE(k2.telefono, 'lead:' || k2.lead_id) = COALESCE(k.telefono, 'lead:' || k.lead_id) AND k2.vox_estado IN ('numero_invalido','fallo_central')) AS fallos_del_numero,

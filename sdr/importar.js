@@ -38,13 +38,13 @@ async function importar(db, config, { archivo, contenido, simular = true, usuari
   // 2 · Lista negra: esas filas no entran, y se dice cuáles.
   const telefonos = unicos.map(f => f.lead.telefono).filter(Boolean);
   const emails = unicos.map(f => f.lead.email).filter(Boolean);
-  const ln = await require('./listanegra').enLista(db, telefonos, emails);
+  const LN = require('./listanegra');
+  const ln = await LN.enLista(db, telefonos, emails, unicos.map(f => f.lead.empresa), []);
   const listaNegra = [];
   for (let i = unicos.length - 1; i >= 0; i--) {
     const f = unicos[i];
-    const porTel = f.lead.telefono && ln.telefonos.has(f.lead.telefono);
-    const porMail = f.lead.email && ln.emails.has(f.lead.email);
-    if (porTel || porMail) { listaNegra.push({ fila: f.fila, empresa: f.lead.empresa, motivo: `${porTel ? 'teléfono' : 'correo'} en la lista negra` }); unicos.splice(i, 1); }
+    const motivo = LN.motivoDe(ln, f.lead);
+    if (motivo) { listaNegra.push({ fila: f.fila, empresa: f.lead.empresa, motivo }); unicos.splice(i, 1); }
   }
   listaNegra.sort((a, b) => a.fila - b.fila);
 

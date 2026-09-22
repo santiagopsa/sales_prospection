@@ -426,27 +426,66 @@
     const lista = await api('lista-negra');
     $app.innerHTML = `
       <div class="cabeza"><div><div class="suave"><a href="#/pipeline">← Pipeline</a></div><h1>Lista negra</h1>
-        <div class="suave">${plural(lista.length, 'contacto que no se vuelve a tocar', 'contactos que no se vuelven a tocar')}. Entran solos con "pidió que no lo contacten"; las cargas los dejan fuera y no se pueden marcar.</div></div></div>
+        <div class="suave">${plural(lista.length, 'entrada', 'entradas')}: personas (teléfono o correo) y empresas enteras (por nombre o dominio). Entran solos con "pidió que no lo contacten", a mano, o cargando tu base de lista negra. Las cargas de leads los dejan fuera, no se pueden marcar ni reactivar.</div></div></div>
+      <div class="panel bloque">
+        <h2>Cargar la base de lista negra <span class="suave" style="font-weight:400;font-size:12px">CSV o Excel con columnas empresa, teléfono, correo, dominio y motivo (cualquiera de ellas)</span></h2>
+        <label class="soltar" id="ln-soltar" style="padding:18px"><input type="file" id="ln-archivo" accept=".csv,.xlsx" hidden /><b>Elige o suelta el archivo</b><div class="suave" style="font-size:12px">Primero se simula: ves cuántas entran, cuáles ya estaban y cuáles tienen error. Cada fila bloquea la empresa entera.</div></label>
+        <div id="ln-informe"></div>
+      </div>
       <div class="panel bloque">
         <h2>Agregar a mano</h2>
         <form id="ln-form" class="form-panel">
           <div><label>Teléfono</label><input name="telefono" placeholder="300 123 4567" /></div>
           <div><label>Correo</label><input name="email" type="email" placeholder="persona@empresa.co" /></div>
-          <div><label>Empresa (opcional)</label><input name="empresa" /></div>
+          <div><label>Empresa</label><input name="empresa" placeholder="ACME S.A.S." /></div>
+          <div><label>Dominio (opcional)</label><input name="dominio" placeholder="acme.com" /></div>
           <div><label>Nota</label><input name="nota" placeholder="Por qué" /></div>
+          <div><label style="display:flex;gap:6px;align-items:center;margin-top:22px"><input type="checkbox" name="toda_empresa" value="1" /> Bloquear toda la empresa</label></div>
           <div><button class="btn primario" type="submit">Agregar</button></div>
         </form>
+        <div class="suave" style="font-size:12px;margin-top:6px">Con teléfono o correo se bloquea a esa persona; con solo empresa o dominio (o la casilla marcada), a toda la empresa.</div>
         <div id="ln-error"></div>
       </div>
       ${lista.length ? `<div class="panel tabla-env"><table>
-        <thead><tr><th>Teléfono</th><th>Correo</th><th>Empresa</th><th>Nota</th><th>Cuándo</th><th></th></tr></thead>
+        <thead><tr><th>Qué bloquea</th><th>Teléfono</th><th>Correo</th><th>Empresa</th><th>Nota</th><th>Cuándo</th><th></th></tr></thead>
         <tbody>${lista.map(x => `<tr>
+          <td>${x.empresa_norm || x.dominio ? '<span class="chip vencida">Empresa</span>' : '<span class="chip etapa">Persona</span>'}${x.dominio ? `<div class="suave" style="font-size:12px">${esc(x.dominio)}</div>` : ''}</td>
           <td class="num">${esc(telVisible(x.telefono) || '—')}</td><td>${esc(x.email || '—')}</td>
           <td>${x.lead_id ? `<a href="#/lead/${x.lead_id}">${esc(x.empresa || 'ver lead')}</a>` : esc(x.empresa || '—')}</td>
           <td class="suave">${esc(x.nota || (meta.razonLabel[x.razon] || ''))}</td>
           <td class="suave" style="white-space:nowrap">${fecha(x.created_ms)}${x.usuario ? ` · ${esc(x.usuario)}` : ''}</td>
           <td><button class="btn mini" data-quitar="${x.id}">Quitar</button></td>
         </tr>`).join('')}</tbody></table></div>` : '<div class="panel vacio">La lista está vacía.</div>'}`;
+    // Carga masiva: simula, muestra el informe, confirma.
+    const $arch = document.getElementById('ln-archivo'), $inf = document.getElementById('ln-informe');
+    const cargarLista = async (file, confirmar) => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      const base64 = btoa(bin);
+      $inf.innerHTML = '<p class="suave">Leyendo…</p>';
+      try {
+        const r = await api('lista-negra/importar', { method: 'POST', body: { archivo: file.name, base64, confirmar } });
+        const tabla = (titulo, filas, col) => filas.length ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:13px">${titulo} (${filas.length})</summary><div class="tabla-env"><table><thead><tr><th class="num">Fila</th><th>Empresa</th><th>${col}</th></tr></thead><tbody>${filas.slice(0, 200).map(f => `<tr><td class="num">${f.fila}</td><td>${esc(f.empresa || '—')}</td><td>${esc(f.motivo || [f.telefono && telVisible(f.telefono), f.email, f.dominio].filter(Boolean).join(' · ') || '')}</td></tr>`).join('')}</tbody></table></div></details>` : '';
+        $inf.innerHTML = `<div class="resumen" style="margin-top:10px">
+            <div class="kpi bien"><b>${r.nuevos.length}</b><span>${r.simulado ? 'Entrarían' : 'Entraron'}</span></div>
+            <div class="kpi"><b>${r.repetidos.length}</b><span>Ya estaban</span></div>
+            <div class="kpi ${r.errores.length ? 'mal' : ''}"><b>${r.errores.length}</b><span>Con error</span></div>
+            ${r.simulado ? '' : `<div class="kpi alerta"><b>${r.leads_descartados}</b><span>Leads descartados</span></div>`}
+          </div>
+          <div class="suave" style="font-size:12px">Columnas: ${Object.entries(r.columnas).map(([k, v]) => `${k} ← "${esc(v)}"`).join(' · ')}</div>
+          ${r.simulado && r.nuevos.length ? `<div class="acciones"><button class="btn primario" id="ln-confirmar">Cargar ${plural(r.nuevos.length, 'entrada', 'entradas')}</button></div>` : ''}
+          ${tabla('Nuevas', r.nuevos, 'Qué bloquea')}${tabla('Ya estaban', r.repetidos, 'Por qué')}${tabla('Con error', r.errores, 'Motivo')}`;
+        const $ok = document.getElementById('ln-confirmar');
+        if ($ok) $ok.addEventListener('click', async () => { $ok.disabled = true; await cargarLista(file, true); await vistaListaNegra(); });
+        if (!r.simulado) avisar(`Lista negra cargada: ${r.nuevos.length} entradas, ${r.leads_descartados} leads descartados.`);
+      } catch (err) { $inf.innerHTML = pintarError(err); }
+    };
+    $arch.addEventListener('change', () => { if ($arch.files[0]) cargarLista($arch.files[0], false); });
+    const $sol = document.getElementById('ln-soltar');
+    $sol.addEventListener('dragover', e => { e.preventDefault(); $sol.classList.add('encima'); });
+    $sol.addEventListener('dragleave', () => $sol.classList.remove('encima'));
+    $sol.addEventListener('drop', e => { e.preventDefault(); $sol.classList.remove('encima'); const f = e.dataTransfer.files[0]; if (f) cargarLista(f, false); });
+
     document.getElementById('ln-form').addEventListener('submit', async e => {
       e.preventDefault();
       const d = Object.fromEntries(new FormData(e.target));
@@ -502,12 +541,12 @@
           <td style="white-space:nowrap">${fechaHora(x.started_ms)}</td>
           <td><a href="#/lead/${x.lead_id}"><b>${esc(x.empresa)}</b></a>${x.contacto ? `<div class="suave" style="font-size:12px">${esc(x.contacto)}</div>` : ''}</td>
           <td class="num">${esc(telVisible(x.telefono) || '—')}</td>
-          <td>${esc(x.vox_estado === 'numero_invalido' ? 'No encuentra el número' : x.vox_estado === 'fallo_central' ? 'Falla de central' : (x.vox_estado || '—'))}<div class="suave" style="font-size:12px">código ${esc(x.vox_codigo || '?')}${x.vox_motivo ? ' ' + esc(x.vox_motivo) : ''}${x.vox_intentos ? ' · ' + plural(x.vox_intentos, 'intento', 'intentos') : ''}</div></td>
+          <td>${esc(x.vox_estado === 'numero_invalido' ? 'No encuentra el número' : x.vox_estado === 'fallo_central' ? 'Falla de central' : (x.vox_estado || '—'))}<div class="suave" style="font-size:12px">código ${esc(x.vox_codigo || '?')}${x.vox_motivo ? ' ' + esc(x.vox_motivo) : ''}${x.vox_intentos ? ' · ' + plural(x.vox_intentos, 'intento', 'intentos') : ''}${x.vox_call_id ? `<br><span title="ID de la llamada en Voximplant, para soporte" style="font-family:monospace">${esc(x.vox_call_id)}</span>` : ''}</div></td>
           <td class="num">${x.fallos_del_numero} / ${x.contestadas_del_numero}</td>
           <td>${x.reporte ? `<b>${esc(x.reporte)}</b>` : '<span class="suave">—</span>'}</td>
           <td><button class="btn mini" data-revisar="${x.id}" data-valor="${x.revisado_ms ? '0' : '1'}">${x.revisado_ms ? 'Reabrir' : 'Revisado'}</button></td>
         </tr>`).join('')}</tbody></table></div>
-        <p class="suave" style="font-size:12px">Para Voximplant: si un número entra desde el celular y aquí sale 404 en varios intentos, pide en soporte que revisen la ruta para Colombia (números portados). Lista los teléfonos y el código.</p>`
+        <p class="suave" style="font-size:12px">Para Voximplant: si un número entra desde el celular y aquí sale 404 en varios intentos, pide en soporte que revisen la ruta para Colombia (números portados). Pásales teléfono, hora (UTC = Bogotá + 5) y el ID de la llamada.</p>`
         : '<div class="panel vacio">Sin fallos de marcación.</div>'}`;
     $app.querySelectorAll('[data-revisar]').forEach(b => b.addEventListener('click', async () => {
       b.disabled = true;

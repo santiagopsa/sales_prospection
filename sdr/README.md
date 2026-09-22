@@ -200,10 +200,26 @@ Desde la cola (botón **Sacar** en la tarjeta), desde la ficha (**Sacar de la co
 - **Pidió que no lo contacten / número o correo equivocado**: definitivo, sin opción de reintento. El primero
   además mete el teléfono y el correo a la **lista negra**.
 
-**Lista negra** (Pipeline → Lista negra): teléfonos y correos que no se vuelven a tocar. Las cargas dejan
-esas filas fuera y lo dicen en el informe; **Marcar** rechaza el número; un lead en la lista no se puede
-reactivar hasta quitarlo de ahí. Se agregan entradas a mano (descarta los leads que coincidan) y se quitan
-con un clic. `limpiar --confirmar` también la vacía.
+**Lista negra** (Pipeline → Lista negra): teléfonos, correos, **empresas** y **dominios** que no se vuelven a
+tocar. Las cargas de leads dejan esas filas fuera y lo dicen en el informe (por teléfono, correo, empresa o
+dominio del correo); **Marcar** rechaza el número; un lead en la lista no se puede reactivar hasta quitarlo de
+ahí. Se agregan entradas a mano (con "Bloquear toda la empresa" veta la empresa completa, no solo ese contacto;
+descarta los leads que coincidan con razón *En lista negra*) y se quitan con un clic. `limpiar --confirmar`
+también la vacía.
+
+La empresa se compara **normalizada**: sin acentos, minúsculas y sin sufijos legales (S.A.S., Ltda, Inc., y
+letras sueltas al final), así "Grupo Éxito S.A.S." y "GRUPO EXITO SAS" son la misma. El dominio se saca del
+correo o del sitio web (`https://www.exito.com` → `exito.com`).
+
+**Cargar la base de lista negra de Peaku** (CSV o xlsx): botón **Cargar la base de lista negra** en esa misma
+vista, o por consola:
+```
+node sdr/cli.js lista-negra lista.xlsx               # simula: qué entraría, qué ya estaba, qué leads se descartarían
+node sdr/cli.js lista-negra lista.xlsx --confirmar   # carga de verdad
+```
+Reconoce columnas como `empresa` / `compañía` / `cliente`, `teléfono` / `celular`, `correo` / `email`,
+`dominio` / `sitio web` / `web`, `motivo` / `nota`. Cada fila bloquea toda la empresa si trae empresa. Las
+repetidas se saltan; siempre se puede simular primero y confirmar después.
 
 ## Usuarios
 Sin credenciales: el desplegable de la barra (Angie, Luisa, Santiago; lista en `USUARIOS` de `config.js`) marca

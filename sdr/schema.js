@@ -260,6 +260,16 @@ const MIGRACIONES = [
      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
      UNIQUE (semana, usuario)
    )`,
+  // ---- M6 · Lista negra por empresa y por dominio ---------------------------------------
+  // La base de lista negra de Peaku es por empresa (clientes, competidores, vetados): una
+  // entrada puede ser solo empresa (nombre normalizado) o solo dominio de correo, sin teléfono.
+  `ALTER TABLE ${T.lista_negra} DROP CONSTRAINT IF EXISTS lista_negra_check`,
+  `ALTER TABLE ${T.lista_negra} DROP CONSTRAINT IF EXISTS sdr_lista_negra_alguno`,
+  `ALTER TABLE ${T.lista_negra} ADD COLUMN IF NOT EXISTS empresa_norm TEXT`,
+  `ALTER TABLE ${T.lista_negra} ADD COLUMN IF NOT EXISTS dominio TEXT`,
+  `ALTER TABLE ${T.lista_negra} ADD CONSTRAINT sdr_lista_negra_alguno CHECK (telefono IS NOT NULL OR email IS NOT NULL OR empresa_norm IS NOT NULL OR dominio IS NOT NULL)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS sdr_lista_negra_empresa ON ${T.lista_negra}(empresa_norm) WHERE empresa_norm IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS sdr_lista_negra_dominio ON ${T.lista_negra}(dominio) WHERE dominio IS NOT NULL`,
 ];
 
 async function initSchema(db, log = console) {
