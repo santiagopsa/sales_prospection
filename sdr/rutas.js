@@ -42,9 +42,9 @@ function rutas({ db, config }) {
     ['get', '/api/vox/config', async () => vox.configPublica(process.env)],
     ['post', '/api/vox/login-key', async ({ body }) => vox.firmarLogin(process.env, (body || {}).key)],
     ['post', '/api/vox/webhook', async ({ headers, body }) => { sinDb(); return vox.recibirWebhook(db, process.env, headers || {}, body); }],
-    ['get', '/api/cola', async () => { sinDb(); return consultarCola(db, config); }],
+    ['get', '/api/cola', async ({ query }) => { sinDb(); return consultarCola(db, config, { usuario: query.usuario || null }); }],
     ['post', '/api/tareas/:id/posponer', async ({ params, body }) => { sinDb(); return posponerTarea(db, config, { taskId: params.id, dias: (body || {}).dias }); }],
-    ['get', '/api/semana', async ({ query }) => { sinDb(); return ritmo.resumenSemana(db, config, { fecha: /^\d{4}-\d{2}-\d{2}$/.test(query.fecha || '') ? query.fecha : undefined }); }],
+    ['get', '/api/semana', async ({ query }) => { sinDb(); return ritmo.resumenSemana(db, config, { fecha: /^\d{4}-\d{2}-\d{2}$/.test(query.fecha || '') ? query.fecha : undefined, usuario: query.usuario || null }); }],
     ['get', '/api/pipeline', async () => { sinDb(); return L.pipeline(db); }],
     ['get', '/api/leads', async ({ query }) => {
       sinDb();

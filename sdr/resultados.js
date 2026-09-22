@@ -250,22 +250,28 @@ async function crearDeal(c, lead, detalle, reunionAt) {
 }
 
 // Marcaciones y conversaciones de un día (Bogotá).
-// Solo cuenta a los usuarios con rol sdr (y toques sin usuario, de antes de la etiqueta).
-async function actividadDelDia(db, fecha, config = {}) {
+// Actividad del día de UN usuario (el elegido en la barra). Cada quien ve su propio histórico.
+// Sin usuario: cuenta a los de rol sdr (y toques sin etiqueta, de antes).
+async function actividadDelDia(db, fecha, config = {}, usuario = null) {
   const desde = tiempo.instante(fecha, 0).toISOString();
   const hasta = tiempo.instante(tiempo.sumarDias(fecha, 1), 0).toISOString();
   const r = await db.query(
     `SELECT COUNT(*) FILTER (WHERE canal = 'llamada')::int AS marcaciones,
             COUNT(*) FILTER (WHERE resultado IN (SELECT jsonb_array_elements_text($3::jsonb)))::int AS conversaciones,
             COUNT(*)::int AS toques
-     FROM ${T.touches} WHERE created_at >= $1 AND created_at < $2 ${filtroSdr(config, 4)}`,
-    [desde, hasta, JSON.stringify(D.RESULTADOS_CON_CONVERSACION), JSON.stringify(usuariosSdr(config))]);
+     FROM ${T.touches} WHERE created_at >= $1 AND created_at < $2 ${filtroUsuario(config, 4, usuario)}`,
+    [desde, hasta, JSON.stringify(D.RESULTADOS_CON_CONVERSACION), paramUsuario(config, usuario)]);
   return r.rows[0];
 }
 
-// Fragmento SQL: toques de usuarios sdr o sin usuario. `n` es la posición del parámetro con la lista.
-function filtroSdr(config, n) {
-  return (config.USUARIOS || []).length ? `AND (usuario IS NULL OR usuario IN (SELECT jsonb_array_elements_text($${n}::jsonb)))` : '';
+// Fragmento SQL para filtrar toques por quién los hizo. `n` es la posición del parámetro que
+// devuelve paramUsuario(). Con usuario: solo los suyos. Sin usuario: los de rol sdr o sin etiqueta.
+function filtroUsuario(config, n, usuario) {
+  if (usuario) return `AND usuario = $${n}`;
+  return (config.USUARIOS || []).length ? `AND (usuario IS NULL OR usuario IN (SELECT jsonb_array_elements_text($${n}::jsonb)))` : `AND $${n}::text IS NOT NULL`;
+}
+function paramUsuario(config, usuario) {
+  return usuario ? usuarioValido(config, usuario) || usuario : JSON.stringify(usuariosSdr(config));
 }
 
-module.exports = { registrarToque, registrarEjecutiva, actividadDelDia, siguienteEtapa, enTransaccion, usuarioValido, usuariosSdr, filtroSdr };
+module.exports = { registrarToque, registrarEjecutiva, actividadDelDia, siguienteEtapa, enTransaccion, usuarioValido, usuariosSdr, filtroUsuario, paramUsuario };

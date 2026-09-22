@@ -142,6 +142,12 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
     assert.deepStrictEqual(u, [null, 'Angie', 'Santiago']);   // 'nadie' no existe → null; 'santiago' se normaliza
     const after = (await consultarCola(db, base, { ahora: lunes })).indicadores.marcaciones;
     assert.strictEqual(after - before, 2);                     // Angie + sin usuario cuentan; Santiago no
+    // Cada quien ve su propio histórico
+    assert.strictEqual((await consultarCola(db, base, { ahora: lunes, usuario: 'Santiago' })).indicadores.marcaciones, 1);
+    assert.strictEqual((await consultarCola(db, base, { ahora: lunes, usuario: 'Angie' })).indicadores.marcaciones, 1);
+    assert.strictEqual((await consultarCola(db, base, { ahora: lunes, usuario: 'Luisa' })).indicadores.marcaciones, 0);
+    const { resumenSemana } = require('../ritmo');
+    assert.strictEqual((await resumenSemana(db, base, { fecha: '2026-09-21', usuario: 'Santiago', ahora: lunes })).totales.marcaciones, 1);
   });
 
   await t.test('descartar sin llamar (decisión) exige razón', async () => {

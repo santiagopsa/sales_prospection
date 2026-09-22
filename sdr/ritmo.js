@@ -2,13 +2,13 @@
 const { T } = require('./schema');
 const D = require('./dominio');
 const tiempo = require('./tiempo');
-const { usuariosSdr, filtroSdr } = require('./resultados');
+const { filtroUsuario, paramUsuario } = require('./resultados');
 
 const minutos = hhmm => { const [h, m] = String(hhmm).split(':').map(Number); return h * 60 + (m || 0); };
 const conv = JSON.stringify(D.RESULTADOS_CON_CONVERSACION);
 
 // Actividad por día (Bogotá) entre dos fechas inclusive: marcaciones, conversaciones, reuniones, toques.
-async function actividadPorDia(db, desde, hasta, config = {}) {
+async function actividadPorDia(db, desde, hasta, config = {}, usuario = null) {
   const r = await db.query(
     `SELECT to_char(created_at AT TIME ZONE 'America/Bogota', 'YYYY-MM-DD') AS fecha,
             COUNT(*) FILTER (WHERE canal = 'llamada')::int AS marcaciones,
@@ -19,9 +19,9 @@ async function actividadPorDia(db, desde, hasta, config = {}) {
             COUNT(*) FILTER (WHERE canal = 'linkedin')::int AS linkedin,
             COUNT(*) FILTER (WHERE canal <> 'ejecutiva')::int AS toques
      FROM ${T.touches}
-     WHERE created_at >= $1 AND created_at < $2 ${filtroSdr(config, 4)}
+     WHERE created_at >= $1 AND created_at < $2 ${filtroUsuario(config, 4, usuario)}
      GROUP BY 1 ORDER BY 1`,
-    [tiempo.instante(desde, 0).toISOString(), tiempo.instante(tiempo.sumarDias(hasta, 1), 0).toISOString(), conv, JSON.stringify(usuariosSdr(config))]);
+    [tiempo.instante(desde, 0).toISOString(), tiempo.instante(tiempo.sumarDias(hasta, 1), 0).toISOString(), conv, paramUsuario(config, usuario)]);
   const porFecha = Object.fromEntries(r.rows.map(x => [x.fecha, x]));
   const dias = [];
   for (let f = desde; f <= hasta; f = tiempo.sumarDias(f, 1)) {
@@ -36,9 +36,9 @@ function diaCumplido(config, d) {
 }
 
 // Días hábiles seguidos cumpliendo la meta, contando hacia atrás desde ayer (hoy suma si ya cumplió).
-async function racha(db, config, ahora = new Date()) {
+async function racha(db, config, ahora = new Date(), usuario = null) {
   const hoy = tiempo.fechaBogota(ahora);
-  const dias = await actividadPorDia(db, tiempo.sumarDias(hoy, -60), hoy, config);
+  const dias = await actividadPorDia(db, tiempo.sumarDias(hoy, -60), hoy, config, usuario);
   const porFecha = Object.fromEntries(dias.map(d => [d.fecha, d]));
   let n = 0;
   const hoyCumple = diaCumplido(config, porFecha[hoy]);
@@ -51,7 +51,7 @@ async function racha(db, config, ahora = new Date()) {
 }
 
 // Bloque de prospección en curso (o null) con lo marcado dentro de él.
-async function bloqueActual(db, config, ahora = new Date()) {
+async function bloqueActual(db, config, ahora = new Date(), usuario = null) {
   const hoy = tiempo.fechaBogota(ahora);
   const minAhora = Math.floor((ahora - tiempo.instante(hoy, 0)) / 60000);
   const bloques = config.BLOQUES_PROSPECCION || [];
@@ -63,8 +63,8 @@ async function bloqueActual(db, config, ahora = new Date()) {
   const r = await db.query(
     `SELECT COUNT(*) FILTER (WHERE canal = 'llamada')::int AS marcaciones,
             COUNT(*) FILTER (WHERE resultado IN (SELECT jsonb_array_elements_text($3::jsonb)))::int AS conversaciones
-     FROM ${T.touches} WHERE created_at >= $1 AND created_at < $2 ${filtroSdr(config, 4)}`,
-    [desde.toISOString(), ahora.toISOString(), conv, JSON.stringify(usuariosSdr(config))]);
+     FROM ${T.touches} WHERE created_at >= $1 AND created_at < $2 ${filtroUsuario(config, 4, usuario)}`,
+    [desde.toISOString(), ahora.toISOString(), conv, paramUsuario(config, usuario)]);
   return {
     enCurso: {
       nombre: b.nombre || `Bloque ${idx + 1}`, inicio: b.inicio, fin: b.fin,
@@ -76,7 +76,7 @@ async function bloqueActual(db, config, ahora = new Date()) {
 }
 
 // Tasas sobre una ventana móvil. Se calculan siempre; la vista decide si las muestra (MOSTRAR_RATIOS).
-async function ratios(db, config, ahora = new Date()) {
+async function ratios(db, config, ahora = new Date(), usuario = null) {
   const hasta = tiempo.fechaBogota(ahora);
   const desde = tiempo.sumarDias(hasta, -(config.VENTANA_RATIOS_DIAS - 1));
   const r = await db.query(
@@ -87,8 +87,8 @@ async function ratios(db, config, ahora = new Date()) {
             COUNT(*) FILTER (WHERE resultado = 'no_show')::int AS no_show,
             COUNT(*) FILTER (WHERE resultado = 'calificado')::int AS calificados
      FROM ${T.touches} WHERE created_at >= $1 AND created_at < $2
-       AND (canal = 'ejecutiva' OR usuario IS NULL OR usuario IN (SELECT jsonb_array_elements_text($4::jsonb)))`,
-    [tiempo.instante(desde, 0).toISOString(), tiempo.instante(tiempo.sumarDias(hasta, 1), 0).toISOString(), conv, JSON.stringify(usuariosSdr(config))]);
+       AND (canal = 'ejecutiva' OR (TRUE ${filtroUsuario(config, 4, usuario)}))`,
+    [tiempo.instante(desde, 0).toISOString(), tiempo.instante(tiempo.sumarDias(hasta, 1), 0).toISOString(), conv, paramUsuario(config, usuario)]);
   const x = r.rows[0];
   const pct = (a, b) => (b ? Math.round((a / b) * 100) : null);
   return {
@@ -107,10 +107,10 @@ function semanaDe(fecha) {
   return { lunes, domingo: tiempo.sumarDias(lunes, 6) };
 }
 
-async function resumenSemana(db, config, { fecha, ahora = new Date() } = {}) {
+async function resumenSemana(db, config, { fecha, usuario = null, ahora = new Date() } = {}) {
   const hoy = tiempo.fechaBogota(ahora);
   const { lunes, domingo } = semanaDe(fecha || hoy);
-  const dias = await actividadPorDia(db, lunes, domingo, config);
+  const dias = await actividadPorDia(db, lunes, domingo, config, usuario);
   const habiles = dias.filter(d => !tiempo.esFinDeSemana(d.fecha) && d.fecha <= hoy);
   const suma = k => dias.reduce((s, d) => s + d[k], 0);
   const totales = { marcaciones: suma('marcaciones'), conversaciones: suma('conversaciones'), reuniones: suma('reuniones'), whatsapp: suma('whatsapp'), correo: suma('correo'), linkedin: suma('linkedin'), toques: suma('toques') };
@@ -124,8 +124,9 @@ async function resumenSemana(db, config, { fecha, ahora = new Date() } = {}) {
       diasHabilesTranscurridos: habiles.length,
       diasCumplidos: habiles.filter(d => diaCumplido(config, d)).length,
     },
-    racha: await racha(db, config, ahora),
-    ratios: await ratios(db, config, ahora),
+    usuario: usuario || null,
+    racha: await racha(db, config, ahora, usuario),
+    ratios: await ratios(db, config, ahora, usuario),
     mostrarRatios: !!config.MOSTRAR_RATIOS,
     // La parte de mejora (hábitos, foco, mejor momento) llega con las fases 4 y 5.
     mejora: null,

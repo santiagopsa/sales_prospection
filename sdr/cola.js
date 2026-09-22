@@ -22,7 +22,7 @@ function prioridad(tarea, config, ahora) {
 
 const etapasDeAngie = JSON.stringify(ETAPAS_DE_ANGIE);
 
-async function consultarCola(db, config, { ahora = new Date() } = {}) {
+async function consultarCola(db, config, { ahora = new Date(), usuario = null } = {}) {
   const hoy = tiempo.fechaBogota(ahora);
   const inicioHoy = tiempo.instante(hoy, 0);
   const finHoy = tiempo.instante(tiempo.sumarDias(hoy, 1), 0);
@@ -55,11 +55,12 @@ async function consultarCola(db, config, { ahora = new Date() } = {}) {
     [etapasDeAngie],
   )).rows[0].n;
 
-  const act = await actividadDelDia(db, hoy, config);
-  const [bloque, racha] = await Promise.all([ritmo.bloqueActual(db, config, ahora), ritmo.racha(db, config, ahora)]);
+  const act = await actividadDelDia(db, hoy, config, usuario);
+  const [bloque, racha] = await Promise.all([ritmo.bloqueActual(db, config, ahora, usuario), ritmo.racha(db, config, ahora, usuario)]);
   return {
     fecha: hoy,
     tareas,
+    usuario: usuario || null,
     bloque,
     racha,
     indicadores: {

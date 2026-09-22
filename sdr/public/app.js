@@ -23,7 +23,7 @@
     const actual = usuarioActual();
     $sel.innerHTML = '<option value="">¿Quién eres?</option>' + meta.usuarios.map(u => `<option value="${esc(u.nombre)}" ${u.nombre === actual ? 'selected' : ''}>${esc(u.nombre)}</option>`).join('');
     $sel.classList.toggle('sin-usuario', !actual);
-    $sel.onchange = () => { try { localStorage.setItem(USUARIO_KEY, $sel.value); } catch (_) {} $sel.classList.toggle('sin-usuario', !$sel.value); avisar($sel.value ? `Hola, ${$sel.value}.` : 'Elige quién eres para que quede registrado.'); };
+    $sel.onchange = () => { try { localStorage.setItem(USUARIO_KEY, $sel.value); } catch (_) {} $sel.classList.toggle('sin-usuario', !$sel.value); avisar($sel.value ? `Hola, ${$sel.value}.` : 'Elige quién eres para que quede registrado.'); render(); };
   }
 
   async function api(ruta, opciones = {}) {
@@ -46,7 +46,7 @@
 
   // ---------------------------------------------------------------- cola
   async function vistaCola(params = new URLSearchParams()) {
-    const c = await api('cola');
+    const c = await api('cola' + (usuarioActual() ? '?usuario=' + encodeURIComponent(usuarioActual()) : ''));
     const i = c.indicadores;
     const ver = params.get('ver') || 'todas';   // todas | vencidas | hoy
     const lista = ver === 'vencidas' ? c.tareas.filter(t => t.vencida) : ver === 'hoy' ? c.tareas.filter(t => !t.vencida) : c.tareas;
@@ -57,7 +57,7 @@
     const siguiente = c.tareas.find(t => t.canal === 'llamada' && t.telefono) || c.tareas[0];
     $app.innerHTML = `
       <div class="cabeza">
-        <div><h1>Cola del día</h1><div class="suave">${esc(hoy)} · ${plural(c.tareas.length, 'toque pendiente', 'toques pendientes')}</div></div>
+        <div><h1>Cola del día</h1><div class="suave">${esc(hoy)} · ${plural(c.tareas.length, 'toque pendiente', 'toques pendientes')}${c.usuario ? ` · ritmo de <b>${esc(c.usuario)}</b>` : ''}</div></div>
         <div class="acciones" style="margin:0">
           ${siguiente ? `<a class="btn primario grande" href="#/lead/${siguiente.lead_id}${siguiente.canal === 'llamada' && siguiente.telefono ? '?llamar=1' : ''}">${siguiente.canal === 'llamada' ? '📞 Llamar al siguiente' : 'Siguiente toque'} · ${esc(siguiente.empresa)}</a>` : ''}
           <a class="btn" href="#/marcar">Marcar</a>
@@ -563,7 +563,8 @@
   // ---------------------------------------------------------------- semana
   async function vistaSemana(params) {
     const f = params.get('fecha');
-    const w = await api('semana' + (f ? '?fecha=' + f : ''));
+    const qsw = new URLSearchParams(); if (f) qsw.set('fecha', f); if (usuarioActual()) qsw.set('usuario', usuarioActual());
+    const w = await api('semana' + (qsw.toString() ? '?' + qsw : ''));
     const dia = x => new Date(x + 'T12:00:00-05:00').toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'short', day: 'numeric' });
     const rango = `${new Date(w.lunes + 'T12:00:00-05:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })} – ${new Date(w.domingo + 'T12:00:00-05:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}`;
     const mover = n => { const d = new Date(w.lunes + 'T12:00:00-05:00'); d.setDate(d.getDate() + n * 7); return d.toISOString().slice(0, 10); };
@@ -572,7 +573,7 @@
     const tasa = (v, nombre, num, den) => `<div class="kpi"><b>${v == null ? '—' : v + '%'}</b><span>${nombre}</span><small>${num} de ${den}</small></div>`;
     $app.innerHTML = `
       <div class="cabeza">
-        <div><h1>Semana</h1><div class="suave">${esc(rango)} · <a href="#/semana?fecha=${mover(-1)}">← anterior</a>${w.domingo < w.hoy ? ` · <a href="#/semana?fecha=${mover(1)}">siguiente →</a>` : ''}</div></div>
+        <div><h1>Semana${w.usuario ? ` de ${esc(w.usuario)}` : ''}</h1><div class="suave">${esc(rango)} · <a href="#/semana?fecha=${mover(-1)}">← anterior</a>${w.domingo < w.hoy ? ` · <a href="#/semana?fecha=${mover(1)}">siguiente →</a>` : ''}</div></div>
         <div class="racha ${w.racha.hoyCumple ? 'hoy' : ''}"><b>${w.racha.dias}</b><span>${w.racha.dias === 1 ? 'día seguido' : 'días seguidos'} cumpliendo la meta</span></div>
       </div>
       <div class="kpis">

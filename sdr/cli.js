@@ -5,7 +5,7 @@
 //   node sdr/cli.js secuencia [--desde 2026-09-21]            fechas de las tareas de un lead nuevo
 //   node sdr/cli.js cola                                        orden de la cola de hoy con el desglose del puntaje
 //   node sdr/cli.js importar archivo.csv [--confirmar]         carga desde la terminal (sin --confirmar, simula)
-//   node sdr/cli.js semana [--fecha 2026-09-22]                resumen semanal (actividad, racha, tasas si MOSTRAR_RATIOS)
+//   node sdr/cli.js semana [--fecha 2026-09-22] [--usuario Angie]  resumen semanal (actividad, racha, tasas si MOSTRAR_RATIOS)
 //   node sdr/cli.js limpiar --confirmar                        BORRA todos los leads, toques, llamadas y cargas del
 //                                                               schema sdr (y los deals que el SDR creó en el Sandler).
 //                                                               Sin --confirmar solo muestra cuánto se borraría.
@@ -95,7 +95,7 @@ async function main() {
   try {
     if (cmd === 'cola') {
       const { consultarCola } = require('./cola');
-      const c = await consultarCola(db, config);
+      const c = await consultarCola(db, config, { usuario: args.usuario || null });
       const i = c.indicadores;
       console.log(`\nCola del ${c.fecha}: ${c.tareas.length} tareas · ${i.vencidas} vencidas · ${i.deHoy} de hoy · ${i.huerfanos} huérfanos\n`);
       console.log(`  ${pad('#', 4)}${pad('pts', 5)}${pad('etapa+canal+atraso', 20)}${pad('canal', 10)}${pad('etapa', 14)}empresa`);
@@ -105,7 +105,7 @@ async function main() {
       });
     } else if (cmd === 'semana') {
       const { resumenSemana } = require('./ritmo');
-      const r = await resumenSemana(db, config, { fecha: args.fecha });
+      const r = await resumenSemana(db, config, { fecha: args.fecha, usuario: args.usuario || null });
       console.log(`\nSemana del ${r.lunes} al ${r.domingo}\n`);
       console.log(`  ${pad('fecha', 12)}${pad('marc', 6)}${pad('conv', 6)}${pad('reun', 6)}${pad('wa', 5)}${pad('mail', 6)}${pad('in', 4)}cumplida`);
       for (const d of r.dias) console.log(`  ${pad(d.fecha, 12)}${pad(d.marcaciones, 6)}${pad(d.conversaciones, 6)}${pad(d.reuniones, 6)}${pad(d.whatsapp, 5)}${pad(d.correo, 6)}${pad(d.linkedin, 4)}${d.habil ? (d.cumplida ? 'sí' : (d.fecha <= r.hoy ? 'no' : '')) : '—'}`);
