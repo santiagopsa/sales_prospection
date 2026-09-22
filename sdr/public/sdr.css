@@ -121,3 +121,17 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #1a2331; color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 13px; max-width: min(90vw, 640px); z-index: 30; box-shadow: 0 6px 24px rgba(0,0,0,.2); }
 .toast.aviso { background: var(--alerta); }
 .toast.error { background: var(--mal); }
+
+/* llamada en curso */
+.llamada { display: flex; align-items: center; gap: 12px; background: var(--panel-2); border: 1px solid var(--linea); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.llamada .punto { width: 10px; height: 10px; border-radius: 50%; background: var(--suave); flex: none; }
+.llamada.conectando .punto { background: var(--alerta); animation: latir 1.2s ease-in-out infinite; }
+.llamada.timbrando .punto { background: var(--azul-osc); animation: latir .8s ease-in-out infinite; }
+.llamada.activa .punto { background: var(--verde); }
+.llamada .txt { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.llamada .txt b { font-weight: 600; }
+.llamada .txt .num { color: var(--suave); font-size: 13px; }
+.llamada .colgar { color: var(--mal); border-color: #f3c4c4; padding: 7px 14px; }
+.llamada .colgar:hover { background: var(--mal-bg); }
+.llamada.fin { background: transparent; border-style: dashed; }
+@keyframes latir { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.8); } }

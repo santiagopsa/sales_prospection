@@ -337,16 +337,37 @@
     if ($llamar && puedeLlamar) $llamar.addEventListener('click', () => {
       const $estado = document.getElementById('llamada-estado');
       const uuid = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
-      $llamar.disabled = true; $llamar.textContent = 'Colgar';
-      let enCurso = true;
-      const colgar = () => { if (enCurso) tel.colgar(); };
-      $llamar.disabled = false; $llamar.onclick = colgar;
+      let enCurso = true, inicio = null, reloj = null;
+      const mmss = ms => { const t = Math.floor(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+      const pintar = (fase, texto) => {
+        // fase: conectando | timbrando | activa
+        $estado.innerHTML = `<div class="llamada ${fase}">
+          <span class="punto"></span>
+          <div class="txt"><b>${esc(texto)}</b><span class="num" id="reloj">${inicio ? mmss(Date.now() - inicio) : ''}</span></div>
+          <button class="btn colgar" type="button" id="colgar">Colgar</button></div>`;
+        document.getElementById('colgar').addEventListener('click', () => { if (enCurso) tel.colgar(); });
+      };
+      $llamar.disabled = true;
+      pintar('conectando', 'Preparando la llamada…');
       tel.llamar({ lead: l, uuid }, {
-        estado: txt => { $estado.textContent = txt; },
+        estado: txt => {
+          const fase = /En llamada/.test(txt) ? 'activa' : (/Timbrando|Marcando/.test(txt) ? 'timbrando' : 'conectando');
+          if (fase === 'activa' && !inicio) { inicio = Date.now(); reloj = setInterval(() => { const r = document.getElementById('reloj'); if (r) r.textContent = mmss(Date.now() - inicio); }, 1000); }
+          pintar(fase, txt);
+        },
         fin: info => {
-          enCurso = false;
-          $llamar.textContent = '📞 Llamar ' + (telVisible(l.telefono) || ''); $llamar.onclick = null;
-          $estado.textContent = info && info.error ? 'Error: ' + info.error : 'Llamada terminada.';
+          enCurso = false; clearInterval(reloj);
+          $llamar.disabled = false;
+          if (info && info.error) {
+            // No salió la llamada: no hay nada que registrar. Se muestra el motivo y la bitácora.
+            const detalle = (tel.bitacora ? tel.bitacora() : []).slice(-8).map(x => `<div>${esc(x)}</div>`).join('');
+            $estado.innerHTML = `<div class="error" style="margin:0"><b>No se pudo llamar.</b> ${esc(info.error)}</div>
+              <details style="margin-top:6px"><summary class="suave" style="cursor:pointer;font-size:12px">Detalle técnico</summary><div class="suave" style="font-size:12px;font-family:monospace">${detalle}</div></details>`;
+            avisar('No se pudo llamar: ' + info.error, 'error');
+            return;
+          }
+          const dur = inicio ? ` · ${mmss(Date.now() - inicio)}` : '';
+          $estado.innerHTML = `<div class="llamada fin"><span class="punto"></span><div class="txt"><b>${info && info.contesto ? 'Llamada terminada' + dur : 'No contestaron' + (info && info.motivo ? ' (' + esc(info.motivo) + ')' : '')}</b></div></div>`;
           if (!(info && info.cancelada)) abrirResultado(l, { callUuid: uuid, obligatorio: true });
         },
       });

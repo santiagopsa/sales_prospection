@@ -91,6 +91,8 @@ async function setup({ key, url, numero, rotar = false, config, log = console.lo
     VOX_CALLER_ID: callerId,
     VOX_WEBHOOK_SECRET: secreto,
     PUBLIC_URL: publicUrl,
+    // No sale por la API: se lee en el dashboard de Voximplant ("Credentials for working with API, SDK, SIP").
+    VOX_NODE: previo.VOX_NODE || '(mira el dashboard de Voximplant: Credentials for working with API, SDK, SIP → node N)',
   };
   fs.writeFileSync(archivo, Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\n') + '\n', { mode: 0o600 });
   log('\nVariables para Render (también quedaron en ' + archivo + ', que está en .gitignore):\n');

@@ -11,9 +11,12 @@ function leerEnv(env = process.env) {
   const v = {
     account: env.VOX_ACCOUNT, app: env.VOX_APP, user: env.VOX_USER, password: env.VOX_USER_PASSWORD,
     callerId: env.VOX_CALLER_ID, secreto: env.VOX_WEBHOOK_SECRET,
+    // Nodo de la cuenta (1–13). Está en el dashboard de Voximplant, sección
+    // "Credentials for working with API, SDK, SIP". El SDK no conecta sin él.
+    node: /^\d{1,2}$/.test(String(env.VOX_NODE || '').trim()) ? Number(env.VOX_NODE) : null,
   };
-  v.configurado = !!(v.account && v.app && v.user && v.password && v.callerId && v.secreto);
-  v.faltan = Object.entries({ VOX_ACCOUNT: v.account, VOX_APP: v.app, VOX_USER: v.user, VOX_USER_PASSWORD: v.password, VOX_CALLER_ID: v.callerId, VOX_WEBHOOK_SECRET: v.secreto })
+  v.configurado = !!(v.account && v.app && v.user && v.password && v.callerId && v.secreto && v.node);
+  v.faltan = Object.entries({ VOX_ACCOUNT: v.account, VOX_APP: v.app, VOX_USER: v.user, VOX_USER_PASSWORD: v.password, VOX_CALLER_ID: v.callerId, VOX_WEBHOOK_SECRET: v.secreto, VOX_NODE: v.node })
     .filter(([, x]) => !x).map(([k]) => k);
   return v;
 }
@@ -26,6 +29,7 @@ function configPublica(env) {
     faltan: v.faltan,
     usuario: v.configurado ? `${v.user}@${v.app}.${v.account}.voximplant.com` : null,
     callerId: v.callerId || null,
+    node: v.node,
   };
 }
 

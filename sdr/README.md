@@ -20,6 +20,7 @@ audio (4), reporte semanal (5), calibración (6).
 | `VOX_CALLER_ID` | Número que ve el prospecto, E.164 | `vox:setup` |
 | `VOX_WEBHOOK_SECRET` | Firma del webhook del escenario | `vox:setup` |
 | `PUBLIC_URL` | URL pública del servicio | `https://peaku-sandler.onrender.com` |
+| `VOX_NODE` | Nodo de la cuenta (1–13); sin él el SDK no conecta | Dashboard de Voximplant → "Credentials for working with API, SDK, SIP" |
 
 Sin las `VOX_*` todo funciona menos el botón **Llamar**, que aparece apagado con el motivo. Angie puede registrar
 llamadas hechas por fuera mientras tanto.
@@ -35,7 +36,7 @@ llamadas hechas por fuera mientras tanto.
    Crea (o reutiliza) la aplicación `sdr`, el usuario `angie`, el escenario `sdr-llamada`, la regla y amarra el
    número. Si la cuenta tiene más de un número, pásalo con `--numero +57…`. Imprime las variables y las deja en
    `sdr/voximplant-render.env` (también ignorado por git).
-3. Pega las variables en Render → Environment y redespliega.
+3. Pega las variables en Render → Environment, más `VOX_NODE` con el número de nodo que muestra el dashboard de Voximplant, y redespliega.
 4. Abre un lead en `/sdr`, dale **Llamar**, acepta el micrófono. La primera llamada tarda unos segundos más (inicia sesión).
 
 Volver a correr `vox:setup` conserva la contraseña y el secreto (los lee de `sdr/voximplant-render.env`), así que no hay que tocar Render; con `--rotar` genera nuevos y entonces sí hay que pegarlos otra vez.

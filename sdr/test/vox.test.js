@@ -5,12 +5,13 @@ const vox = require('../vox/servidor');
 const { generarEscenario } = require('../vox/escenario');
 const { jwt } = require('../vox/api');
 
-const ENV = { VOX_ACCOUNT: 'santiagopeaku', VOX_APP: 'sdr', VOX_USER: 'angie', VOX_USER_PASSWORD: 'p4ss', VOX_CALLER_ID: '+573009138048', VOX_WEBHOOK_SECRET: 's3cr3t' };
+const ENV = { VOX_ACCOUNT: 'santiagopeaku', VOX_APP: 'sdr', VOX_USER: 'angie', VOX_USER_PASSWORD: 'p4ss', VOX_CALLER_ID: '+573009138048', VOX_WEBHOOK_SECRET: 's3cr3t', VOX_NODE: '4' };
 const md5 = s => crypto.createHash('md5').update(s).digest('hex');
 
 test('config pública: sin secretos y con lo que falta', () => {
   const c = vox.configPublica(ENV);
-  assert.deepStrictEqual(c, { configurado: true, faltan: [], usuario: 'angie@sdr.santiagopeaku.voximplant.com', callerId: '+573009138048' });
+  assert.deepStrictEqual(c, { configurado: true, faltan: [], usuario: 'angie@sdr.santiagopeaku.voximplant.com', callerId: '+573009138048', node: 4 });
+  assert.ok(vox.configPublica({ ...ENV, VOX_NODE: 'x' }).faltan.includes('VOX_NODE'));
   assert.ok(!JSON.stringify(c).includes('p4ss'));
   const f = vox.configPublica({ VOX_ACCOUNT: 'x' });
   assert.strictEqual(f.configurado, false);

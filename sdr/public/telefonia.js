@@ -12,6 +12,9 @@
   let conectando = null;
 
   const SDK = () => window.VoxImplant;
+  const log = (...a) => { try { console.log('[sdr/tel]', ...a); } catch (_) {} };
+  const bitacora = [];   // últimos eventos, para mostrarlos en la ficha cuando algo falla
+  const anotar = t => { bitacora.push(new Date().toLocaleTimeString('es-CO') + ' · ' + t); if (bitacora.length > 30) bitacora.shift(); log(t); };
 
   fetch('api/vox/config').then(r => r.json()).then(c => { config = c; }).catch(() => { config = { configurado: false, faltan: ['servidor'] }; });
 
@@ -20,7 +23,7 @@
   function motivo() {
     if (!SDK()) return 'No cargó el SDK de Voximplant (revisa la conexión).';
     if (!config) return 'Consultando la configuración…';
-    if (!config.configurado) return 'Faltan en Render: ' + config.faltan.join(', ');
+    if (!config.configurado) return 'Faltan en Render: ' + config.faltan.join(', ') + (config.faltan.includes('VOX_NODE') ? ' (el nodo está en el dashboard de Voximplant, sección "Credentials for working with API, SDK, SIP")' : '');
     return '';
   }
 
@@ -32,19 +35,30 @@
     conectando = (async () => {
       const V = SDK();
       cliente = V.getInstance();
-      estado('Conectando con la central…');
-      try { await cliente.init({ micRequired: true, showDebugInfo: false, progressTone: true, progressToneCountry: 'US' }); }
-      catch (e) { if (!/already/i.test(String(e && e.message))) throw e; }
-      if (cliente.getClientState() !== V.ClientState.CONNECTED && cliente.getClientState() !== V.ClientState.LOGGED_IN) {
-        await cliente.connect();
+      estado('Conectando con la central…'); anotar('init');
+      const nodo = V.ConnectionNode && V.ConnectionNode['NODE_' + config.node];
+      if (!nodo) throw new Error('VOX_NODE=' + config.node + ' no es un nodo válido del SDK (1 a 13).');
+      anotar('nodo NODE_' + config.node);
+      try { await cliente.init({ node: nodo, micRequired: true, showDebugInfo: false, progressTone: true, progressToneCountry: 'US' }); }
+      catch (e) {
+        if (!/already/i.test(String(e && e.message))) {
+          if (/NotAllowed|Permission|denied/i.test(String(e && (e.name + ' ' + e.message)))) throw new Error('El navegador no dio permiso de micrófono. Haz clic en el candado de la barra de direcciones y permite el micrófono.');
+          throw new Error('No se pudo iniciar el SDK: ' + (e && e.message || e));
+        }
       }
+      anotar('estado del cliente: ' + cliente.getClientState());
+      if (cliente.getClientState() !== V.ClientState.CONNECTED && cliente.getClientState() !== V.ClientState.LOGGED_IN) {
+        try { await cliente.connect(); } catch (e) { throw new Error('No se pudo conectar con Voximplant: ' + (e && e.message || e)); }
+      }
+      anotar('conectado; pidiendo llave para ' + config.usuario);
       estado('Iniciando sesión…');
       const key = await new Promise((ok, no) => {
         const h = ev => {
           cliente.removeEventListener(V.Events.AuthResult, h);
+          anotar('AuthResult (llave): result=' + ev.result + ' code=' + ev.code);
           if (ev.result === false && ev.code === 302 && ev.key) ok(ev.key);
           else if (ev.result === true) ok(null);
-          else no(new Error('No se pudo pedir la llave de sesión (código ' + ev.code + ')'));
+          else no(new Error('No se pudo pedir la llave de sesión (código ' + ev.code + '). ¿Existe el usuario ' + config.usuario + '?'));
         };
         cliente.addEventListener(V.Events.AuthResult, h);
         cliente.requestOneTimeLoginKey(config.usuario);
@@ -56,14 +70,15 @@
         await new Promise((ok, no) => {
           const h = ev => {
             cliente.removeEventListener(V.Events.AuthResult, h);
-            ev.result ? ok() : no(new Error('Voximplant rechazó el login (código ' + ev.code + '). Revisa VOX_USER_PASSWORD en Render.'));
+            anotar('AuthResult (login): result=' + ev.result + ' code=' + ev.code);
+            ev.result ? ok() : no(new Error('Voximplant rechazó el login (código ' + ev.code + '). Revisa VOX_USER_PASSWORD en Render (debe ser la del archivo voximplant-render.env).'));
           };
           cliente.addEventListener(V.Events.AuthResult, h);
           cliente.loginWithOneTimeKey(config.usuario, d.hash);
         });
       }
-      conectado = true;
-      cliente.addEventListener(V.Events.ConnectionClosed, () => { conectado = false; });
+      conectado = true; anotar('sesión iniciada');
+      cliente.addEventListener(V.Events.ConnectionClosed, () => { conectado = false; anotar('conexión cerrada'); });
     })();
     try { await conectando; } finally { conectando = null; }
   }
@@ -75,6 +90,7 @@
     const fin = info => { if (terminado) return; terminado = true; llamadaActual = null; cb.fin && cb.fin(info || {}); };
     (async () => {
       await sesion(estado);
+      anotar('llamando a ' + lead.telefono + ' uuid=' + uuid);
       estado('Marcando a ' + lead.telefono + '…');
       const call = cliente.call({
         number: lead.telefono,
@@ -83,20 +99,21 @@
       });
       llamadaActual = call;
       let contesto = false;
-      call.addEventListener(V.CallEvents.Connected, () => { contesto = true; estado('En llamada'); });
-      call.addEventListener(V.CallEvents.ProgressToneStart, () => estado('Timbrando…'));
-      call.addEventListener(V.CallEvents.Disconnected, () => fin({ contesto }));
+      call.addEventListener(V.CallEvents.Connected, () => { contesto = true; anotar('Connected'); estado('En llamada'); });
+      call.addEventListener(V.CallEvents.ProgressToneStart, () => { anotar('ProgressToneStart'); estado('Timbrando…'); });
+      call.addEventListener(V.CallEvents.Disconnected, ev => { anotar('Disconnected ' + JSON.stringify(ev && ev.headers || {})); fin({ contesto }); });
       call.addEventListener(V.CallEvents.Failed, ev => {
+        anotar('Failed code=' + ev.code + ' reason=' + ev.reason);
         // 486 ocupado, 480/487 no contesta: son resultados normales, no errores.
         const normal = [480, 486, 487, 603].includes(ev.code);
-        fin(normal ? { contesto: false, codigo: ev.code } : { error: (ev.reason || 'falló') + ' (' + ev.code + ')', codigo: ev.code });
+        fin(normal ? { contesto: false, codigo: ev.code, motivo: ev.reason } : { error: (ev.reason || 'falló') + ' (código ' + ev.code + ')', codigo: ev.code });
       });
-    })().catch(e => fin({ error: e.message || String(e) }));
+    })().catch(e => { anotar('error: ' + (e.message || e)); fin({ error: e.message || String(e) }); });
   }
 
   function colgar() {
     if (llamadaActual) { try { llamadaActual.hangup(); } catch (_) { /* nada */ } }
   }
 
-  window.SDR_TELEFONIA = { disponible, motivo, llamar, colgar };
+  window.SDR_TELEFONIA = { disponible, motivo, llamar, colgar, bitacora: () => bitacora.slice() };
 })();
