@@ -6,6 +6,7 @@
 const { T } = require('./schema');
 const { ETAPAS_DE_ANGIE } = require('./dominio');
 const tiempo = require('./tiempo');
+const { actividadDelDia } = require('./resultados');
 
 function prioridad(tarea, config, ahora) {
   const P = config.PRIORIDAD;
@@ -53,6 +54,7 @@ async function consultarCola(db, config, { ahora = new Date() } = {}) {
     [etapasDeAngie],
   )).rows[0].n;
 
+  const act = await actividadDelDia(db, hoy);
   return {
     fecha: hoy,
     tareas,
@@ -60,9 +62,9 @@ async function consultarCola(db, config, { ahora = new Date() } = {}) {
       vencidas: tareas.filter(t => t.vencida).length,
       deHoy: tareas.filter(t => !t.vencida).length,
       huerfanos,
-      // Se llenan en la fase 2, cuando exista el resultado de la llamada.
-      marcaciones: null,
-      conversaciones: null,
+      marcaciones: act.marcaciones,
+      conversaciones: act.conversaciones,
+      toques: act.toques,
       metaMarcaciones: config.META_MARCACIONES_DIA,
       metaConversaciones: config.META_CONVERSACIONES_DIA,
     },

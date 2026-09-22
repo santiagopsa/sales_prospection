@@ -5,6 +5,9 @@
 //   node sdr/cli.js secuencia [--desde 2026-09-21]            fechas de las tareas de un lead nuevo
 //   node sdr/cli.js cola                                        orden de la cola de hoy con el desglose del puntaje
 //   node sdr/cli.js importar archivo.csv [--confirmar]         carga desde la terminal (sin --confirmar, simula)
+//   node sdr/cli.js vox:setup [--key ruta.json] [--url https://…] [--numero +57…]
+//                                                               deja Voximplant listo e imprime las variables de Render
+//   node sdr/cli.js vox:escenario                               imprime el escenario que se subiría (para revisarlo)
 //
 // Ejemplos:
 //   node sdr/cli.js secuencia --set SALTAR_FINES_DE_SEMANA=false
@@ -70,6 +73,17 @@ async function main() {
     for (const p of planificar(config, desde)) {
       console.log(`  ${pad(p.paso, 3)} ${pad(CANAL_LABEL[p.canal], 9)} ${p.fecha} ${dias[tiempo.diaSemana(p.fecha)]}  día ${tiempo.diasEntre(tiempo.instante(desde, 12), tiempo.instante(p.fecha, 12))}`);
     }
+    return;
+  }
+
+  if (cmd === 'vox:setup') {
+    const { setup } = require('./vox/setup');
+    await setup({ key: args.key, url: args.url, numero: args.numero, config });
+    return;
+  }
+  if (cmd === 'vox:escenario') {
+    const { generarEscenario } = require('./vox/escenario');
+    console.log(generarEscenario({ callerId: '+57XXXXXXXXXX', webhookUrl: (config.PUBLIC_URL_POR_DEFECTO || '') + '/sdr/api/vox/webhook', secreto: '(secreto)', aviso: config.AVISO_GRABACION, voz: config.VOZ_AVISO, avisoATodos: config.AVISO_TAMBIEN_A_ANGIE }));
     return;
   }
 

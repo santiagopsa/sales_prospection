@@ -42,7 +42,7 @@ async function main() {
         let body = '';
         for await (const c of req) body += c;
         try {
-          return json(200, await r.h({ params, query: Object.fromEntries(url.searchParams), body: body ? JSON.parse(body) : {} }));
+          return json(200, await r.h({ params, query: Object.fromEntries(url.searchParams), body: body ? JSON.parse(body) : {}, headers: req.headers }));
         } catch (e) {
           if (!e.status) console.error(e);
           return json(e.status || 500, { error: e.message });

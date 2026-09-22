@@ -60,7 +60,68 @@ module.exports = {
   // Metas diarias (visibles desde el día uno)
   // ---------------------------------------------------------------------------
   // Qué mueve: la barra de avance de la cola. No cambia ningún dato guardado.
-  // Las marcaciones y conversaciones se empiezan a contar en la fase 2 (resultado de la llamada).
+  // Marcación = toque por canal llamada registrado hoy (cualquier resultado).
+  // Conversación = resultado "conversación" o "reunión agendada".
   META_MARCACIONES_DIA: 60,
   META_CONVERSACIONES_DIA: 8,
+
+  // ---------------------------------------------------------------------------
+  // Qué pasa después de cada resultado (motor de etapas)
+  // ---------------------------------------------------------------------------
+  // Qué mueve: a qué etapa pasa el lead al registrar un resultado. null = no cambia de etapa
+  // (la secuencia sigue). Solo se avanza, nunca se retrocede: un "no contestó" después de una
+  // conversación no devuelve el lead a "nuevo".
+  // Ver el efecto: node sdr/cli.js resultado no_contesto --etapa nuevo
+  ETAPA_POR_RESULTADO: {
+    no_contesto: null,
+    buzon: null,
+    gatekeeper: 'contactado',
+    conversacion: 'conversacion',
+    reunion_agendada: 'reunion_agendada',
+    descartado: 'descartado',
+    // toques por otros canales
+    whatsapp: 'contactado',
+    correo: 'contactado',
+    linkedin: 'contactado',
+  },
+
+  // Qué mueve: cuántos días (hábiles si SALTAR_FINES_DE_SEMANA) después de una conversación sin
+  // reunión se hace el siguiente toque, y por qué canal. Reemplaza lo que dijera la secuencia:
+  // después de hablar con alguien, el ritmo lo pone la conversación, no la lista.
+  // Ver el efecto: node sdr/cli.js resultado conversacion --etapa contactado
+  TRAS_CONVERSACION: { canal: 'llamada', dias: 3 },
+
+  // Qué mueve: al agendar reunión se crea un toque de WhatsApp de recordatorio este número de
+  // días antes de la reunión (si Angie anotó la fecha). 0 = el mismo día. null = sin recordatorio.
+  RECORDATORIO_REUNION_DIAS_ANTES: 1,
+
+  // Qué mueve: si la reunión no ocurrió (no-show), cuántos días después se vuelve a llamar.
+  TRAS_NO_SHOW: { canal: 'llamada', dias: 1 },
+
+  // Qué mueve: qué se hace cuando se acaba la secuencia sin conversación.
+  //   'huerfano'  → el lead queda sin próximo toque y aparece en el indicador (Angie decide).
+  //   'descartar' → pasa a descartado con razón "sin_respuesta" automáticamente.
+  // Ver el efecto: node sdr/cli.js resultado no_contesto --paso 9
+  AL_AGOTAR_SECUENCIA: 'huerfano',
+
+  // ---------------------------------------------------------------------------
+  // Llamadas (Voximplant). Estos tres se incrustan en el escenario: después de cambiarlos hay
+  // que correr `node sdr/cli.js vox:setup` para subir la versión nueva.
+  // ---------------------------------------------------------------------------
+  // Qué mueve: lo que oye el prospecto al contestar, antes de que se una la voz de Angie.
+  // Vacío = sin aviso (no recomendado: habeas data).
+  AVISO_GRABACION: 'Hola, le habla Angie de Peaku. Le informo que esta llamada está siendo grabada con fines de calidad.',
+  // Qué mueve: la voz sintética del aviso, en la forma Proveedor.Nombre de VoiceList de Voximplant.
+  // Si el nombre no existe, el escenario cae a la voz estándar en español.
+  VOZ_AVISO: 'Google.es_US_Standard_A',
+  // Qué mueve: si Angie también oye el aviso (true) o solo silencio mientras suena (false).
+  AVISO_TAMBIEN_A_ANGIE: false,
+  // Qué mueve: URL pública del servicio, para el webhook del escenario. `vox:setup --url` la sobreescribe.
+  PUBLIC_URL_POR_DEFECTO: 'https://peaku-sandler.onrender.com',
+  // Qué mueve: qué canal del audio estéreo es Angie, para el pipeline de la fase 4 (proporción
+  // de habla y quién dijo qué). Si al escuchar una grabación las voces salen al revés, cámbialo.
+  CANAL_ANGIE_EN_GRABACION: 'derecho',
+  // Qué mueve: llamadas más cortas que esto (segundos contestados) no pasan por transcripción ni
+  // evaluación aunque el resultado sea "conversación". Fase 4.
+  DURACION_MINIMA_PIPELINE_S: 45,
 };

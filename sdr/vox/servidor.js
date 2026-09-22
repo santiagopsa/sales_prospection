@@ -1,0 +1,73 @@
+// Lado servidor de las llamadas: qué necesita el navegador para entrar a Voximplant, la firma
+// del login de un solo uso (la contraseña de Angie no sale de Render) y el webhook que manda
+// el escenario al terminar cada llamada.
+const crypto = require('crypto');
+const { T } = require('./../schema');
+
+function error(status, message) { return Object.assign(new Error(message), { status }); }
+const md5 = s => crypto.createHash('md5').update(s).digest('hex');
+
+function leerEnv(env = process.env) {
+  const v = {
+    account: env.VOX_ACCOUNT, app: env.VOX_APP, user: env.VOX_USER, password: env.VOX_USER_PASSWORD,
+    callerId: env.VOX_CALLER_ID, secreto: env.VOX_WEBHOOK_SECRET,
+  };
+  v.configurado = !!(v.account && v.app && v.user && v.password && v.callerId && v.secreto);
+  v.faltan = Object.entries({ VOX_ACCOUNT: v.account, VOX_APP: v.app, VOX_USER: v.user, VOX_USER_PASSWORD: v.password, VOX_CALLER_ID: v.callerId, VOX_WEBHOOK_SECRET: v.secreto })
+    .filter(([, x]) => !x).map(([k]) => k);
+  return v;
+}
+
+// Lo que el navegador necesita (sin secretos).
+function configPublica(env) {
+  const v = leerEnv(env);
+  return {
+    configurado: v.configurado,
+    faltan: v.faltan,
+    usuario: v.configurado ? `${v.user}@${v.app}.${v.account}.voximplant.com` : null,
+    callerId: v.callerId || null,
+  };
+}
+
+// Login de un solo uso del Web SDK: el navegador pide una "key" a Voximplant y el servidor
+// devuelve md5(key + '|' + md5(user + ':voximplant.com:' + password)). La clave nunca viaja.
+function firmarLogin(env, key) {
+  const v = leerEnv(env);
+  if (!v.configurado) throw error(503, 'La telefonía no está configurada: faltan ' + v.faltan.join(', '));
+  if (!key || typeof key !== 'string' || key.length > 200) throw error(400, 'Falta la key');
+  return { hash: md5(key + '|' + md5(`${v.user}:voximplant.com:${v.password}`)) };
+}
+
+// Webhook del escenario. Se compara el secreto en tiempo constante.
+async function recibirWebhook(db, env, headers, body) {
+  const v = leerEnv(env);
+  const recibido = String(headers['x-sdr-secret'] || '');
+  const esperado = String(v.secreto || '');
+  if (!esperado || recibido.length !== esperado.length || !crypto.timingSafeEqual(Buffer.from(recibido), Buffer.from(esperado))) {
+    throw error(401, 'Secreto inválido');
+  }
+  const b = body || {};
+  if (!b.uuid) throw error(400, 'Falta uuid');
+  const leadId = Number(b.lead_id);
+  if (!Number.isInteger(leadId)) throw error(400, 'Falta lead_id');
+  const fecha = x => (x && !isNaN(Date.parse(x))) ? new Date(x).toISOString() : null;
+  const duracion = Number.isFinite(Number(b.duracion_s)) ? Math.max(0, Math.round(Number(b.duracion_s))) : null;
+  const r = await db.query(
+    `INSERT INTO ${T.calls} (uuid, lead_id, origen, telefono, started_at, answered_at, ended_at, duracion_s, vox_call_id, vox_estado, record_url, pipeline_status)
+     VALUES ($1, $2, 'voximplant', $3, $4, $5, $6, $7, $8, $9, $10, 'pendiente_resultado')
+     ON CONFLICT (uuid) DO UPDATE SET
+       telefono = COALESCE(EXCLUDED.telefono, ${T.calls}.telefono),
+       started_at = COALESCE(EXCLUDED.started_at, ${T.calls}.started_at),
+       answered_at = COALESCE(EXCLUDED.answered_at, ${T.calls}.answered_at),
+       ended_at = COALESCE(EXCLUDED.ended_at, ${T.calls}.ended_at),
+       duracion_s = COALESCE(EXCLUDED.duracion_s, ${T.calls}.duracion_s),
+       vox_call_id = COALESCE(EXCLUDED.vox_call_id, ${T.calls}.vox_call_id),
+       vox_estado = COALESCE(EXCLUDED.vox_estado, ${T.calls}.vox_estado),
+       record_url = COALESCE(EXCLUDED.record_url, ${T.calls}.record_url),
+       updated_at = NOW()
+     RETURNING id, touch_id`,
+    [String(b.uuid), leadId, b.telefono || null, fecha(b.started_at), fecha(b.answered_at), fecha(b.ended_at), duracion, b.vox_call_id || null, b.estado || null, b.record_url || null]);
+  return { ok: true, call_id: r.rows[0].id };
+}
+
+module.exports = { leerEnv, configPublica, firmarLogin, recibirWebhook };

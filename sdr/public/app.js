@@ -194,38 +194,252 @@
   }
 
   // ---------------------------------------------------------------- ficha
+  let toast = null;
+  function avisar(texto, tipo = 'ok') {
+    if (toast) toast.remove();
+    toast = document.createElement('div');
+    toast.className = 'toast ' + tipo;
+    toast.textContent = texto;
+    document.body.appendChild(toast);
+    setTimeout(() => toast && toast.remove(), tipo === 'ok' ? 4000 : 8000);
+  }
+
+  const DE_ANGIE = ['nuevo', 'contactado', 'conversacion'];
+  const waLink = tel => tel ? `https://wa.me/${tel.replace(/\D/g, '')}` : null;
+  const fechaLocal = d => { // Date → valor de <input type=datetime-local> en hora de Bogotá
+    const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(d);
+    const g = t => p.find(x => x.type === t).value;
+    return `${g('year')}-${g('month')}-${g('day')}T${g('hour') === '24' ? '00' : g('hour')}:${g('minute')}`;
+  };
+
   async function vistaLead(id) {
     const l = await api('leads/' + encodeURIComponent(id));
+    const deAngie = DE_ANGIE.includes(l.etapa);
+    const tel = window.SDR_TELEFONIA || {};
+    const puedeLlamar = !!(l.telefono && tel.disponible && tel.disponible());
+    const proxima = l.tareas.find(t => t.estado === 'pendiente');
+    const pintaToque = t => {
+      const cuando = fechaHora(t.created_ms);
+      const que = t.canal === 'ejecutiva' ? (meta.resultadoLabel[t.resultado] || t.resultado) : (meta.resultadoLabel[t.resultado] || t.resultado);
+      const extra = [
+        t.razon_descarte && (meta.razonLabel[t.razon_descarte] || t.razon_descarte),
+        t.duracion_s != null && `${Math.floor(t.duracion_s / 60)}:${String(t.duracion_s % 60).padStart(2, '0')} min`,
+        t.detalle && t.detalle.reunion_at && 'reunión ' + fechaHora(new Date(t.detalle.reunion_at).getTime()),
+      ].filter(Boolean).join(' · ');
+      return `<li>
+        <span class="chip ${t.canal}">${esc(t.canal === 'ejecutiva' ? 'Ejecutiva' : etiqueta(meta.canales, t.canal))}</span>
+        <div style="flex:1;min-width:0"><b>${esc(que)}</b>${extra ? ` <span class="suave">· ${esc(extra)}</span>` : ''}
+          ${t.nota ? `<div class="suave" style="white-space:pre-wrap">${esc(t.nota)}</div>` : ''}
+          ${t.record_url ? `<div><a href="${esc(t.record_url)}" target="_blank" rel="noopener">Escuchar grabación</a></div>` : ''}</div>
+        <span class="suave" style="font-size:12px;white-space:nowrap">${cuando}</span>
+      </li>`;
+    };
+
     $app.innerHTML = `
       <div class="cabeza">
         <div><div class="suave"><a href="#/cola">← Cola</a></div><h1>${esc(l.empresa)}</h1>
-          <div class="suave">${esc([l.contacto, l.cargo].filter(Boolean).join(' · ') || 'Sin contacto')}</div></div>
-        <span class="chip etapa" style="font-size:13px">${esc(etiqueta(meta.etapas, l.etapa))}</span>
+          <div class="suave">${esc([l.contacto, l.cargo].filter(Boolean).join(' · ') || 'Sin contacto')}${l.ciudad ? ' · ' + esc(l.ciudad) : ''}</div></div>
+        <div style="text-align:right">
+          <span class="chip etapa" style="font-size:13px">${esc(etiqueta(meta.etapas, l.etapa))}</span>
+          ${l.razon_descarte ? `<div class="suave" style="font-size:12px;margin-top:4px">${esc(meta.razonLabel[l.razon_descarte] || l.razon_descarte)}</div>` : ''}
+          ${l.reunion_ms ? `<div class="suave" style="font-size:12px;margin-top:4px">Reunión: ${fechaHora(l.reunion_ms)}</div>` : ''}
+          ${l.deal_id ? `<div style="font-size:12px;margin-top:4px"><a href="/#/deal/${l.deal_id}" target="_blank" rel="noopener">Deal #${l.deal_id} en el Sandler ↗</a></div>` : ''}
+        </div>
       </div>
+      <div id="msg"></div>
       <div class="ficha">
-        <div class="panel">
-          <h2>Datos</h2>
-          <dl>
-            <dt>Teléfono</dt><dd class="num">${esc(telVisible(l.telefono) || '—')}${l.telefono_original && l.telefono && l.telefono_original !== telVisible(l.telefono) ? ` <span class="suave">(archivo: ${esc(l.telefono_original)})</span>` : ''}</dd>
-            <dt>Correo</dt><dd>${esc(l.email || '—')}</dd>
-            <dt>Ciudad</dt><dd>${esc(l.ciudad || '—')}</dd>
-            <dt>Fuente</dt><dd>${esc(l.fuente || '—')}</dd>
-            <dt>Cargado</dt><dd>${fechaHora(l.created_ms)}</dd>
-          </dl>
-          <p class="suave" style="margin:14px 0 0;font-size:12px">Llamar y registrar toques llega en las fases 2 y 3.</p>
+        <div>
+          <div class="panel">
+            <h2>Acciones</h2>
+            ${deAngie ? `
+              ${proxima ? `<p class="suave" style="margin:0 0 10px">Siguiente toque: <b>${esc(etiqueta(meta.canales, proxima.canal))}</b> · ${fecha(proxima.due_ms)}</p>` : '<p class="suave" style="margin:0 0 10px">Sin próximo toque programado.</p>'}
+              <div class="acciones" style="margin-top:0">
+                <button class="btn primario grande" id="llamar" ${puedeLlamar ? '' : 'disabled'} title="${puedeLlamar ? 'Llama desde el navegador' : (l.telefono ? (tel.motivo ? tel.motivo() : 'La telefonía no está configurada todavía') : 'El lead no tiene teléfono')}">📞 Llamar ${esc(telVisible(l.telefono) || '')}</button>
+                <button class="btn" id="llamada-manual" ${l.telefono ? '' : 'disabled'}>Registrar llamada hecha por fuera</button>
+              </div>
+              <div id="llamada-estado" class="suave" style="min-height:18px;margin:6px 0">${!puedeLlamar && l.telefono && tel.motivo ? esc(tel.motivo()) : ''}</div>
+              <div class="acciones">
+                <button class="btn" data-toque="whatsapp" ${l.telefono ? '' : 'disabled'}>WhatsApp enviado</button>
+                <button class="btn" data-toque="correo" ${l.email ? '' : 'disabled'}>Correo enviado</button>
+                <button class="btn" data-toque="linkedin">LinkedIn enviado</button>
+                <button class="btn peligro" id="descartar">Descartar</button>
+              </div>
+              <p class="suave" style="font-size:12px;margin:0">${l.telefono ? `<a href="${waLink(l.telefono)}" target="_blank" rel="noopener">Abrir WhatsApp ↗</a>` : ''}${l.email ? ` · <a href="mailto:${esc(l.email)}">Escribir correo ↗</a>` : ''}</p>`
+            : l.etapa === 'descartado' ? '<p class="suave" style="margin:0">Lead descartado. No hay acciones.</p>'
+            : `<p class="suave" style="margin:0 0 10px">Desde aquí decide la ejecutiva comercial.</p>
+              <div class="acciones" style="margin-top:0">
+                ${l.etapa === 'reunion_agendada' ? `<button class="btn primario" data-ejecutiva="reunion_realizada">Reunión realizada</button>
+                <button class="btn" data-ejecutiva="no_show">No se presentó</button>` : ''}
+                ${['reunion_agendada', 'reunion_realizada'].includes(l.etapa) ? `<button class="btn primario" data-ejecutiva="calificado">Calificado</button>` : ''}
+                ${l.etapa !== 'calificado' ? `<button class="btn peligro" id="descartar">Descartar</button>` : ''}
+              </div>`}
+          </div>
+          <div class="panel" style="margin-top:16px">
+            <h2>Datos</h2>
+            <dl>
+              <dt>Teléfono</dt><dd class="num">${esc(telVisible(l.telefono) || '—')}${l.telefono_original && l.telefono && l.telefono_original !== telVisible(l.telefono) ? ` <span class="suave">(archivo: ${esc(l.telefono_original)})</span>` : ''}</dd>
+              <dt>Correo</dt><dd>${esc(l.email || '—')}</dd>
+              <dt>Ciudad</dt><dd>${esc(l.ciudad || '—')}</dd>
+              <dt>Fuente</dt><dd>${esc(l.fuente || '—')}</dd>
+              <dt>Cargado</dt><dd>${fechaHora(l.created_ms)}</dd>
+            </dl>
+          </div>
         </div>
         <div class="panel">
-          <h2>Secuencia</h2>
+          <h2>Historial</h2>
+          ${l.toques.length ? `<ul class="pasos historial">${l.toques.map(pintaToque).join('')}</ul>` : '<p class="suave" style="margin:0 0 14px">Todavía no hay toques registrados.</p>'}
+          <h2 style="margin-top:16px">Secuencia</h2>
           <ul class="pasos">${l.tareas.map(t => `<li>
             <span class="n">${t.paso}</span>
             <span class="chip ${t.canal}">${esc(etiqueta(meta.canales, t.canal))}</span>
             <span class="${t.estado !== 'pendiente' ? 'hecha' : ''}">${fecha(t.due_ms)}</span>
             <span class="suave" style="margin-left:auto;font-size:12px">${esc(t.estado)}</span>
           </li>`).join('')}</ul>
-          <h2 style="margin-top:16px">Toques</h2>
-          ${l.toques.length ? '' : '<p class="suave" style="margin:0">Todavía no hay toques registrados.</p>'}
         </div>
-      </div>`;
+      </div>
+      <div id="modal"></div>`;
+
+    const $msg = document.getElementById('msg');
+    const despues = r => {
+      const partes = [`Registrado. Etapa: ${etiqueta(meta.etapas, r.etapa)}.`];
+      if (r.proxima) partes.push(`Próximo toque: ${etiqueta(meta.canales, r.proxima.canal)} el ${fecha(new Date(r.proxima.due_at).getTime())}.`);
+      (r.avisos || []).forEach(a => partes.push(a));
+      avisar(partes.join(' '), (r.avisos || []).length ? 'aviso' : 'ok');
+    };
+
+    // Toques de un clic
+    $app.querySelectorAll('[data-toque]').forEach(b => b.addEventListener('click', async () => {
+      const canal = b.dataset.toque;
+      if (canal === 'whatsapp' && l.telefono) window.open(waLink(l.telefono), '_blank', 'noopener');
+      if (canal === 'correo' && l.email) window.open('mailto:' + l.email, '_self');
+      b.disabled = true;
+      try { despues(await api(`leads/${l.id}/toques`, { method: 'POST', body: { canal } })); location.hash = '#/cola'; }
+      catch (e) { $msg.innerHTML = pintarError(e); b.disabled = false; }
+    }));
+
+    // Ejecutiva
+    $app.querySelectorAll('[data-ejecutiva]').forEach(b => b.addEventListener('click', async () => {
+      const accion = b.dataset.ejecutiva;
+      const nota = window.prompt('Nota (opcional):', '') ;
+      if (nota === null) return;
+      b.disabled = true;
+      try { despues(await api(`leads/${l.id}/ejecutiva`, { method: 'POST', body: { accion, nota } })); await vistaLead(l.id); }
+      catch (e) { $msg.innerHTML = pintarError(e); b.disabled = false; }
+    }));
+
+    const $desc = document.getElementById('descartar');
+    if ($desc) $desc.addEventListener('click', () => abrirResultado(l, { soloDescarte: true }));
+
+    const $manual = document.getElementById('llamada-manual');
+    if ($manual) $manual.addEventListener('click', () => abrirResultado(l, {}));
+
+    const $llamar = document.getElementById('llamar');
+    if ($llamar && puedeLlamar) $llamar.addEventListener('click', () => {
+      const $estado = document.getElementById('llamada-estado');
+      const uuid = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+      $llamar.disabled = true; $llamar.textContent = 'Colgar';
+      let enCurso = true;
+      const colgar = () => { if (enCurso) tel.colgar(); };
+      $llamar.disabled = false; $llamar.onclick = colgar;
+      tel.llamar({ lead: l, uuid }, {
+        estado: txt => { $estado.textContent = txt; },
+        fin: info => {
+          enCurso = false;
+          $llamar.textContent = '📞 Llamar ' + (telVisible(l.telefono) || ''); $llamar.onclick = null;
+          $estado.textContent = info && info.error ? 'Error: ' + info.error : 'Llamada terminada.';
+          if (!(info && info.cancelada)) abrirResultado(l, { callUuid: uuid, obligatorio: true });
+        },
+      });
+    });
+  }
+
+  // Diálogo de resultado de la llamada (obligatorio al colgar) o de descarte.
+  function abrirResultado(l, { callUuid = null, obligatorio = false, soloDescarte = false } = {}) {
+    const $modal = document.getElementById('modal');
+    const resultados = soloDescarte ? meta.resultados.filter(r => r.id === 'descartado') : meta.resultados;
+    const enUnaHora = new Date(Date.now() + 3600 * 1000);
+    $modal.innerHTML = `
+      <div class="velo"><form class="dialogo" id="frm">
+        <h2>${soloDescarte ? 'Descartar lead' : 'Resultado de la llamada'}</h2>
+        ${obligatorio ? '<p class="suave" style="margin:0 0 10px">Obligatorio: la llamada no queda registrada hasta que elijas un resultado.</p>' : ''}
+        <div class="opciones">${resultados.map((r, i) => `<label class="opcion"><input type="radio" name="resultado" value="${r.id}" ${soloDescarte || (i === 0 && false) ? 'checked' : ''} required> ${esc(r.label)}</label>`).join('')}</div>
+        <div id="campos-descarte" hidden>
+          <label>Razón</label>
+          <select name="razon">${meta.razones.map(r => `<option value="${r.id}">${esc(r.label)}</option>`).join('')}</select>
+        </div>
+        <div id="campos-reunion" hidden>
+          <label>Fecha y hora de la reunión</label>
+          <input type="datetime-local" name="reunion_at" value="${fechaLocal(enUnaHora)}" />
+          <div class="dos">
+            <div><label>Ejecutiva que atiende</label><input name="ejecutiva" placeholder="Luisa" /></div>
+            <div><label>Línea de negocio</label><select name="linea_negocio"><option value="">—</option><option>Headhunting</option><option>EOR</option><option>SaaS</option></select></div>
+          </div>
+          <label>Cargos que necesita</label><input name="ficha_cargos" placeholder="Ej. 2 devs backend senior, 1 QA" />
+          <div class="dos">
+            <div><label>Costo de la vacante abierta</label><input name="ficha_costo" placeholder="Ej. $8M/mes por dev sin contratar" /></div>
+            <div><label>Herramientas actuales</label><input name="ficha_herramientas" placeholder="Ej. LinkedIn, Computrabajo" /></div>
+          </div>
+          <div class="dos">
+            <div><label>Actitud / interés</label><input name="actitud" placeholder="Ej. muy interesada, pidió propuesta" /></div>
+            <div><label>Urgencia (¿por qué ahora?)</label><input name="urgencia" placeholder="Ej. proyecto arranca en octubre" /></div>
+          </div>
+        </div>
+        <label>Nota</label>
+        <textarea name="nota" rows="3" placeholder="Lo que valga la pena recordar de esta llamada"></textarea>
+        <div class="acciones">
+          <button class="btn primario" type="submit">Guardar</button>
+          ${obligatorio ? '' : '<button class="btn" type="button" id="cancelar">Cancelar</button>'}
+        </div>
+        <div id="frm-error"></div>
+      </form></div>`;
+    const $frm = document.getElementById('frm');
+    const mostrar = () => {
+      const v = ($frm.querySelector('input[name=resultado]:checked') || {}).value;
+      document.getElementById('campos-descarte').hidden = v !== 'descartado';
+      document.getElementById('campos-reunion').hidden = v !== 'reunion_agendada';
+    };
+    $frm.querySelectorAll('input[name=resultado]').forEach(r => r.addEventListener('change', mostrar));
+    mostrar();
+    const $cancelar = document.getElementById('cancelar');
+    if ($cancelar) $cancelar.addEventListener('click', () => { $modal.innerHTML = ''; });
+    $frm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const f = new FormData($frm);
+      const resultado = f.get('resultado');
+      if (!resultado) return;
+      const body = { nota: f.get('nota') || '' };
+      let ruta;
+      if (soloDescarte) {
+        ruta = `leads/${l.id}/ejecutiva`;
+        Object.assign(body, { accion: 'descartado', razon: f.get('razon') });
+      } else {
+        ruta = `leads/${l.id}/toques`;
+        Object.assign(body, { canal: 'llamada', resultado, call_uuid: callUuid });
+        if (resultado === 'descartado') body.razon = f.get('razon');
+        if (resultado === 'reunion_agendada') {
+          const local = f.get('reunion_at');
+          body.detalle = {
+            reunion_at: local ? new Date(local + ':00-05:00').toISOString() : null,
+            ejecutiva: f.get('ejecutiva'), linea_negocio: f.get('linea_negocio'),
+            ficha_cargos: f.get('ficha_cargos'), ficha_costo: f.get('ficha_costo'), ficha_herramientas: f.get('ficha_herramientas'),
+            actitud: f.get('actitud'), urgencia: f.get('urgencia'),
+          };
+        }
+      }
+      $frm.querySelector('button[type=submit]').disabled = true;
+      try {
+        const r = await api(ruta, { method: 'POST', body });
+        $modal.innerHTML = '';
+        const partes = [`Registrado. Etapa: ${etiqueta(meta.etapas, r.etapa)}.`];
+        if (r.proxima) partes.push(`Próximo toque: ${etiqueta(meta.canales, r.proxima.canal)} el ${fecha(new Date(r.proxima.due_at).getTime())}.`);
+        (r.avisos || []).forEach(a => partes.push(a));
+        avisar(partes.join(' '), (r.avisos || []).length ? 'aviso' : 'ok');
+        if (location.hash === '#/cola') render(); else location.hash = '#/cola';
+      } catch (err) {
+        document.getElementById('frm-error').innerHTML = pintarError(err);
+        $frm.querySelector('button[type=submit]').disabled = false;
+      }
+    });
   }
 
   // ---------------------------------------------------------------- router

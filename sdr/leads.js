@@ -51,15 +51,18 @@ async function detalleLead(db, id) {
   if (!Number.isInteger(id)) throw error(400, 'id inválido');
   const l = await db.query(
     `SELECT id, empresa, contacto, cargo, telefono, telefono_original, email, ciudad, fuente, etapa,
-            razon_descarte, deal_id, import_id, ${ms('created_at')} AS created_ms, ${ms('etapa_at')} AS etapa_ms
+            razon_descarte, deal_id, import_id, ${ms('created_at')} AS created_ms, ${ms('etapa_at')} AS etapa_ms,
+            ${ms('reunion_at')} AS reunion_ms
      FROM ${T.leads} WHERE id = $1`, [id]);
   if (!l.rows.length) throw error(404, 'Lead no encontrado');
   const tareas = await db.query(
     `SELECT id, paso, canal, estado, ${ms('due_at')} AS due_ms, ${ms('done_at')} AS done_ms
      FROM ${T.tasks} WHERE lead_id = $1 ORDER BY paso`, [id]);
   const toques = await db.query(
-    `SELECT id, task_id, canal, resultado, razon_descarte, nota, ${ms('created_at')} AS created_ms
-     FROM ${T.touches} WHERE lead_id = $1 ORDER BY created_at DESC`, [id]);
+    `SELECT t.id, t.task_id, t.canal, t.resultado, t.razon_descarte, t.nota, t.detalle, t.call_id,
+            ${ms('t.created_at')} AS created_ms, c.duracion_s, c.record_url, c.origen AS call_origen
+     FROM ${T.touches} t LEFT JOIN ${T.calls} c ON c.id = t.call_id
+     WHERE t.lead_id = $1 ORDER BY t.created_at DESC, t.id DESC`, [id]);
   return { ...l.rows[0], tareas: tareas.rows, toques: toques.rows };
 }
 

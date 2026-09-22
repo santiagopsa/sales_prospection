@@ -101,3 +101,23 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .pasos li:last-child { border-bottom: 0; }
 .pasos .n { width: 22px; color: var(--suave); font-weight: 700; font-size: 12px; }
 .pasos .hecha { color: var(--suave); text-decoration: line-through; }
+
+/* acciones y diálogo */
+.btn.grande { font-size: 15px; padding: 11px 20px; }
+.btn.peligro { color: var(--mal); border-color: #f3c4c4; }
+.btn.peligro:hover { background: var(--mal-bg); }
+.historial li { align-items: flex-start; }
+.chip.ejecutiva { background: #fdf4ff; color: #86198f; }
+.velo { position: fixed; inset: 0; background: rgba(20, 30, 40, .45); display: grid; place-items: center; padding: 16px; z-index: 20; overflow: auto; }
+.dialogo { background: var(--panel); border-radius: var(--r); padding: 20px; width: 100%; max-width: 560px; max-height: calc(100vh - 32px); overflow: auto; }
+.dialogo label { display: block; font-size: 12px; font-weight: 600; color: var(--suave); margin: 10px 0 4px; }
+.dialogo input, .dialogo select, .dialogo textarea { font: inherit; width: 100%; padding: 8px 10px; border: 1px solid var(--linea); border-radius: 8px; }
+.dialogo .dos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 520px) { .dialogo .dos { grid-template-columns: 1fr; } }
+.opciones { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.opcion { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--linea); border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; color: var(--texto); margin: 0; }
+.opcion:has(input:checked) { border-color: var(--azul-osc); background: #e6f9ff; }
+.opcion input { margin: 0; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #1a2331; color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 13px; max-width: min(90vw, 640px); z-index: 30; box-shadow: 0 6px 24px rgba(0,0,0,.2); }
+.toast.aviso { background: var(--alerta); }
+.toast.error { background: var(--mal); }

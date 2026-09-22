@@ -14,6 +14,7 @@ const T = {
   leads: `${SCHEMA}.leads`,
   tasks: `${SCHEMA}.tasks`,
   touches: `${SCHEMA}.touches`,
+  calls: `${SCHEMA}.calls`,
 };
 
 const lista = xs => xs.map(x => `'${x}'`).join(',');
@@ -91,6 +92,43 @@ const MIGRACIONES = [
      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
    )`,
   `CREATE INDEX IF NOT EXISTS sdr_touches_lead ON ${T.touches}(lead_id, created_at)`,
+
+  // ---- M2 · Llamadas (fase 2 y 3) -------------------------------------------------------
+  // Una fila por llamada, venga del navegador (Voximplant) o registrada a mano. `uuid` lo
+  // genera el navegador antes de marcar, y viaja en customData al escenario: así el resultado
+  // que Angie registra al colgar y el webhook de Voximplant (que llega después, con la
+  // grabación) caen en la misma fila aunque lleguen en cualquier orden.
+  `CREATE TABLE IF NOT EXISTS ${T.calls} (
+     id SERIAL PRIMARY KEY,
+     uuid TEXT UNIQUE,
+     lead_id INT NOT NULL REFERENCES ${T.leads}(id) ON DELETE CASCADE,
+     touch_id INT REFERENCES ${T.touches}(id) ON DELETE SET NULL,
+     origen TEXT NOT NULL DEFAULT 'manual' CHECK (origen IN ('voximplant','manual')),
+     telefono TEXT,
+     started_at TIMESTAMPTZ,
+     answered_at TIMESTAMPTZ,
+     ended_at TIMESTAMPTZ,
+     duracion_s INT,
+     vox_call_id TEXT,
+     vox_estado TEXT,
+     record_url TEXT,
+     pipeline_status TEXT NOT NULL DEFAULT 'no_aplica',
+     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+   )`,
+  `CREATE INDEX IF NOT EXISTS sdr_calls_lead ON ${T.calls}(lead_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS sdr_calls_pipeline ON ${T.calls}(pipeline_status) WHERE pipeline_status <> 'no_aplica'`,
+  // El toque de una llamada apunta a su fila de calls; el resultado vive en el toque.
+  `ALTER TABLE ${T.touches} ADD COLUMN IF NOT EXISTS call_id INT REFERENCES ${T.calls}(id) ON DELETE SET NULL`,
+  // Lo que Angie anota al agendar: fecha de la reunión y ficha para la ejecutiva. Va en el
+  // toque porque es lo que se dijo en ESA llamada; el deal del Sandler recibe una copia.
+  `ALTER TABLE ${T.touches} ADD COLUMN IF NOT EXISTS detalle JSONB`,
+  `ALTER TABLE ${T.leads} ADD COLUMN IF NOT EXISTS reunion_at TIMESTAMPTZ`,
+  // Las acciones de la ejecutiva (reunión realizada, no-show, calificado) quedan en el historial
+  // del lead como toques con canal 'ejecutiva'. El CHECK original solo admitía los canales de Angie.
+  `ALTER TABLE ${T.touches} DROP CONSTRAINT IF EXISTS touches_canal_check`,
+  `ALTER TABLE ${T.touches} DROP CONSTRAINT IF EXISTS sdr_touches_canal_check`,
+  `ALTER TABLE ${T.touches} ADD CONSTRAINT sdr_touches_canal_check CHECK (canal IN (${lista(CANALES)}, 'ejecutiva'))`,
 ];
 
 async function initSchema(db, log = console) {

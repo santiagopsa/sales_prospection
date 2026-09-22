@@ -21,7 +21,7 @@ function router({ pool, config = baseConfig }) {
   for (const [metodo, ruta, handler] of rutas({ db: pool, config })) {
     r[metodo](ruta, async (req, res) => {
       try {
-        res.json(await handler({ params: req.params, query: req.query, body: req.body }));
+        res.json(await handler({ params: req.params, query: req.query, body: req.body, headers: req.headers }));
       } catch (e) {
         if (!e.status) console.error('[sdr]', req.method, req.originalUrl, e);
         res.status(e.status || 500).json({ error: e.status ? e.message : 'Error interno. El detalle quedó en el registro del servidor.' });

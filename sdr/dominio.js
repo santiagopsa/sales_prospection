@@ -21,4 +21,41 @@ const CANALES = ['llamada', 'whatsapp', 'correo', 'linkedin'];
 
 const CANAL_LABEL = { llamada: 'Llamada', whatsapp: 'WhatsApp', correo: 'Correo', linkedin: 'LinkedIn' };
 
-module.exports = { ETAPAS, ETAPA_LABEL, ETAPAS_DE_ANGIE, CANALES, CANAL_LABEL };
+// Resultados cerrados de una llamada. Los toques por otro canal usan el nombre del canal
+// como resultado ("whatsapp" = WhatsApp enviado).
+const RESULTADOS_LLAMADA = ['no_contesto', 'buzon', 'gatekeeper', 'conversacion', 'reunion_agendada', 'descartado'];
+
+const RESULTADO_LABEL = {
+  no_contesto: 'No contestó',
+  buzon: 'Buzón',
+  gatekeeper: 'Gatekeeper',
+  conversacion: 'Conversación sin reunión',
+  reunion_agendada: 'Reunión agendada',
+  descartado: 'Descartado',
+  whatsapp: 'WhatsApp enviado',
+  correo: 'Correo enviado',
+  linkedin: 'LinkedIn enviado',
+  // registrados por la ejecutiva comercial
+  reunion_realizada: 'Reunión realizada',
+  no_show: 'No se presentó',
+  calificado: 'Calificado',
+};
+
+// Solo estos resultados pasan por el pipeline de audio (fase 4).
+const RESULTADOS_CON_CONVERSACION = ['conversacion', 'reunion_agendada'];
+
+const RAZONES_DESCARTE = ['sin_necesidad', 'sin_presupuesto', 'ya_tiene_proveedor', 'no_es_decisor', 'sin_respuesta', 'otro'];
+
+const RAZON_LABEL = {
+  sin_necesidad: 'Sin necesidad',
+  sin_presupuesto: 'Sin presupuesto',
+  ya_tiene_proveedor: 'Ya tiene proveedor',
+  no_es_decisor: 'No es el decisor',
+  sin_respuesta: 'Nunca respondió',
+  otro: 'Otro',
+};
+
+module.exports = {
+  ETAPAS, ETAPA_LABEL, ETAPAS_DE_ANGIE, CANALES, CANAL_LABEL,
+  RESULTADOS_LLAMADA, RESULTADO_LABEL, RESULTADOS_CON_CONVERSACION, RAZONES_DESCARTE, RAZON_LABEL,
+};
