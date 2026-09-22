@@ -43,7 +43,7 @@ function firmarLogin(env, key) {
 }
 
 // Webhook del escenario. Se compara el secreto en tiempo constante.
-async function recibirWebhook(db, env, headers, body) {
+async function recibirWebhook(db, env, headers, body, config = require('../config')) {
   const v = leerEnv(env);
   const recibido = String(headers['x-sdr-secret'] || '');
   const esperado = String(v.secreto || '');
@@ -57,9 +57,12 @@ async function recibirWebhook(db, env, headers, body) {
   const fecha = x => (x && !isNaN(Date.parse(x))) ? new Date(x).toISOString() : null;
   const duracion = Number.isFinite(Number(b.duracion_s)) ? Math.max(0, Math.round(Number(b.duracion_s))) : null;
   const r = await db.query(
-    `INSERT INTO ${T.calls} (uuid, lead_id, origen, telefono, started_at, answered_at, ended_at, duracion_s, vox_call_id, vox_estado, record_url, pipeline_status)
-     VALUES ($1, $2, 'voximplant', $3, $4, $5, $6, $7, $8, $9, $10, 'pendiente_resultado')
+    `INSERT INTO ${T.calls} (uuid, lead_id, origen, telefono, started_at, answered_at, ended_at, duracion_s, vox_call_id, vox_estado, record_url, pipeline_status, vox_codigo, vox_motivo, vox_intentos)
+     VALUES ($1, $2, 'voximplant', $3, $4, $5, $6, $7, $8, $9, $10, 'pendiente_resultado', $11, $12, $13)
      ON CONFLICT (uuid) DO UPDATE SET
+       vox_codigo = COALESCE(EXCLUDED.vox_codigo, ${T.calls}.vox_codigo),
+       vox_motivo = COALESCE(EXCLUDED.vox_motivo, ${T.calls}.vox_motivo),
+       vox_intentos = COALESCE(EXCLUDED.vox_intentos, ${T.calls}.vox_intentos),
        telefono = COALESCE(EXCLUDED.telefono, ${T.calls}.telefono),
        started_at = COALESCE(EXCLUDED.started_at, ${T.calls}.started_at),
        answered_at = COALESCE(EXCLUDED.answered_at, ${T.calls}.answered_at),
@@ -70,8 +73,10 @@ async function recibirWebhook(db, env, headers, body) {
        record_url = COALESCE(EXCLUDED.record_url, ${T.calls}.record_url),
        updated_at = NOW()
      RETURNING id, touch_id`,
-    [String(b.uuid), leadId, b.telefono || null, fecha(b.started_at), fecha(b.answered_at), fecha(b.ended_at), duracion, b.vox_call_id || null, b.estado || null, b.record_url || null]);
-  return { ok: true, call_id: r.rows[0].id };
+    [String(b.uuid), leadId, b.telefono || null, fecha(b.started_at), fecha(b.answered_at), fecha(b.ended_at), duracion, b.vox_call_id || null, b.estado || null, b.record_url || null,
+     b.codigo != null ? String(b.codigo) : null, b.motivo || null, Number.isInteger(Number(b.intentos)) && b.intentos != null ? Number(b.intentos) : null]);
+  const estado = await require('../pipeline').revisarLlamada(db, config, r.rows[0].id);
+  return { ok: true, call_id: r.rows[0].id, pipeline: estado };
 }
 
 module.exports = { leerEnv, configPublica, firmarLogin, recibirWebhook };

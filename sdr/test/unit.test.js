@@ -126,3 +126,22 @@ test('fijos viejos de Colombia y el "+1 571" de Apollo', () => {
   assert.strictEqual(N.normalizarTelefono('+1 571-702-6044', null, { TELEFONO_1_571_ES_BOGOTA: false }).e164, '+15717026044');
   assert.strictEqual(e('+1 212-555-0100'), '+12125550100');    // otros +1 se respetan
 });
+
+test('sumarMeses: fin de mes se recorta y el año rueda', () => {
+  const tiempo = require('../tiempo');
+  assert.strictEqual(tiempo.sumarMeses('2026-09-21', 3), '2026-12-21');
+  assert.strictEqual(tiempo.sumarMeses('2026-11-30', 3), '2027-02-28');
+  assert.strictEqual(tiempo.sumarMeses('2026-01-31', 1), '2026-02-28');
+  assert.strictEqual(tiempo.sumarMeses('2026-12-15', 1), '2027-01-15');
+});
+
+test('mesesReintento: por defecto según la razón, definitivas nunca, valida opciones', () => {
+  const { mesesReintento } = require('../resultados');
+  const cfg = require('../config');
+  assert.strictEqual(mesesReintento(cfg, 'sin_presupuesto', undefined), 3);
+  assert.strictEqual(mesesReintento(cfg, 'no_es_decisor', undefined), null);
+  assert.strictEqual(mesesReintento(cfg, 'no_contactar', 6), null);
+  assert.strictEqual(mesesReintento(cfg, 'sin_presupuesto', '6'), 6);
+  assert.strictEqual(mesesReintento(cfg, 'sin_presupuesto', 0), null);
+  assert.throws(() => mesesReintento(cfg, 'sin_presupuesto', 4), /1, 3, 6/);
+});

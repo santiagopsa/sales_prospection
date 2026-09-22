@@ -39,23 +39,34 @@ const RESULTADO_LABEL = {
   reunion_realizada: 'Reunión realizada',
   no_show: 'No se presentó',
   calificado: 'Calificado',
+  // decisiones sobre el lead (sacar de la cola / volver)
+  pausado: 'En pausa',
+  reactivado: 'Reactivado',
+  editado: 'Datos editados',
 };
 
 // Solo estos resultados pasan por el pipeline de audio (fase 4).
 const RESULTADOS_CON_CONVERSACION = ['conversacion', 'reunion_agendada'];
 
-const RAZONES_DESCARTE = ['sin_necesidad', 'sin_presupuesto', 'ya_tiene_proveedor', 'no_es_decisor', 'sin_respuesta', 'otro'];
+// Razones para sacar un lead de la cola. Con una razón "no ahora" (sin presupuesto, ya tiene
+// proveedor…) el lead se puede PAUSAR en vez de descartar: vuelve solo a la cola meses después
+// (REINTENTO_POR_RAZON en config). Las definitivas nunca ofrecen reintento.
+const RAZONES_DESCARTE = ['no_interesa', 'sin_necesidad', 'sin_presupuesto', 'ya_tiene_proveedor', 'no_es_decisor', 'no_contactar', 'datos_malos', 'sin_respuesta', 'otro'];
+const RAZONES_DEFINITIVAS = ['no_contactar', 'datos_malos', 'sin_respuesta'];
 
 const RAZON_LABEL = {
+  no_interesa: 'No le interesa',
   sin_necesidad: 'Sin necesidad',
   sin_presupuesto: 'Sin presupuesto',
   ya_tiene_proveedor: 'Ya tiene proveedor',
   no_es_decisor: 'No es el decisor',
+  no_contactar: 'Pidió que no lo contacten',
+  datos_malos: 'Número o correo equivocado',
   sin_respuesta: 'Nunca respondió',
   otro: 'Otro',
 };
 
 module.exports = {
   ETAPAS, ETAPA_LABEL, ETAPAS_DE_ANGIE, CANALES, CANAL_LABEL,
-  RESULTADOS_LLAMADA, RESULTADO_LABEL, RESULTADOS_CON_CONVERSACION, RAZONES_DESCARTE, RAZON_LABEL,
+  RESULTADOS_LLAMADA, RESULTADO_LABEL, RESULTADOS_CON_CONVERSACION, RAZONES_DESCARTE, RAZONES_DEFINITIVAS, RAZON_LABEL,
 };

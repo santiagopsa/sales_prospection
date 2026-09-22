@@ -32,6 +32,27 @@ test('escenario: incrusta caller id, aviso y webhook, y es JS válido', () => {
   assert.ok(s.includes('Hola \\"Peaku\\"'));
   assert.ok(s.includes('X-SDR-Secret: '));
   assert.ok(s.includes('stereo: true'));
+  // Reintentos, mensajes y tono real hacia Angie
+  const cfg = require('../config');
+  const s2 = generarEscenario({ callerId: '+57', webhookUrl: 'u', secreto: 's', aviso: '', voz: cfg.VOZ_AVISO, reintentos: 2, codigosReintento: [404, 503], pausaReintentoS: 2, mensajes: cfg.MENSAJES_LLAMADA });
+  new (require('vm').Script)(s2);
+  assert.ok(s2.includes('const REINTENTOS = 2'));
+  assert.ok(s2.includes('const CODIGOS_REINTENTO = [404,503]'));
+  assert.ok(s2.includes('PAUSA_REINTENTO_MS = 2000'));
+  assert.ok(s2.includes('angie.answer()'));
+  assert.ok(s2.includes('sendMessage'));
+  assert.ok(s2.includes(cfg.MENSAJES_LLAMADA.numero_invalido.slice(0, 20)));
+});
+
+test('escenario: clasificar códigos SIP del operador', () => {
+  const s = generarEscenario({ callerId: '+57', webhookUrl: 'u', secreto: 's', aviso: '', voz: 'x' });
+  const fn = new Function(s.slice(s.indexOf('function clasificar'), s.indexOf('VoxEngine.addEventListener')) + '; return clasificar;')();
+  assert.strictEqual(fn(404, 'Not Here'), 'numero_invalido');
+  assert.strictEqual(fn(480, 'Temporarily not available'), 'no_contesto');
+  assert.strictEqual(fn(487, ''), 'no_contesto');
+  assert.strictEqual(fn(486, 'Busy Here'), 'ocupado');
+  assert.strictEqual(fn(503, 'Service Unavailable'), 'fallo_central');
+  assert.strictEqual(fn(603, 'Decline'), 'rechazada');
 });
 
 test('jwt del service account: RS256 verificable', () => {
@@ -105,6 +126,7 @@ test('webhook contra Postgres', { skip: !process.env.SDR_TEST_DATABASE_URL && 's
   const { registrarToque } = require('../resultados');
   const config = require('../config');
   const db = conectar(process.env.SDR_TEST_DATABASE_URL);
+  process.on('exit', () => { try { db.end(); } catch (_) {} });
   await db.query('DROP SCHEMA IF EXISTS sdr CASCADE');
   await initSchema(db, { log() {}, error: console.error });
   const lead = (await db.query(`INSERT INTO sdr.leads (empresa, telefono) VALUES ('ACME', '+573001234567') RETURNING id`)).rows[0];
@@ -133,5 +155,25 @@ test('webhook contra Postgres', { skip: !process.env.SDR_TEST_DATABASE_URL && 's
   assert.strictEqual(c2.touch_id, r2.toque_id);
   assert.strictEqual(c2.vox_estado, 'no_contesto');
   assert.strictEqual((await db.query('SELECT COUNT(*)::int AS n FROM sdr.calls')).rows[0].n, 2);
+
+  // Fallo del operador: código, motivo e intentos quedan; el reporte de Angie puede llegar antes que el webhook.
+  const L = require('../leads');
+  await L.reportarLlamada(db, { uuid: 'u3', leadId: lead.id, telefono: '+573001234567', codigo: 404, estado: 'numero_invalido', nota: 'desde el celular sí entra', usuario: 'Angie' });
+  await vox.recibirWebhook(db, ENV, { 'x-sdr-secret': 's3cr3t' }, { uuid: 'u3', lead_id: lead.id, estado: 'numero_invalido', codigo: 404, motivo: 'Not Here', intentos: 3, duracion_s: null });
+  const c3 = (await db.query(`SELECT * FROM sdr.calls WHERE uuid='u3'`)).rows[0];
+  assert.strictEqual(c3.vox_codigo, '404'); assert.strictEqual(c3.vox_motivo, 'Not Here'); assert.strictEqual(c3.vox_intentos, 3);
+  assert.match(c3.reporte, /Angie: desde el celular/);
+  assert.ok(c3.reportado_at);
+  assert.strictEqual((await db.query('SELECT COUNT(*)::int AS n FROM sdr.calls')).rows[0].n, 3);
+  const fallos = await L.fallosDeMarcacion(db);
+  assert.strictEqual(fallos.length, 1);
+  assert.strictEqual(fallos[0].fallos_del_numero, 1);
+  assert.strictEqual(fallos[0].contestadas_del_numero, 1);
+  assert.strictEqual((await L.pipeline(db)).fallos, 1);
+  await L.revisarFallo(db, c3.id);
+  assert.strictEqual((await L.pipeline(db)).fallos, 0);
+  assert.ok((await L.fallosDeMarcacion(db))[0].revisado_ms);
+  // La llamada fallida no entra al pipeline de audio ni cuenta como resultado.
+  assert.strictEqual(c3.pipeline_status, 'no_aplica');
   db.end();
 });

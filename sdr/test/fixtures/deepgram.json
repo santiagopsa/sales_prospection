@@ -1,0 +1,18 @@
+{
+  "metadata": { "request_id": "req-1", "duration": 71.4, "channels": 2, "models": ["m1"], "model_info": { "m1": { "name": "2-general-nova", "version": "2024-01-09" } } },
+  "results": {
+    "channels": [
+      { "alternatives": [ { "transcript": "Sí, dime. Sí, dos. ¿Cuánto cobran?", "words": [] } ] },
+      { "alternatives": [ { "transcript": "Hola, ¿hablo con Ana? Soy Angie de Peaku.", "words": [] } ] }
+    ],
+    "utterances": [
+      { "channel": 1, "start": 0.2, "end": 5.9, "transcript": "Hola, ¿hablo con Ana? Soy Angie.", "words": [{},{},{},{},{},{}] },
+      { "channel": 0, "start": 6.1, "end": 7.8, "transcript": "Sí, dime.", "words": [{},{}] },
+      { "channel": 1, "start": 8.0, "end": 20.0, "transcript": "¿Tienen vacantes de tecnología abiertas ahora mismo?", "words": [{},{},{},{},{},{},{},{}] },
+      { "channel": 0, "start": 20.5, "end": 24.0, "transcript": "Sí, dos de backend.", "words": [{},{},{},{}] },
+      { "channel": 1, "start": 24.2, "end": 60.0, "transcript": "Eh, te cuento, nosotros en Peaku hacemos headhunting tech, este, o sea, con una base de quinientos mil perfiles. ¿Te sirve que te muestre cómo?", "words": [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}] },
+      { "channel": 0, "start": 59.5, "end": 66.0, "transcript": "Puede ser. ¿Cuánto cobran?", "words": [{},{},{},{},{}] },
+      { "channel": 1, "start": 66.2, "end": 71.0, "transcript": "Te lo explico en una reunión corta.", "words": [{},{},{},{},{},{},{}] }
+    ]
+  }
+}

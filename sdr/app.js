@@ -34,4 +34,11 @@ function router({ pool, config = baseConfig }) {
   return r;
 }
 
-module.exports = { router, initSchema };
+// Crea el schema y, si hay DEEPGRAM_API_KEY, deja corriendo el pipeline de audio en segundo plano.
+async function arrancar(pool, config = baseConfig) {
+  await initSchema(pool);
+  require('./pipeline').iniciar(pool, config, process.env);
+  return true;
+}
+
+module.exports = { router, initSchema: arrancar, initSchemaSolo: initSchema };

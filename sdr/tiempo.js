@@ -40,10 +40,19 @@ function avanzar(fecha, n, saltarFinDeSemana) {
 }
 
 // Días completos entre dos instantes, medidos en fechas de Bogotá (no en horas).
+// Misma fecha `n` meses después; si ese mes no tiene el día, el último que tenga (31 ene + 1 → 28 feb).
+function sumarMeses(fecha, n) {
+  const [y, m, d] = fecha.split('-').map(Number);
+  const total = y * 12 + (m - 1) + n;
+  const ny = Math.floor(total / 12), nm = total % 12;
+  const ultimo = new Date(Date.UTC(ny, nm + 1, 0)).getUTCDate();
+  return `${ny}-${String(nm + 1).padStart(2, '0')}-${String(Math.min(d, ultimo)).padStart(2, '0')}`;
+}
+
 function diasEntre(desde, hasta) {
   const a = new Date(`${fechaBogota(desde)}T12:00:00Z`);
   const b = new Date(`${fechaBogota(hasta)}T12:00:00Z`);
   return Math.round((b - a) / 86400000);
 }
 
-module.exports = { OFFSET, fechaBogota, instante, diaSemana, sumarDias, aDiaHabil, avanzar, diasEntre, esFinDeSemana };
+module.exports = { OFFSET, fechaBogota, instante, diaSemana, sumarDias, sumarMeses, aDiaHabil, avanzar, diasEntre, esFinDeSemana };

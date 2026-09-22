@@ -12,6 +12,10 @@
 //   node sdr/cli.js vox:setup [--key ruta.json] [--url https://…] [--numero +57…] [--rotar]
 //                                                               deja Voximplant listo e imprime las variables de Render
 //   node sdr/cli.js vox:escenario                               imprime el escenario que se subiría (para revisarlo)
+//   node sdr/cli.js pipeline [--estado] [--call N] [--limite 5] transcribe las llamadas pendientes (necesita DEEPGRAM_API_KEY);
+//                                                               --estado muestra el conteo y los errores; --call N reprocesa una
+//   node sdr/cli.js metricas --call N                          muestra transcripción y métricas de una llamada; con --set
+//                                                               recalcula las métricas (PALABRAS_PITCH, MONOLOGO_LARGO_S…) y las guarda
 //
 // Ejemplos:
 //   node sdr/cli.js secuencia --set SALTAR_FINES_DE_SEMANA=false
@@ -87,7 +91,7 @@ async function main() {
   }
   if (cmd === 'vox:escenario') {
     const { generarEscenario } = require('./vox/escenario');
-    console.log(generarEscenario({ callerId: '+57XXXXXXXXXX', webhookUrl: (config.PUBLIC_URL_POR_DEFECTO || '') + '/sdr/api/vox/webhook', secreto: '(secreto)', aviso: config.AVISO_GRABACION, voz: config.VOZ_AVISO, avisoATodos: config.AVISO_TAMBIEN_A_ANGIE }));
+    console.log(generarEscenario({ callerId: '+57XXXXXXXXXX', webhookUrl: (config.PUBLIC_URL_POR_DEFECTO || '') + '/sdr/api/vox/webhook', secreto: '(secreto)', aviso: config.AVISO_GRABACION, voz: config.VOZ_AVISO, avisoATodos: config.AVISO_TAMBIEN_A_ANGIE, reintentos: config.LLAMADA_REINTENTOS, codigosReintento: config.LLAMADA_REINTENTAR_CODIGOS, pausaReintentoS: config.LLAMADA_PAUSA_REINTENTO_S, mensajes: config.MENSAJES_LLAMADA }));
     return;
   }
 
@@ -117,13 +121,13 @@ async function main() {
       const { T } = require('./schema');
       const n = async (tabla) => (await db.query(`SELECT COUNT(*)::int AS n FROM ${tabla}`)).rows[0].n;
       const deals = (await db.query(`SELECT COUNT(*)::int AS n FROM public.deals WHERE id IN (SELECT deal_id FROM ${T.leads} WHERE deal_id IS NOT NULL)`)).rows[0].n;
-      console.log(`\nEn la base: ${await n(T.leads)} leads · ${await n(T.tasks)} tareas · ${await n(T.touches)} toques · ${await n(T.calls)} llamadas · ${await n(T.imports)} cargas · ${deals} deals del SDR en el Sandler`);
+      console.log(`\nEn la base: ${await n(T.leads)} leads · ${await n(T.tasks)} tareas · ${await n(T.touches)} toques · ${await n(T.calls)} llamadas · ${await n(T.imports)} cargas · ${await n(T.lista_negra)} en lista negra · ${deals} deals del SDR en el Sandler`);
       if (!args.confirmar) { console.log('Nada borrado. Para borrar de verdad: node sdr/cli.js limpiar --confirmar'); return; }
       await db.query('BEGIN');
       try {
         await db.query(`DELETE FROM public.deals WHERE id IN (SELECT deal_id FROM ${T.leads} WHERE deal_id IS NOT NULL)`);
         await db.query(`DELETE FROM ${T.touches}`); await db.query(`DELETE FROM ${T.calls}`); await db.query(`DELETE FROM ${T.tasks}`);
-        await db.query(`DELETE FROM ${T.leads}`); await db.query(`DELETE FROM ${T.imports}`);
+        await db.query(`DELETE FROM ${T.leads}`); await db.query(`DELETE FROM ${T.imports}`); await db.query(`DELETE FROM ${T.lista_negra}`);
         await db.query('COMMIT');
       } catch (e) { await db.query('ROLLBACK'); throw e; }
       console.log('Borrado. El schema, la rúbrica y la configuración quedan intactos.');
@@ -138,12 +142,47 @@ async function main() {
       for (const d of inf.duplicados) console.log(`  dup  fila ${d.fila}: ${d.empresa} — ${d.motivo}`);
       for (const e of inf.errores) console.log(`  err  fila ${e.fila}: ${e.motivo}`);
       for (const a of inf.avisos) console.log(`  aviso fila ${a.fila}: ${a.avisos.join('; ')}`);
+    } else if (cmd === 'pipeline') {
+      const P = require('./pipeline');
+      if (args.estado || (!args.call && !process.env.DEEPGRAM_API_KEY)) {
+        const e = await P.estado(db);
+        console.log(`\nLlamadas por estado: ${Object.entries(e.conteo).map(([k, v]) => `${k} ${v}`).join(' · ') || 'ninguna'}`);
+        for (const x of e.errores) console.log(`  error llamada ${x.id} (lead ${x.lead_id}, ${x.pipeline_intentos} intentos): ${x.pipeline_error}`);
+        if (!process.env.DEEPGRAM_API_KEY) console.log('Sin DEEPGRAM_API_KEY en el entorno: no se transcribe nada.');
+        if (args.estado || !args.call) return;
+      }
+      if (args.call) {
+        await P.reencolar(db, args.call);
+        const r = await P.procesar(db, config, process.env, args.call, { forzar: true });
+        console.log(r.error ? `Llamada ${r.call_id}: ${r.estado} · ${r.error}` : `Llamada ${r.call_id}: ${r.estado} · ${r.turnos} turnos`);
+        if (r.metricas) imprimirMetricas(r.metricas);
+        return;
+      }
+      const rs = await P.correrPendientes(db, config, process.env, { limite: Number(args.limite) || 5 });
+      if (!rs.length) console.log('No hay llamadas pendientes.');
+      for (const r of rs) console.log(r.error ? `Llamada ${r.call_id}: ${r.estado} · ${r.error}` : `Llamada ${r.call_id}: ${r.estado} · ${r.turnos} turnos`);
+    } else if (cmd === 'metricas') {
+      const P = require('./pipeline');
+      if (!args.call) throw new Error('Falta --call N');
+      const t = await P.transcripcionDeLlamada(db, args.call);
+      if (!t.turnos) throw new Error(`La llamada ${args.call} está en "${t.pipeline_status}", sin transcripción.`);
+      console.log(`\nLlamada ${t.id} · ${t.empresa}${t.contacto ? ' · ' + t.contacto : ''} · ${t.duracion_s || '?'} s · resultado: ${t.resultado || '—'}`);
+      console.log(t.texto);
+      const m = args.set.length ? await P.recalcularMetricas(db, config, args.call) : t.metricas;
+      console.log(args.set.length ? '\nMétricas recalculadas y guardadas con los --set:' : '\nMétricas:');
+      imprimirMetricas(m);
     } else {
       throw new Error(`Comando desconocido: ${cmd}. Usa "node sdr/cli.js ayuda".`);
     }
   } finally {
     await (db.end ? db.end() : null);
   }
+}
+
+function imprimirMetricas(m) {
+  const { ETIQUETAS } = require('./pipeline/metricas');
+  for (const [k, [nombre, fmt]] of Object.entries(ETIQUETAS)) console.log(`  ${nombre.padEnd(28)} ${fmt(m[k])}`);
+  if (m.muletillas_detalle && Object.keys(m.muletillas_detalle).length) console.log(`  ${'Muletillas'.padEnd(28)} ${Object.entries(m.muletillas_detalle).map(([k, v]) => `${k} ×${v}`).join(', ')}`);
 }
 
 main().catch(e => { console.error('Error:', e.message); process.exit(1); });

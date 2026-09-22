@@ -105,6 +105,36 @@ module.exports = {
   AL_AGOTAR_SECUENCIA: 'huerfano',
 
   // ---------------------------------------------------------------------------
+  // Sacar un lead de la cola: descartar o pausar
+  // ---------------------------------------------------------------------------
+  // Qué mueve: cuando Angie saca un lead de la cola con una razón, cuántos MESES después se vuelve
+  // a intentar por defecto. null = descartado definitivo. Angie puede cambiar la propuesta en el
+  // diálogo; las razones definitivas (pidió no contacto, datos malos) nunca ofrecen reintento.
+  // La idea: "no ahora" no es "nunca". Un "sin presupuesto" en septiembre es un lead tibio en enero,
+  // y "ya tiene proveedor" cambia cuando ese contrato vence. Descartar de verdad se reserva para
+  // quien no encaja o pidió que no lo llamen.
+  // Ver el efecto: node sdr/cli.js cola --set REINTENTO_POR_RAZON.sin_presupuesto=1
+  REINTENTO_POR_RAZON: {
+    no_interesa: 6,
+    sin_necesidad: 6,
+    sin_presupuesto: 3,
+    ya_tiene_proveedor: 6,
+    no_es_decisor: null,
+    otro: null,
+  },
+  // Qué mueve: las opciones de meses que muestra el diálogo (además de "No, descartar").
+  OPCIONES_REINTENTO_MESES: [1, 3, 6],
+  // Qué mueve: con qué toques vuelve un lead en pausa cuando llega su fecha (mismo formato que
+  // SECUENCIA_POR_DEFECTO). Corta a propósito: ya lo conocen, no hace falta la cadencia completa.
+  // También es la secuencia con la que vuelve un lead descartado que se reactiva.
+  SECUENCIA_REINTENTO: [
+    { canal: 'llamada',  dias: 0 },
+    { canal: 'whatsapp', dias: 0 },
+    { canal: 'llamada',  dias: 3 },
+    { canal: 'correo',   dias: 0 },
+  ],
+
+  // ---------------------------------------------------------------------------
   // Llamadas (Voximplant). Estos tres se incrustan en el escenario: después de cambiarlos hay
   // que correr `node sdr/cli.js vox:setup` para subir la versión nueva.
   // ---------------------------------------------------------------------------
@@ -117,6 +147,24 @@ module.exports = {
   // Qué mueve: el texto que ve Angie en pantalla mientras la llamada está activa, para que no
   // se le olvide decirlo. Vacío = sin recordatorio.
   RECORDATORIO_GRABACION: 'Cuando haya conversación: "te cuento que estoy grabando la llamada para mejorar mi trabajo, ¿te parece?"',
+  // Qué mueve: cuántas veces más se vuelve a marcar cuando el operador devuelve uno de los códigos
+  // de LLAMADA_REINTENTAR_CODIGOS antes de rendirse y decirle a Angie qué pasó. 0 = sin reintentos.
+  // 404 está en la lista a propósito: con rutas baratas, un número portado (Claro→Tigo…) a veces
+  // devuelve 404 aunque exista; el segundo intento a veces entra. No se reintenta un 480/487
+  // (timbró y no contestaron) ni un 486 (ocupado): eso es un resultado, no una falla.
+  LLAMADA_REINTENTOS: 2,
+  LLAMADA_REINTENTAR_CODIGOS: [404, 408, 500, 502, 503, 504],
+  // Qué mueve: segundos de pausa entre un intento y el siguiente.
+  LLAMADA_PAUSA_REINTENTO_S: 2,
+  // Qué mueve: lo que Angie OYE (voz) en cada situación; el navegador además lo muestra en texto.
+  MENSAJES_LLAMADA: {
+    marcando: 'Marcando',
+    reintentando: 'No entró. Reintentando',
+    numero_invalido: 'El operador dice que el número no existe o no lo encuentra. Si desde el celular sí entra, repórtalo',
+    ocupado: 'Ocupado',
+    no_contesto: 'No contestaron',
+    fallo_central: 'Falla de la central. No fue posible llamar',
+  },
   // Qué mueve: la voz sintética del aviso, en la forma Proveedor.Nombre de VoiceList de Voximplant.
   // Si el nombre no existe, el escenario cae a la voz estándar en español.
   VOZ_AVISO: 'Google.es_US_Standard_A',
@@ -130,6 +178,46 @@ module.exports = {
   // Qué mueve: llamadas más cortas que esto (segundos contestados) no pasan por transcripción ni
   // evaluación aunque el resultado sea "conversación". Fase 4.
   DURACION_MINIMA_PIPELINE_S: 45,
+
+  // ---------------------------------------------------------------------------
+  // Pipeline de audio (fase 4): grabación → transcripción → métricas
+  // ---------------------------------------------------------------------------
+  // Solo pasan las llamadas de Voximplant con resultado "conversación" o "reunión agendada", con
+  // grabación y con al menos DURACION_MINIMA_PIPELINE_S segundos contestados. Corre en segundo
+  // plano en el servidor (necesita DEEPGRAM_API_KEY) o a mano: node sdr/cli.js pipeline
+  // Qué mueve: modelo e idioma de Deepgram. nova-2 con "es" transcribe español colombiano bien;
+  // "es-419" es la variante latinoamericana si algún día hace falta.
+  DEEPGRAM_MODELO: 'nova-2',
+  DEEPGRAM_IDIOMA: 'es',
+  // Qué mueve: cada cuántos segundos el servidor revisa si hay llamadas pendientes de transcribir.
+  PIPELINE_INTERVALO_S: 60,
+  // Qué mueve: cuántas veces se reintenta una llamada que falló (red, grabación aún no lista…)
+  // antes de dejarla en "error" para revisarla a mano (node sdr/cli.js pipeline --call N).
+  PIPELINE_REINTENTOS: 3,
+  // Qué mueve: si el servidor descarga el audio y se lo manda a Deepgram (true) o le pasa la URL
+  // de Voximplant para que lo baje Deepgram (false, más barato para Render). Si la URL de la
+  // grabación no es pública, el pipeline cae solo a descargarlo.
+  PIPELINE_DESCARGAR_AUDIO: false,
+
+  // Métricas de la conversación. Se calculan sobre los turnos guardados, así que cambiar estas
+  // constantes NO obliga a transcribir de nuevo: node sdr/cli.js metricas --call N --set PALABRAS_PITCH='["peaku"]'
+  // Qué mueve: dónde empieza el pitch. El primer turno de Angie que contiene una de estas
+  // palabras marca "pitch_en_s", y las preguntas de Angie antes de ese punto son
+  // "preguntas_antes_del_pitch" (Cold Calling Sucks: primero preguntar, después contar).
+  PALABRAS_PITCH: ['peaku', 'nosotros', 'ofrecemos', 'headhunting', 'nuestra plataforma', 'nuestro servicio', 'lo que hacemos', 'te cuento'],
+  // Qué mueve: qué cuenta como muletilla (se buscan como palabra completa, sin acentos).
+  PALABRAS_MULETILLA: ['eh', 'este', 'o sea', 'digamos', 'tipo', 'como que', 'basicamente', 'entonces nada', 'listo'],
+  // Qué mueve: un turno continuo de Angie más largo que esto (segundos) cuenta como monólogo.
+  MONOLOGO_LARGO_S: 45,
+  // Qué mueve: dos turnos de Angie separados por menos de esto (segundos) se consideran el mismo
+  // monólogo (el prospecto solo dijo "ajá").
+  PAUSA_MISMO_TURNO_S: 1.5,
+  // Qué mueve: desde qué velocidad (palabras por minuto de habla propia) se marca "va rápido".
+  RITMO_RAPIDO_PPM: 170,
+  // Qué mueve: qué roles ven la transcripción y las métricas por llamada. Por diseño Angie (sdr)
+  // no las ve llamada por llamada: recibe el resumen semanal (fase 5). Sin login esto es solo la
+  // vista, no un control de acceso.
+  VER_TRANSCRIPCION: ['admin', 'ejecutiva'],
 
   // ---------------------------------------------------------------------------
   // Teléfonos

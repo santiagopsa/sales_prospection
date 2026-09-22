@@ -154,11 +154,115 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
     await assert.rejects(registrarEjecutiva(db, base, { leadId: await id('Beta'), accion: 'descartado' }), /razón/);
   });
 
-  await t.test('descartado con razón', async () => {
-    const r = await registrarToque(db, base, { leadId: await id('Beta'), canal: 'llamada', resultado: 'descartado', razon: 'ya_tiene_proveedor', ahora: lunes });
+  await t.test('descartado con razón (sin reintento)', async () => {
+    const r = await registrarToque(db, base, { leadId: await id('Beta'), canal: 'llamada', resultado: 'descartado', razon: 'ya_tiene_proveedor', reintentoMeses: null, ahora: lunes });
     assert.strictEqual(r.etapa, 'descartado');
     assert.deepStrictEqual(await pendientes('Beta'), []);
     assert.strictEqual((await lead('Beta')).razon_descarte, 'ya_tiene_proveedor');
+  });
+
+  await t.test('sacar de la cola con reintento: pausa, no descarta, y vuelve solo', async () => {
+    const csv2 = 'empresa,contacto,telefono,email\nPausa SA,Pep,3005555555,pep@pausa.co\nNegra SA,Nan,3006666666,nan@negra.co\nManual SA,Man,3007777777,man@manual.co';
+    await importar(db, base, { archivo: 'y.csv', contenido: csv2, simular: false, ahora: lunes });
+    // Por defecto "sin presupuesto" propone 3 meses.
+    const r = await registrarToque(db, base, { leadId: await id('Pausa SA'), canal: 'llamada', resultado: 'descartado', razon: 'sin_presupuesto', ahora: lunes });
+    assert.strictEqual(r.etapa, 'nuevo');
+    assert.ok(r.pausado_hasta);
+    assert.strictEqual(tiempo.fechaBogota(new Date(r.pausado_hasta)), '2026-12-21');
+    assert.strictEqual(r.proxima.canal, 'llamada');
+    assert.match(r.avisos[0], /En pausa hasta el 2026-12-21/);
+    const p = await pendientes('Pausa SA');
+    assert.strictEqual(p.length, base.SECUENCIA_REINTENTO.length);
+    assert.strictEqual(p[0].paso, base.SECUENCIA_POR_DEFECTO.length + 1);
+    // No está en la cola hoy, ni es huérfano, y el pipeline lo cuenta en pausa.
+    const c = await consultarCola(db, base, { ahora: lunes });
+    assert.ok(!c.tareas.some(x => x.empresa === 'Pausa SA'));
+    assert.strictEqual((await L.pipeline(db)).pausados, 1);
+    assert.strictEqual((await L.listarLeads(db, { pausados: true })).length, 1);
+    const toque = (await db.query(`SELECT resultado, razon_descarte, detalle FROM sdr.touches WHERE lead_id=$1`, [await id('Pausa SA')])).rows[0];
+    assert.strictEqual(toque.resultado, 'pausado');
+    assert.strictEqual(toque.detalle.meses, 3);
+    // El día que llega, aparece en la cola y un toque real le quita la pausa.
+    const diciembre = new Date('2026-12-21T14:00:00Z');
+    const c2 = await consultarCola(db, base, { ahora: diciembre });
+    assert.ok(c2.tareas.some(x => x.empresa === 'Pausa SA'));
+    await registrarToque(db, base, { leadId: await id('Pausa SA'), canal: 'llamada', resultado: 'no_contesto', ahora: diciembre });
+    const l = await lead('Pausa SA');
+    assert.strictEqual(l.pausado_hasta, null);
+    assert.strictEqual(l.razon_descarte, null);
+    // Meses explícitos y validación.
+    await assert.rejects(registrarEjecutiva(db, base, { leadId: await id('Pausa SA'), accion: 'descartado', razon: 'otro', reintentoMeses: 2 }), /1, 3, 6/);
+    const e = await registrarEjecutiva(db, base, { leadId: await id('Pausa SA'), accion: 'descartado', razon: 'otro', reintentoMeses: 1, ahora: diciembre });
+    assert.strictEqual(tiempo.fechaBogota(new Date(e.pausado_hasta)), '2027-01-21');
+    // "otro" sin meses = descartar de verdad; reintento 0 también.
+    const d = await registrarEjecutiva(db, base, { leadId: await id('Pausa SA'), accion: 'descartado', razon: 'otro', reintentoMeses: 0, ahora: diciembre });
+    assert.strictEqual(d.etapa, 'descartado');
+    assert.deepStrictEqual(await pendientes('Pausa SA'), []);
+  });
+
+  await t.test('reactivar: vuelve a la cola con la secuencia de reintento', async () => {
+    await assert.rejects(registrarEjecutiva(db, base, { leadId: await id('ACME'), accion: 'reactivar' }), /no está descartado/);
+    const r = await registrarEjecutiva(db, base, { leadId: await id('Pausa SA'), accion: 'reactivar', ahora: lunes });
+    assert.strictEqual(r.etapa, 'contactado');
+    assert.strictEqual(r.proxima.canal, 'llamada');
+    assert.strictEqual((await pendientes('Pausa SA')).length, base.SECUENCIA_REINTENTO.length);
+    assert.strictEqual((await lead('Pausa SA')).razon_descarte, null);
+  });
+
+  await t.test('lista negra: "pidió que no lo contacten" la llena; bloquea cargas, marcación y reactivación', async () => {
+    const LN = require('../listanegra');
+    const { agregarAListaNegra } = require('../resultados');
+    // Nunca ofrece reintento aunque se pidan meses.
+    const r = await registrarToque(db, base, { leadId: await id('Negra SA'), canal: 'llamada', resultado: 'descartado', razon: 'no_contactar', reintentoMeses: 6, ahora: lunes });
+    assert.strictEqual(r.etapa, 'descartado');
+    assert.strictEqual(r.pausado_hasta, null);
+    assert.match(r.avisos[0], /lista negra/);
+    const ln = await LN.listar(db);
+    assert.strictEqual(ln.length, 1);
+    assert.strictEqual(ln[0].telefono, '+573006666666');
+    assert.strictEqual(ln[0].email, 'nan@negra.co');
+    // La carga la deja fuera (por teléfono o por correo) y lo dice.
+    const inf = await importar(db, base, { archivo: 'z.csv', contenido: 'empresa,telefono,email\nOtra,3006666666,\nOtra2,,NAN@negra.co\nLimpia,3008888888,', simular: true, ahora: lunes });
+    assert.strictEqual(inf.aCrear, 1);
+    assert.strictEqual(inf.listaNegra.length, 2);
+    assert.match(inf.listaNegra[0].motivo, /teléfono en la lista negra/);
+    assert.match(inf.listaNegra[1].motivo, /correo en la lista negra/);
+    // Marcación directa rechazada; reactivar rechazado.
+    await assert.rejects(L.leadParaMarcar(db, base, { telefono: '300 666 6666' }), /lista negra/);
+    await assert.rejects(registrarEjecutiva(db, base, { leadId: await id('Negra SA'), accion: 'reactivar' }), /lista negra/);
+    assert.strictEqual((await L.detalleLead(db, await id('Negra SA'))).en_lista_negra, true);
+    // A mano: descarta el lead que coincide y no duplica.
+    const m = await agregarAListaNegra(db, base, { telefono: '3007777777', nota: 'llamó a quejarse', usuario: 'Santiago' });
+    assert.strictEqual(m.leads_descartados, 1);
+    assert.strictEqual((await lead('Manual SA')).etapa, 'descartado');
+    assert.strictEqual((await lead('Manual SA')).razon_descarte, 'no_contactar');
+    const otra = await agregarAListaNegra(db, base, { telefono: '3007777777' });
+    assert.strictEqual(otra.existente, true);
+    assert.strictEqual((await LN.listar(db)).length, 2);
+    await assert.rejects(agregarAListaNegra(db, base, { nota: 'x' }), /teléfono o un correo/);
+    // Quitar.
+    await LN.quitar(db, m.id);
+    assert.strictEqual((await LN.listar(db)).length, 1);
+    await assert.rejects(LN.quitar(db, m.id), /No está/);
+  });
+
+  await t.test('editar datos: normaliza teléfonos, rechaza choques, deja rastro', async () => {
+    const r = await L.editarLead(db, base, await id('ACME'), { contacto: 'Ana María', telefono_alt: '301 222 3344', cargo: '' }, 'Santiago');
+    assert.deepStrictEqual(Object.keys(r.cambios).sort(), ['contacto', 'telefono_alt']);
+    const l = await lead('ACME');
+    assert.strictEqual(l.telefono_alt, '+573012223344');
+    assert.strictEqual(l.contacto, 'Ana María');
+    assert.strictEqual((await db.query(`SELECT resultado, usuario FROM sdr.touches WHERE lead_id=$1 ORDER BY id DESC LIMIT 1`, [l.id])).rows[0].resultado, 'editado');
+    assert.strictEqual((await L.editarLead(db, base, l.id, { contacto: 'Ana María' })).sin_cambios, true);
+    await assert.rejects(L.editarLead(db, base, l.id, { telefono: '3002222222' }), /ya es del lead/);      // el de Beta
+    await assert.rejects(L.editarLead(db, base, l.id, { telefono: '12' }), /Teléfono/);
+    await assert.rejects(L.editarLead(db, base, l.id, { email: 'malo' }), /Correo inválido/);
+    await assert.rejects(L.editarLead(db, base, l.id, { empresa: ' ' }), /empresa/);
+    const r2 = await L.editarLead(db, base, l.id, { telefono: '3019998877', telefono_alt: '3019998877' });
+    assert.strictEqual((await lead('ACME')).telefono, '+573019998877');
+    assert.strictEqual((await lead('ACME')).telefono_alt, null);
+    assert.ok(r2.cambios.telefono);
+    assert.strictEqual((await L.detalleLead(db, l.id)).telefono_alt, null);
   });
 
   await t.test('secuencia agotada: huérfano o descarte según AL_AGOTAR_SECUENCIA', async () => {

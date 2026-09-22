@@ -68,6 +68,7 @@ async function setup({ key, url, numero, rotar = false, config, log = console.lo
   const script = generarEscenario({
     callerId, secreto, webhookUrl: `${publicUrl}/sdr/api/vox/webhook`,
     aviso: config.AVISO_GRABACION, voz: config.VOZ_AVISO, avisoATodos: config.AVISO_TAMBIEN_A_ANGIE,
+    reintentos: config.LLAMADA_REINTENTOS, codigosReintento: config.LLAMADA_REINTENTAR_CODIGOS, pausaReintentoS: config.LLAMADA_PAUSA_REINTENTO_S, mensajes: config.MENSAJES_LLAMADA,
   });
   let esc = (await api('GetScenarios', { scenario_name: ESCENARIO })).result.find(s => s.scenario_name === ESCENARIO);
   if (esc) { await api('SetScenarioInfo', { scenario_id: esc.scenario_id, scenario_script: script }); log(`Escenario "${ESCENARIO}" actualizado`); }

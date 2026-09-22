@@ -35,9 +35,20 @@ async function importar(db, config, { archivo, contenido, simular = true, usuari
     unicos.push(f);
   }
 
-  // 2 · Repetidos contra lo que ya está en la base, con el lead con que chocan.
+  // 2 · Lista negra: esas filas no entran, y se dice cuáles.
   const telefonos = unicos.map(f => f.lead.telefono).filter(Boolean);
   const emails = unicos.map(f => f.lead.email).filter(Boolean);
+  const ln = await require('./listanegra').enLista(db, telefonos, emails);
+  const listaNegra = [];
+  for (let i = unicos.length - 1; i >= 0; i--) {
+    const f = unicos[i];
+    const porTel = f.lead.telefono && ln.telefonos.has(f.lead.telefono);
+    const porMail = f.lead.email && ln.emails.has(f.lead.email);
+    if (porTel || porMail) { listaNegra.push({ fila: f.fila, empresa: f.lead.empresa, motivo: `${porTel ? 'teléfono' : 'correo'} en la lista negra` }); unicos.splice(i, 1); }
+  }
+  listaNegra.sort((a, b) => a.fila - b.fila);
+
+  // 3 · Repetidos contra lo que ya está en la base, con el lead con que chocan.
   const existentes = (await db.query(
     `SELECT id, empresa, contacto, telefono, email, etapa FROM ${T.leads}
      WHERE telefono IN (SELECT jsonb_array_elements_text($1::jsonb))
@@ -68,6 +79,7 @@ async function importar(db, config, { archivo, contenido, simular = true, usuari
     creados: [],
     aCrear: aCrear.length,
     duplicados: duplicados.sort((a, b) => a.fila - b.fila),
+    listaNegra,
     errores: leido.errores,
     avisos: leido.filas.filter(f => f.avisos.length).map(f => ({ fila: f.fila, empresa: f.lead.empresa, avisos: f.avisos })),
     secuencia: plan.map(p => ({ paso: p.paso, canal: p.canal, fecha: p.fecha })),
@@ -78,7 +90,7 @@ async function importar(db, config, { archivo, contenido, simular = true, usuari
     return informe;
   }
 
-  // 3 · Carga. ON CONFLICT DO NOTHING cubre la carrera con otra carga simultánea: esa fila
+  // 4 · Carga. ON CONFLICT DO NOTHING cubre la carrera con otra carga simultánea: esa fila
   // simplemente no vuelve en RETURNING y se informa como duplicada.
   const entrada = aCrear.map(f => ({ fila: f.fila, ...f.lead }));
   const tareas = plan.map(p => ({ paso: p.paso, canal: p.canal, due_at: p.due_at.toISOString() }));
@@ -123,7 +135,7 @@ async function importar(db, config, { archivo, contenido, simular = true, usuari
 // Deja el informe guardado con la carga. Si esto falla, los leads ya entraron; solo se
 // pierde el resumen, y por eso no se propaga el error.
 async function registrarCarga(db, informe, id = null) {
-  const detalle = JSON.stringify({ columnas: informe.columnas, duplicados: informe.duplicados, errores: informe.errores, avisos: informe.avisos });
+  const detalle = JSON.stringify({ columnas: informe.columnas, duplicados: informe.duplicados, listaNegra: informe.listaNegra, errores: informe.errores, avisos: informe.avisos });
   try {
     if (id) {
       await db.query(

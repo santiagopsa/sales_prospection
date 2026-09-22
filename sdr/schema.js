@@ -15,6 +15,8 @@ const T = {
   tasks: `${SCHEMA}.tasks`,
   touches: `${SCHEMA}.touches`,
   calls: `${SCHEMA}.calls`,
+  lista_negra: `${SCHEMA}.lista_negra`,
+  transcripts: `${SCHEMA}.transcripts`,
 };
 
 const lista = xs => xs.map(x => `'${x}'`).join(',');
@@ -134,6 +136,60 @@ const MIGRACIONES = [
   `ALTER TABLE ${T.imports} ADD COLUMN IF NOT EXISTS usuario TEXT`,
   // Contexto del contacto que trae el archivo (Apollo: industria, empleados, LinkedIn, país…).
   `ALTER TABLE ${T.leads} ADD COLUMN IF NOT EXISTS extra JSONB`,
+  // Lead en pausa ("no ahora"): fuera de la cola hasta esta fecha, cuando su secuencia de reintento
+  // lo trae de vuelta sola. NULL = no está en pausa.
+  `ALTER TABLE ${T.leads} ADD COLUMN IF NOT EXISTS pausado_hasta TIMESTAMPTZ`,
+  // Lista negra: teléfonos y correos que no se vuelven a tocar. Los llena "pidió que no lo
+  // contacten" y la mano. Las cargas los dejan fuera y la marcación directa los rechaza.
+  `CREATE TABLE IF NOT EXISTS ${T.lista_negra} (
+     id SERIAL PRIMARY KEY,
+     telefono TEXT,
+     email TEXT,
+     empresa TEXT,
+     razon TEXT,
+     nota TEXT,
+     lead_id INT REFERENCES ${T.leads}(id) ON DELETE SET NULL,
+     usuario TEXT,
+     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+     CHECK (telefono IS NOT NULL OR email IS NOT NULL)
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS sdr_lista_negra_tel ON ${T.lista_negra}(telefono) WHERE telefono IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS sdr_lista_negra_email ON ${T.lista_negra}(email) WHERE email IS NOT NULL`,
+  // ---- M3b · Fallos de marcación y datos editables ---------------------------------------
+  // Código SIP y motivo que devolvió el operador, intentos que hizo el escenario, y el reporte
+  // de Angie ("desde el celular sí entra") con su revisión.
+  `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS vox_codigo TEXT`,
+  `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS vox_motivo TEXT`,
+  `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS vox_intentos INT`,
+  `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS reporte TEXT`,
+  `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS reportado_at TIMESTAMPTZ`,
+  `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS revisado_at TIMESTAMPTZ`,
+  // Segundo teléfono del lead (el principal sigue siendo la llave de deduplicación).
+  `ALTER TABLE ${T.leads} ADD COLUMN IF NOT EXISTS telefono_alt TEXT`,
+
+  // ---- M4 · Pipeline de audio ------------------------------------------------------------
+  // Estados de calls.pipeline_status: no_aplica (manual / sin resultado con conversación),
+  // pendiente_resultado (llegó el webhook, falta el resultado), pendiente (lista para transcribir),
+  // transcribiendo, transcrito, omitida (corta o sin conversación), error.
+  `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS pipeline_error TEXT`,
+  `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS pipeline_intentos INT NOT NULL DEFAULT 0`,
+  `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS pipeline_at TIMESTAMPTZ`,
+  // Una transcripción por llamada: turnos [{quien, inicio, fin, texto, palabras}] con quién habló
+  // (canal estéreo), el texto plano y las métricas calculadas (se recalculan sin volver a transcribir).
+  `CREATE TABLE IF NOT EXISTS ${T.transcripts} (
+     id SERIAL PRIMARY KEY,
+     call_id INT NOT NULL UNIQUE REFERENCES ${T.calls}(id) ON DELETE CASCADE,
+     proveedor TEXT NOT NULL DEFAULT 'deepgram',
+     modelo TEXT,
+     idioma TEXT,
+     duracion_s REAL,
+     turnos JSONB NOT NULL,
+     texto TEXT,
+     metricas JSONB,
+     meta JSONB,
+     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+   )`,
 ];
 
 async function initSchema(db, log = console) {

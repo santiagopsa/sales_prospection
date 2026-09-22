@@ -1,6 +1,8 @@
 // Telefonía en el navegador (Voximplant Web SDK). app.js solo conoce esta interfaz:
 //   SDR_TELEFONIA.disponible() → bool
-//   SDR_TELEFONIA.llamar({ lead, uuid }, { estado(txt), fin({ error?, cancelada? }) })
+//   SDR_TELEFONIA.llamar({ lead, uuid, telefono? }, { estado(txt), fin({ error?, cancelada?, contesto, estadoVox?, codigo?, motivo?, intentos? }) })
+// El escenario de Voximplant manda mensajes JSON por la llamada ({ fase, intento, codigo, motivo,
+// estado }) con lo que pasa del otro lado: timbrando, reintentando, contestada, fallida y por qué.
 //   SDR_TELEFONIA.colgar()
 // Si el SDK no cargó o el servidor no tiene las variables VOX_*, disponible() es false y la
 // ficha muestra el botón apagado con el motivo.
@@ -92,8 +94,9 @@
     } catch (_) { /* nada */ }
   }
 
-  function llamar({ lead, uuid }, cb) {
+  function llamar({ lead, uuid, telefono }, cb) {
     const V = SDK();
+    const numero = telefono || lead.telefono;
     const estado = t => cb.estado && cb.estado(t);
     let terminado = false;
     const fin = info => { if (terminado) return; terminado = true; llamadaActual = null; if (info && info.error) reportar(lead, uuid, info.error); cb.fin && cb.fin(info || {}); };
@@ -108,18 +111,33 @@
         if (st !== V.ClientState.LOGGED_IN) { anotar('sesión perdida (estado ' + st + '); reconectando'); conectado = false; }
       }
       await sesion(estado);
-      anotar('llamando a ' + lead.telefono + ' uuid=' + uuid + ' intento ' + intentos);
-      estado('Marcando a ' + lead.telefono + '…');
+      anotar('llamando a ' + numero + ' uuid=' + uuid + ' intento ' + intentos);
+      estado('Marcando a ' + numero + '…');
       const call = cliente.call({
-        number: lead.telefono,
+        number: numero,
         video: { sendVideo: false, receiveVideo: false },
         customData: JSON.stringify({ uuid, lead_id: lead.id }),
       });
       llamadaActual = call;
-      let contesto = false;
-      call.addEventListener(V.CallEvents.Connected, () => { contesto = true; anotar('Connected'); estado('En llamada'); });
-      call.addEventListener(V.CallEvents.ProgressToneStart, () => { anotar('ProgressToneStart'); estado('Timbrando…'); });
-      call.addEventListener(V.CallEvents.Disconnected, ev => { anotar('Disconnected ' + JSON.stringify(ev && ev.headers || {})); fin({ contesto }); });
+      // El tramo de Angie se contesta de una vez (para que oiga el tono real y los avisos); lo que
+      // pasa con el prospecto llega por mensajes del escenario.
+      let contesto = false, vox = { estado: null, codigo: null, motivo: null, intento: 0 };
+      call.addEventListener(V.CallEvents.Connected, () => { anotar('Connected (tramo de Angie)'); estado('Marcando a ' + numero + '…'); });
+      call.addEventListener(V.CallEvents.ProgressToneStart, () => { anotar('ProgressToneStart'); });
+      call.addEventListener(V.CallEvents.MessageReceived, ev => {
+        let m = null; try { m = JSON.parse(ev.text); } catch (_) { return; }
+        anotar('escenario: ' + ev.text);
+        vox = { estado: m.estado || vox.estado, codigo: m.codigo || vox.codigo, motivo: m.motivo || vox.motivo, intento: m.intento || vox.intento };
+        if (m.fase === 'marcando') estado(m.intento > 1 ? 'Marcando de nuevo (intento ' + m.intento + ')…' : 'Marcando a ' + numero + '…');
+        else if (m.fase === 'timbrando') estado('Timbrando…');
+        else if (m.fase === 'reintentando') estado('No entró (' + (m.codigo || '') + '). Reintentando…');
+        else if (m.fase === 'contestada') { contesto = true; estado('En llamada'); }
+        else if (m.fase === 'fallida') estado(motivoLegible(vox));
+      });
+      call.addEventListener(V.CallEvents.Disconnected, ev => {
+        anotar('Disconnected ' + JSON.stringify(ev && ev.headers || {}));
+        fin({ contesto, estadoVox: vox.estado, codigo: vox.codigo, motivo: vox.motivo, intentos: vox.intento, motivoLegible: contesto ? null : motivoLegible(vox) });
+      });
       call.addEventListener(V.CallEvents.Failed, ev => {
         anotar('Failed code=' + ev.code + ' reason=' + ev.reason);
         // 486 ocupado, 480/487 no contesta: son resultados normales, no errores.
@@ -130,6 +148,20 @@
       });
     };
     marcar().catch(e => { anotar('error: ' + (e.message || e)); fin({ error: e.message || String(e) }); });
+  }
+
+  // Texto para Angie según lo que dijo el operador.
+  function motivoLegible(vox) {
+    const c = vox.codigo ? ' (código ' + vox.codigo + (vox.motivo ? ' ' + vox.motivo : '') + ')' : '';
+    switch (vox.estado) {
+      case 'numero_invalido': return 'El operador no encuentra el número' + c;
+      case 'ocupado': return 'Ocupado' + c;
+      case 'no_contesto': return 'Timbró y no contestaron' + c;
+      case 'rechazada': return 'Rechazaron la llamada' + c;
+      case 'fallo_central': return 'Falla de la central' + c;
+      case 'contestada': case 'colgada': return 'Llamada terminada';
+      default: return vox.codigo ? 'No salió la llamada' + c : 'Llamada terminada';
+    }
   }
 
   function colgar() {

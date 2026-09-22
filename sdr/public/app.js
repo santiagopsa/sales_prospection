@@ -17,6 +17,9 @@
   // Quién está usando la app: etiqueta elegida en la barra, sin credenciales. Va en cada POST.
   const USUARIO_KEY = 'sdr_usuario';
   const usuarioActual = () => { try { return localStorage.getItem(USUARIO_KEY) || ''; } catch (_) { return ''; } };
+  const rolActual = () => ((meta.usuarios || []).find(u => u.nombre === usuarioActual()) || {}).rol || '';
+  // Transcripción y métricas por llamada: solo para los roles de VER_TRANSCRIPCION (Angie recibe el semanal).
+  const veTranscripcion = () => (meta.verTranscripcion || []).includes(rolActual());
   function pintarUsuarios() {
     const $sel = document.getElementById('usuario');
     if (!$sel || !meta.usuarios) return;
@@ -101,10 +104,11 @@
             <span class="chip ${t.canal}">${esc(etiqueta(meta.canales, t.canal))} · paso ${t.paso}/${t.pasos_total}</span>
             ${t.vencida ? `<span class="chip vencida">Vencida ${plural(t.diasVencida, 'día', 'días')}</span>` : '<span class="chip hoy">Hoy</span>'}
             ${t.etapa !== 'nuevo' ? `<span class="chip etapa">${esc(etiqueta(meta.etapas, t.etapa))}</span>` : ''}
-            <span class="mover"><button class="btn mini" data-posponer="1" data-task="${t.id}" title="Mover al siguiente día hábil">Mañana</button><button class="btn mini" data-posponer="5" data-task="${t.id}" title="Mover una semana">+1 semana</button></span>
+            <span class="mover"><button class="btn mini" data-posponer="1" data-task="${t.id}" title="Mover al siguiente día hábil">Mañana</button><button class="btn mini" data-posponer="5" data-task="${t.id}" title="Mover una semana">+1 semana</button><button class="btn mini sacar" data-sacar="${t.lead_id}" title="Descartar o pausar: sale de la cola">Sacar</button></span>
           </div>
         </div>`).join('')}</div>`
-        : `<div class="panel vacio">${ver === 'todas' ? 'No hay toques pendientes para hoy.<br><a href="#/importar">Carga una lista de leads</a> para empezar.' : 'Nada en este filtro. <a href="#/cola">Ver todas</a>'}</div>`}`;
+        : `<div class="panel vacio">${ver === 'todas' ? 'No hay toques pendientes para hoy.<br><a href="#/importar">Carga una lista de leads</a> para empezar.' : 'Nada en este filtro. <a href="#/cola">Ver todas</a>'}</div>`}
+      <div id="modal"></div>`;
 
     // Clic en la tarjeta abre la ficha; los botones de posponer no.
     $app.querySelectorAll('.item[data-lead]').forEach(el => el.addEventListener('click', e => {
@@ -119,6 +123,68 @@
         await vistaCola(params);
       } catch (e) { avisar(e.message, 'error'); b.disabled = false; }
     }));
+    $app.querySelectorAll('[data-sacar]').forEach(b => b.addEventListener('click', () => {
+      const t = c.tareas.find(x => String(x.lead_id) === b.dataset.sacar);
+      abrirSacar({ id: t.lead_id, empresa: t.empresa }, { alTerminar: () => vistaCola(params) });
+    }));
+  }
+
+  // Diálogo "Sacar de la cola": razón cerrada + ¿volver a intentar? (descartar de verdad, o pausa
+  // de N meses, propuesta según la razón). "Pidió que no lo contacten" va a la lista negra.
+  function abrirSacar(l, { alTerminar, razon } = {}) {
+    const $modal = document.getElementById('modal');
+    $modal.innerHTML = `
+      <div class="velo"><form class="dialogo" id="frm-sacar" style="max-width:460px">
+        <h2>Sacar de la cola · ${esc(l.empresa)}</h2>
+        <label>¿Por qué?</label>
+        <select name="razon">${meta.razones.map(r => `<option value="${r.id}" ${r.id === razon ? 'selected' : ''}>${esc(r.label)}</option>`).join('')}</select>
+        <div id="sacar-reintento">${camposReintento()}</div>
+        <label>Nota</label>
+        <textarea name="nota" rows="2" placeholder="Lo que dijo, para cuando se retome"></textarea>
+        <div class="acciones"><button class="btn primario" type="submit">Guardar</button><button class="btn" type="button" id="sacar-cancelar">Cancelar</button></div>
+        <div id="sacar-error"></div>
+      </form></div>`;
+    const $frm = document.getElementById('frm-sacar');
+    enlazarReintento($frm);
+    document.getElementById('sacar-cancelar').addEventListener('click', () => { $modal.innerHTML = ''; });
+    $frm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const f = new FormData($frm);
+      $frm.querySelector('button[type=submit]').disabled = true;
+      try {
+        const r = await api(`leads/${l.id}/ejecutiva`, { method: 'POST', body: { accion: 'descartado', razon: f.get('razon'), reintento_meses: Number(f.get('reintento') || 0), nota: f.get('nota') || '' } });
+        $modal.innerHTML = '';
+        avisar(r.pausado_hasta ? (r.avisos || []).join(' ') : `Descartado (${etiqueta(meta.razones, f.get('razon'))}). ${(r.avisos || []).join(' ')}`, r.pausado_hasta ? 'ok' : 'aviso');
+        if (alTerminar) await alTerminar();
+      } catch (err) { document.getElementById('sacar-error').innerHTML = pintarError(err); $frm.querySelector('button[type=submit]').disabled = false; }
+    });
+  }
+
+  // Radios "¿Volver a intentar?" que comparten el diálogo de sacar y el de resultado de llamada.
+  function camposReintento() {
+    return `<label>¿Volver a intentar?</label>
+      <div class="opciones fila" id="reintento-opciones">
+        <label class="opcion"><input type="radio" name="reintento" value="0"> No, descartar</label>
+        ${(meta.reintentoMeses || []).map(m => `<label class="opcion"><input type="radio" name="reintento" value="${m}"> En ${m} ${m === 1 ? 'mes' : 'meses'}</label>`).join('')}
+      </div>
+      <div class="suave" id="reintento-nota" style="font-size:12px;margin:-4px 0 8px"></div>`;
+  }
+  function enlazarReintento($frm) {
+    const $razon = $frm.querySelector('select[name=razon]');
+    const ajustar = () => {
+      const r = meta.razones.find(x => x.id === $razon.value) || {};
+      const $ops = $frm.querySelector('#reintento-opciones'), $nota = $frm.querySelector('#reintento-nota');
+      if (!$ops) return;
+      $ops.hidden = !!r.definitiva;
+      const valor = r.definitiva ? '0' : String(r.reintento || 0);
+      const radio = $frm.querySelector(`input[name=reintento][value="${valor}"]`) || $frm.querySelector('input[name=reintento]');
+      if (radio) radio.checked = true;
+      $nota.textContent = r.definitiva
+        ? (r.id === 'no_contactar' ? 'Definitivo: el teléfono y el correo pasan a la lista negra y no vuelven a entrar por ninguna carga.' : 'Definitivo: el lead queda descartado.')
+        : (r.reintento ? `Propuesto: pausa de ${r.reintento} meses. "No ahora" no es "nunca"; ese día vuelve solo a la cola.` : 'Propuesto: descartar. Cambia a una pausa si vale la pena retomarlo.');
+    };
+    $razon.addEventListener('change', ajustar);
+    ajustar();
   }
 
   // ---------------------------------------------------------------- cargar
@@ -197,6 +263,7 @@
       <div class="resumen">
         <div class="kpi bien"><b>${creados}</b><span>${simulado ? 'Leads nuevos a crear' : 'Leads creados'}</span></div>
         <div class="kpi ${inf.duplicados.length ? 'alerta' : ''}"><b>${inf.duplicados.length}</b><span>Duplicados (no entran)</span></div>
+        ${(inf.listaNegra || []).length ? `<div class="kpi mal"><b>${inf.listaNegra.length}</b><span>En lista negra (no entran)</span></div>` : ''}
         <div class="kpi ${inf.errores.length ? 'mal' : ''}"><b>${inf.errores.length}</b><span>Filas con error</span></div>
         <div class="kpi"><b>${inf.filas}</b><span>Filas en ${esc(inf.archivo || 'el archivo')}</span></div>
       </div>
@@ -211,6 +278,7 @@
         <button class="btn" id="otro">Elegir otro archivo</button></div>` : ''}
       ${tabla('Filas con error', inf.errores, 'Motivo')}
       ${tabla('Duplicados', inf.duplicados, 'Por qué')}
+      ${tabla('Fuera por lista negra', inf.listaNegra || [], 'Por qué')}
       ${tabla('Entran con aviso', inf.avisos, 'Aviso')}`;
   }
 
@@ -218,19 +286,24 @@
   async function vistaPipeline(params) {
     const etapa = params.get('etapa') || '';
     const huerfanos = params.get('huerfanos') === '1';
+    const pausados = params.get('pausados') === '1';
     const q = params.get('q') || '';
     const qs = new URLSearchParams();
     if (etapa) qs.set('etapa', etapa);
     if (huerfanos) qs.set('huerfanos', '1');
+    if (pausados) qs.set('pausados', '1');
     if (q) qs.set('q', q);
-    const [{ etapas: conteo, huerfanos: nHuerfanos }, leads] = await Promise.all([api('pipeline'), api('leads?' + qs)]);
+    const [{ etapas: conteo, huerfanos: nHuerfanos, pausados: nPausados, listaNegra: nListaNegra, fallos: nFallos }, leads] = await Promise.all([api('pipeline'), api('leads?' + qs)]);
     const total = conteo.reduce((s, x) => s + x.n, 0);
     $app.innerHTML = `
       <div class="cabeza"><div><h1>Pipeline</h1><div class="suave">${plural(total, 'lead', 'leads')} en total</div></div></div>
       <div class="etapas">
-        <a class="etapa ${!etapa && !huerfanos ? 'activo' : ''}" href="#/pipeline"><b>${total}</b><span>Todos</span></a>
+        <a class="etapa ${!etapa && !huerfanos && !pausados ? 'activo' : ''}" href="#/pipeline"><b>${total}</b><span>Todos</span></a>
         ${conteo.map(x => `<a class="etapa ${etapa === x.etapa ? 'activo' : ''}" href="#/pipeline?etapa=${x.etapa}"><b>${x.n}</b><span>${esc(etiqueta(meta.etapas, x.etapa))}</span></a>`).join('')}
         <a class="etapa ${huerfanos ? 'activo' : ''}" href="#/pipeline?huerfanos=1"><b>${nHuerfanos}</b><span>Sin próximo toque</span></a>
+        <a class="etapa ${pausados ? 'activo' : ''}" href="#/pipeline?pausados=1"><b>${nPausados || 0}</b><span>En pausa</span></a>
+        <a class="etapa" href="#/lista-negra"><b>${nListaNegra || 0}</b><span>Lista negra</span></a>
+        ${veTranscripcion() ? `<a class="etapa ${nFallos ? 'alerta' : ''}" href="#/fallos"><b>${nFallos || 0}</b><span>Fallos de marcación</span></a>` : ''}
       </div>
       <form class="filtros" id="buscar"><input type="search" name="q" placeholder="Buscar por empresa, contacto, correo o teléfono" value="${esc(q)}" /><button class="btn">Buscar</button></form>
       ${leads.length ? `<div class="panel tabla-env"><table>
@@ -239,8 +312,8 @@
           <td><a href="#/lead/${l.id}"><b>${esc(l.empresa)}</b></a></td>
           <td>${esc([l.contacto, l.cargo].filter(Boolean).join(' · ') || '—')}</td>
           <td class="num">${esc(telVisible(l.telefono) || l.email || '—')}</td>
-          <td><span class="chip etapa">${esc(etiqueta(meta.etapas, l.etapa))}</span></td>
-          <td>${l.proximo_ms ? fecha(l.proximo_ms) : '<span class="suave">—</span>'}</td>
+          <td><span class="chip etapa">${esc(etiqueta(meta.etapas, l.etapa))}</span>${l.razon_descarte ? ` <span class="suave" style="font-size:12px">${esc(meta.razonLabel[l.razon_descarte] || l.razon_descarte)}</span>` : ''}</td>
+          <td>${l.pausado_ms ? `<span class="chip pausa">En pausa hasta ${fecha(l.pausado_ms)}</span>` : l.proximo_ms ? fecha(l.proximo_ms) : '<span class="suave">—</span>'}</td>
         </tr>`).join('')}</tbody></table></div>`
         : '<div class="panel vacio">Ningún lead con este filtro.</div>'}`;
     document.getElementById('buscar').addEventListener('submit', e => {
@@ -248,6 +321,128 @@
       const nq = new FormData(e.target).get('q');
       const p = new URLSearchParams(qs); nq ? p.set('q', nq) : p.delete('q');
       location.hash = '#/pipeline?' + p;
+    });
+  }
+
+  // ---------------------------------------------------------------- lista negra
+  async function vistaListaNegra() {
+    const lista = await api('lista-negra');
+    $app.innerHTML = `
+      <div class="cabeza"><div><div class="suave"><a href="#/pipeline">← Pipeline</a></div><h1>Lista negra</h1>
+        <div class="suave">${plural(lista.length, 'contacto que no se vuelve a tocar', 'contactos que no se vuelven a tocar')}. Entran solos con "pidió que no lo contacten"; las cargas los dejan fuera y no se pueden marcar.</div></div></div>
+      <div class="panel bloque">
+        <h2>Agregar a mano</h2>
+        <form id="ln-form" class="form-panel">
+          <div><label>Teléfono</label><input name="telefono" placeholder="300 123 4567" /></div>
+          <div><label>Correo</label><input name="email" type="email" placeholder="persona@empresa.co" /></div>
+          <div><label>Empresa (opcional)</label><input name="empresa" /></div>
+          <div><label>Nota</label><input name="nota" placeholder="Por qué" /></div>
+          <div><button class="btn primario" type="submit">Agregar</button></div>
+        </form>
+        <div id="ln-error"></div>
+      </div>
+      ${lista.length ? `<div class="panel tabla-env"><table>
+        <thead><tr><th>Teléfono</th><th>Correo</th><th>Empresa</th><th>Nota</th><th>Cuándo</th><th></th></tr></thead>
+        <tbody>${lista.map(x => `<tr>
+          <td class="num">${esc(telVisible(x.telefono) || '—')}</td><td>${esc(x.email || '—')}</td>
+          <td>${x.lead_id ? `<a href="#/lead/${x.lead_id}">${esc(x.empresa || 'ver lead')}</a>` : esc(x.empresa || '—')}</td>
+          <td class="suave">${esc(x.nota || (meta.razonLabel[x.razon] || ''))}</td>
+          <td class="suave" style="white-space:nowrap">${fecha(x.created_ms)}${x.usuario ? ` · ${esc(x.usuario)}` : ''}</td>
+          <td><button class="btn mini" data-quitar="${x.id}">Quitar</button></td>
+        </tr>`).join('')}</tbody></table></div>` : '<div class="panel vacio">La lista está vacía.</div>'}`;
+    document.getElementById('ln-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const d = Object.fromEntries(new FormData(e.target));
+      try {
+        const r = await api('lista-negra', { method: 'POST', body: d });
+        avisar(r.existente ? 'Ya estaba en la lista.' : `Agregado.${r.leads_descartados ? ` ${plural(r.leads_descartados, 'lead descartado', 'leads descartados')}.` : ''}`);
+        await vistaListaNegra();
+      } catch (err) { document.getElementById('ln-error').innerHTML = pintarError(err); }
+    });
+    $app.querySelectorAll('[data-quitar]').forEach(b => b.addEventListener('click', async () => {
+      if (!window.confirm('¿Quitar de la lista negra? Podrá volver a entrar por una carga y a marcarse.')) return;
+      b.disabled = true;
+      try { await api(`lista-negra/${b.dataset.quitar}/quitar`, { method: 'POST', body: {} }); avisar('Quitado de la lista.'); await vistaListaNegra(); }
+      catch (err) { avisar(err.message, 'error'); b.disabled = false; }
+    }));
+  }
+
+  // ---------------------------------------------------------------- fallos de marcación
+  async function vistaFallos() {
+    const lista = await api('llamadas/fallidas');
+    const pend = lista.filter(x => !x.revisado_ms);
+    $app.innerHTML = `
+      <div class="cabeza"><div><div class="suave"><a href="#/pipeline">← Pipeline</a></div><h1>Fallos de marcación</h1>
+        <div class="suave">Llamadas que el operador de Voximplant no cursó (404 = no encuentra el número, 5xx = falla de central) y lo que Angie reportó. ${plural(pend.length, 'sin revisar', 'sin revisar')}.</div></div></div>
+      ${lista.length ? `<div class="panel tabla-env"><table>
+        <thead><tr><th>Cuándo</th><th>Empresa</th><th>Teléfono</th><th>Qué pasó</th><th class="num">Fallos / contestadas del número</th><th>Reporte</th><th></th></tr></thead>
+        <tbody>${lista.map(x => `<tr class="${x.revisado_ms ? 'suave' : ''}">
+          <td style="white-space:nowrap">${fechaHora(x.started_ms)}</td>
+          <td><a href="#/lead/${x.lead_id}"><b>${esc(x.empresa)}</b></a>${x.contacto ? `<div class="suave" style="font-size:12px">${esc(x.contacto)}</div>` : ''}</td>
+          <td class="num">${esc(telVisible(x.telefono) || '—')}</td>
+          <td>${esc(x.vox_estado === 'numero_invalido' ? 'No encuentra el número' : x.vox_estado === 'fallo_central' ? 'Falla de central' : (x.vox_estado || '—'))}<div class="suave" style="font-size:12px">código ${esc(x.vox_codigo || '?')}${x.vox_motivo ? ' ' + esc(x.vox_motivo) : ''}${x.vox_intentos ? ' · ' + plural(x.vox_intentos, 'intento', 'intentos') : ''}</div></td>
+          <td class="num">${x.fallos_del_numero} / ${x.contestadas_del_numero}</td>
+          <td>${x.reporte ? `<b>${esc(x.reporte)}</b>` : '<span class="suave">—</span>'}</td>
+          <td><button class="btn mini" data-revisar="${x.id}" data-valor="${x.revisado_ms ? '0' : '1'}">${x.revisado_ms ? 'Reabrir' : 'Revisado'}</button></td>
+        </tr>`).join('')}</tbody></table></div>
+        <p class="suave" style="font-size:12px">Para Voximplant: si un número entra desde el celular y aquí sale 404 en varios intentos, pide en soporte que revisen la ruta para Colombia (números portados). Lista los teléfonos y el código.</p>`
+        : '<div class="panel vacio">Sin fallos de marcación.</div>'}`;
+    $app.querySelectorAll('[data-revisar]').forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try { await api(`llamadas/${b.dataset.revisar}/revisar`, { method: 'POST', body: { revisado: b.dataset.valor === '1' } }); await vistaFallos(); }
+      catch (e) { avisar(e.message, 'error'); b.disabled = false; }
+    }));
+  }
+
+  // ---------------------------------------------------------------- llamada (transcripción y métricas)
+  const PIPELINE_LABEL = { pendiente_resultado: 'esperando resultado', pendiente: 'por transcribir', transcribiendo: 'transcribiendo…', transcrito: 'transcrita', omitida: 'sin transcribir', error: 'error al transcribir', no_aplica: '' };
+  function pipelineChip(t) {
+    const st = t.pipeline_status;
+    if (!st || st === 'no_aplica') return '';
+    if (st === 'transcrito') return ` · <a href="#/llamada/${t.call_id}">Ver transcripción y métricas</a>`;
+    if (st === 'error') return ` · <a href="#/llamada/${t.call_id}" style="color:var(--mal)">${PIPELINE_LABEL[st]}</a>`;
+    return ` · <span class="suave">${PIPELINE_LABEL[st] || st}</span>`;
+  }
+  const METRICAS = [
+    ['proporcion_angie', 'Habla Angie', v => v == null ? '—' : Math.round(v * 100) + ' %', 'Del tiempo hablado. Con conversación real, menos de la mitad.'],
+    ['preguntas_antes_del_pitch', 'Preguntas antes del pitch', v => v == null ? 'sin pitch' : v, 'Preguntar antes de contar.'],
+    ['preguntas_angie', 'Preguntas de Angie', v => v, ''],
+    ['primera_pregunta_s', 'Primera pregunta', v => v == null ? 'ninguna' : 'seg ' + Math.round(v), ''],
+    ['pitch_en_s', 'Empieza el pitch', v => v == null ? 'no detectado' : 'seg ' + Math.round(v), 'Primer turno con una palabra de PALABRAS_PITCH.'],
+    ['monologo_mas_largo_s', 'Monólogo más largo', v => Math.round(v) + ' s', ''],
+    ['ppm_angie', 'Velocidad', v => v == null ? '—' : v + ' ppm', 'Palabras por minuto de habla propia.'],
+    ['muletillas_por_min', 'Muletillas / min', v => v == null ? '—' : v, ''],
+    ['interrupciones', 'Interrupciones', v => v, 'Angie arranca mientras el prospecto habla.'],
+    ['turnos_prospecto', 'Turnos del prospecto', v => v, ''],
+  ];
+  async function vistaLlamada(id) {
+    const c = await api('llamadas/' + encodeURIComponent(id) + '/transcripcion');
+    const m = c.metricas || {};
+    const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+    $app.innerHTML = `
+      <div class="cabeza">
+        <div><div class="suave"><a href="#/lead/${c.lead_id}">← ${esc(c.empresa)}</a></div><h1>Llamada${c.contacto ? ' con ' + esc(c.contacto) : ''}</h1>
+          <div class="suave">${fechaHora(c.started_ms)}${c.duracion_s != null ? ' · ' + mmss(c.duracion_s) : ''}${c.resultado ? ' · ' + esc(meta.resultadoLabel[c.resultado] || c.resultado) : ''}${c.usuario ? ' · ' + esc(c.usuario) : ''}</div></div>
+        <div class="acciones" style="margin:0">
+          ${c.record_url ? `<a class="btn" href="${esc(c.record_url)}" target="_blank" rel="noopener">Escuchar grabación</a>` : ''}
+          ${c.record_url ? '<button class="btn" id="reprocesar" title="Vuelve a transcribir y calcular">Reprocesar</button>' : ''}
+        </div>
+      </div>
+      <div id="msg"></div>
+      ${!veTranscripcion() ? '<div class="panel vacio">La transcripción por llamada es para la ejecutiva y el admin. Angie recibe el resumen de la semana.</div>' : !c.turnos ? `
+        <div class="panel vacio">Estado: <b>${esc(PIPELINE_LABEL[c.pipeline_status] || c.pipeline_status)}</b>${c.pipeline_error ? `<div class="error" style="margin-top:10px;text-align:left">${esc(c.pipeline_error)}</div>` : ''}</div>` : `
+      ${c.nota ? `<div class="panel bloque"><b>Nota de Angie:</b> <span style="white-space:pre-wrap">${esc(c.nota)}</span></div>` : ''}
+      <div class="kpis">${METRICAS.map(([k, nombre, fmt, ayuda]) => `<div class="kpi" title="${esc(ayuda)}"><b>${esc(String(fmt(m[k])))}</b><span>${nombre}</span></div>`).join('')}</div>
+      ${m.muletillas_detalle && Object.keys(m.muletillas_detalle).length ? `<div class="suave" style="font-size:12px;margin:-6px 0 14px">Muletillas: ${Object.entries(m.muletillas_detalle).map(([k, v]) => `${esc(k)} ×${v}`).join(', ')}</div>` : ''}
+      <div class="panel">
+        <h2>Transcripción <span class="suave" style="font-weight:400;font-size:12px">${c.modelo ? esc(c.modelo) : ''}${c.transcrito_ms ? ' · ' + fechaHora(c.transcrito_ms) : ''}</span></h2>
+        <div class="turnos">${(c.turnos || []).map(t => `<div class="turno ${t.quien}"><span class="t">${mmss(t.inicio)}</span><span class="q">${t.quien === 'angie' ? 'Angie' : 'Prospecto'}</span><span class="x">${esc(t.texto)}</span></div>`).join('')}</div>
+      </div>`}`;
+    const $re = document.getElementById('reprocesar');
+    if ($re) $re.addEventListener('click', async () => {
+      $re.disabled = true;
+      try { await api(`llamadas/${c.id}/reprocesar`, { method: 'POST', body: {} }); avisar('En cola. El servidor la transcribe en el próximo minuto.'); }
+      catch (e) { avisar(e.message, 'error'); $re.disabled = false; }
     });
   }
 
@@ -288,7 +483,7 @@
         <span class="chip ${t.canal}">${esc(t.canal === 'ejecutiva' ? 'Ejecutiva' : etiqueta(meta.canales, t.canal))}</span>
         <div style="flex:1;min-width:0"><b>${esc(que)}</b>${extra ? ` <span class="suave">· ${esc(extra)}</span>` : ''}
           ${t.nota ? `<div class="suave" style="white-space:pre-wrap">${esc(t.nota)}</div>` : ''}
-          ${t.record_url ? `<div><a href="${esc(t.record_url)}" target="_blank" rel="noopener">Escuchar grabación</a></div>` : ''}</div>
+          ${t.record_url || (veTranscripcion() && t.pipeline_status && t.pipeline_status !== 'no_aplica') ? `<div style="font-size:12px">${t.record_url ? `<a href="${esc(t.record_url)}" target="_blank" rel="noopener">Escuchar grabación</a>` : ''}${veTranscripcion() && t.call_id ? pipelineChip(t) : ''}</div>` : ''}</div>
         <span class="suave" style="font-size:12px;white-space:nowrap;text-align:right">${cuando}${t.usuario ? `<br>${esc(t.usuario)}` : ''}</span>
       </li>`;
     };
@@ -299,7 +494,9 @@
           <div class="suave">${esc([l.contacto, l.cargo].filter(Boolean).join(' · ') || 'Sin contacto')}${l.ciudad ? ' · ' + esc(l.ciudad) : ''}</div></div>
         <div style="text-align:right">
           <span class="chip etapa" style="font-size:13px">${esc(etiqueta(meta.etapas, l.etapa))}</span>
+          ${l.pausado_ms ? `<div style="margin-top:4px"><span class="chip pausa">En pausa hasta ${fecha(l.pausado_ms)}</span></div>` : ''}
           ${l.razon_descarte ? `<div class="suave" style="font-size:12px;margin-top:4px">${esc(meta.razonLabel[l.razon_descarte] || l.razon_descarte)}</div>` : ''}
+          ${l.en_lista_negra ? '<div style="font-size:12px;margin-top:4px;color:var(--mal)"><b>En lista negra</b> · no contactar</div>' : ''}
           ${l.reunion_ms ? `<div class="suave" style="font-size:12px;margin-top:4px">Reunión: ${fechaHora(l.reunion_ms)}</div>` : ''}
           ${l.deal_id ? `<div style="font-size:12px;margin-top:4px"><a href="/#/deal/${l.deal_id}" target="_blank" rel="noopener">Deal #${l.deal_id} en el Sandler ↗</a></div>` : ''}
         </div>
@@ -320,10 +517,12 @@
                 <button class="btn" data-toque="whatsapp" ${l.telefono ? '' : 'disabled'}>WhatsApp enviado</button>
                 <button class="btn" data-toque="correo" ${l.email ? '' : 'disabled'}>Correo enviado</button>
                 <button class="btn" data-toque="linkedin">LinkedIn enviado</button>
-                <button class="btn peligro" id="descartar">Descartar</button>
+                <button class="btn peligro" id="descartar" title="Descartar o pausar">Sacar de la cola</button>
+                ${l.pausado_ms ? '<button class="btn" data-ejecutiva="reactivar" title="Quitar la pausa y volver a la cola desde hoy">Retomar ahora</button>' : ''}
               </div>
               <p class="suave" style="font-size:12px;margin:0">${l.telefono ? `<a href="${waLink(l.telefono)}" target="_blank" rel="noopener">Abrir WhatsApp ↗</a>` : ''}${l.email ? ` · <a href="mailto:${esc(l.email)}">Escribir correo ↗</a>` : ''}</p>`
-            : l.etapa === 'descartado' ? '<p class="suave" style="margin:0">Lead descartado. No hay acciones.</p>'
+            : l.etapa === 'descartado' ? `<p class="suave" style="margin:0 0 10px">Lead descartado${l.en_lista_negra ? ' y en lista negra: para volver a llamarlo hay que <a href="#/lista-negra">quitarlo de la lista</a> primero' : ''}.</p>
+              ${l.en_lista_negra ? '' : '<div class="acciones" style="margin-top:0"><button class="btn" data-ejecutiva="reactivar" title="Vuelve a la cola con una secuencia corta desde hoy">Reactivar</button></div>'}`
             : `<p class="suave" style="margin:0 0 10px">Desde aquí decide la ejecutiva comercial.</p>
               <div class="acciones" style="margin-top:0">
                 ${l.etapa === 'reunion_agendada' ? `<button class="btn primario" data-ejecutiva="reunion_realizada">Reunión realizada</button>
@@ -333,9 +532,11 @@
               </div>`}
           </div>
           <div class="panel" style="margin-top:16px">
-            <h2>Datos</h2>
-            <dl>
+            <h2>Datos <button class="btn mini" id="editar" style="float:right" title="Corregir teléfono, correo, contacto…">Editar</button></h2>
+            <div id="datos-form" hidden></div>
+            <dl id="datos-lista">
               <dt>Teléfono</dt><dd class="num">${esc(telVisible(l.telefono) || '—')}${l.telefono_original && l.telefono && l.telefono_original !== telVisible(l.telefono) ? ` <span class="suave">(archivo: ${esc(l.telefono_original)})</span>` : ''}</dd>
+              ${l.telefono_alt ? `<dt>Otro teléfono</dt><dd class="num">${esc(telVisible(l.telefono_alt))}${deAngie && tel.disponible && tel.disponible() ? ` <button class="btn mini" id="llamar-alt" title="Llamar a este número">📞 Llamar</button>` : ''}</dd>` : ''}
               <dt>Correo</dt><dd>${esc(l.email || '—')}</dd>
               <dt>Ciudad</dt><dd>${esc(l.ciudad || '—')}</dd>
               <dt>Fuente</dt><dd>${esc(l.fuente || '—')}</dd>
@@ -382,7 +583,7 @@
     // Ejecutiva
     $app.querySelectorAll('[data-ejecutiva]').forEach(b => b.addEventListener('click', async () => {
       const accion = b.dataset.ejecutiva;
-      const nota = window.prompt('Nota (opcional):', '') ;
+      const nota = window.prompt(accion === 'reactivar' ? '¿Por qué se retoma? (opcional)' : 'Nota (opcional):', '') ;
       if (nota === null) return;
       b.disabled = true;
       try { despues(await api(`leads/${l.id}/ejecutiva`, { method: 'POST', body: { accion, nota } })); await vistaLead(l.id); }
@@ -390,13 +591,41 @@
     }));
 
     const $desc = document.getElementById('descartar');
-    if ($desc) $desc.addEventListener('click', () => abrirResultado(l, { soloDescarte: true }));
+    if ($desc) $desc.addEventListener('click', () => abrirSacar(l, { alTerminar: () => vistaLead(l.id) }));
 
     const $manual = document.getElementById('llamada-manual');
     if ($manual) $manual.addEventListener('click', () => abrirResultado(l, {}));
 
+    // Editar datos de contacto (los números cambian y las bases traen errores).
+    const $editar = document.getElementById('editar');
+    if ($editar) $editar.addEventListener('click', () => {
+      const $f = document.getElementById('datos-form'), $dl = document.getElementById('datos-lista');
+      const campo = (k, label, v, extra = '') => `<div><label>${label}</label><input name="${k}" value="${esc(v || '')}" ${extra} /></div>`;
+      $f.innerHTML = `<form class="form-panel" id="frm-editar" style="grid-template-columns:1fr 1fr">
+          ${campo('empresa', 'Empresa', l.empresa, 'required')}${campo('contacto', 'Contacto', l.contacto)}
+          ${campo('cargo', 'Cargo', l.cargo)}${campo('ciudad', 'Ciudad', l.ciudad)}
+          ${campo('telefono', 'Teléfono principal', telVisible(l.telefono), 'inputmode="tel"')}${campo('telefono_alt', 'Otro teléfono', telVisible(l.telefono_alt), 'inputmode="tel" placeholder="Si tiene otro número"')}
+          ${campo('email', 'Correo', l.email, 'type="email"')}
+          <div class="acciones" style="grid-column:1/-1;margin:0"><button class="btn primario" type="submit">Guardar</button><button class="btn" type="button" id="editar-cancelar">Cancelar</button></div>
+          <div id="editar-error" style="grid-column:1/-1"></div></form>`;
+      $f.hidden = false; $dl.hidden = true; $editar.hidden = true;
+      document.getElementById('editar-cancelar').addEventListener('click', () => { $f.hidden = true; $dl.hidden = false; $editar.hidden = false; });
+      document.getElementById('frm-editar').addEventListener('submit', async e => {
+        e.preventDefault();
+        const d = Object.fromEntries(new FormData(e.target));
+        try {
+          const r = await api(`leads/${l.id}/editar`, { method: 'POST', body: d });
+          avisar(r.sin_cambios ? 'Sin cambios.' : 'Datos actualizados: ' + Object.keys(r.cambios).join(', ') + '.');
+          await vistaLead(l.id);
+        } catch (err) { document.getElementById('editar-error').innerHTML = pintarError(err); }
+      });
+    });
+
     const $llamar = document.getElementById('llamar');
-    if ($llamar && puedeLlamar) $llamar.addEventListener('click', () => {
+    const $llamarAlt = document.getElementById('llamar-alt');
+    if ($llamarAlt) $llamarAlt.addEventListener('click', () => iniciarLlamada(l.telefono_alt));
+    if ($llamar && puedeLlamar) $llamar.addEventListener('click', () => iniciarLlamada(l.telefono));
+    function iniciarLlamada(numero) {
       const $estado = document.getElementById('llamada-estado');
       const uuid = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
       let enCurso = true, inicio = null, reloj = null;
@@ -412,7 +641,7 @@
       };
       $llamar.disabled = true;
       pintar('conectando', 'Preparando la llamada…');
-      tel.llamar({ lead: l, uuid }, {
+      tel.llamar({ lead: l, uuid, telefono: numero }, {
         estado: txt => {
           const fase = /En llamada/.test(txt) ? 'activa' : (/Timbrando|Marcando/.test(txt) ? 'timbrando' : 'conectando');
           if (fase === 'activa' && !inicio) { inicio = Date.now(); reloj = setInterval(() => { const r = document.getElementById('reloj'); if (r) r.textContent = mmss(Date.now() - inicio); }, 1000); }
@@ -430,11 +659,35 @@
             return;
           }
           const dur = inicio ? ` · ${mmss(Date.now() - inicio)}` : '';
-          $estado.innerHTML = `<div class="llamada fin"><span class="punto"></span><div class="txt"><b>${info && info.contesto ? 'Llamada terminada' + dur : 'No contestaron' + (info && info.motivo ? ' (' + esc(info.motivo) + ')' : '')}</b></div></div>`;
+          // El operador no cursó la llamada (número no encontrado, falla de central): no es un
+          // resultado de prospección. Angie ve el motivo exacto y decide qué hacer.
+          if (info && ['numero_invalido', 'fallo_central'].includes(info.estadoVox)) return pintarFallo(info);
+          $estado.innerHTML = `<div class="llamada fin"><span class="punto"></span><div class="txt"><b>${info && info.contesto ? 'Llamada terminada' + dur : esc((info && info.motivoLegible) || 'No contestaron')}</b></div></div>`;
           if (!(info && info.cancelada)) abrirResultado(l, { callUuid: uuid, obligatorio: true });
         },
       });
-    });
+      function pintarFallo(info) {
+        const invalido = info.estadoVox === 'numero_invalido';
+        $estado.innerHTML = `<div class="fallo">
+          <b>${invalido ? 'No salió: el operador no encuentra el número' : 'No salió: falla de la central'}</b>
+          <div class="suave" style="font-size:12px">${esc(telVisible(numero))} · código ${esc(info.codigo || '?')}${info.motivo ? ' ' + esc(info.motivo) : ''} · ${plural(info.intentos || 1, 'intento', 'intentos')}. ${invalido ? 'Puede ser un número malo, o un número portado que esta ruta no encuentra.' : 'Suele ser pasajero.'}</div>
+          <div class="acciones" style="margin:8px 0 0">
+            <button class="btn primario" id="fallo-reintentar">Volver a marcar</button>
+            <button class="btn" id="fallo-reportar" title="Queda registrado para revisar la ruta con Voximplant">Desde el celular sí entra: reportar</button>
+            ${invalido ? '<button class="btn" id="fallo-sacar">Número malo: sacar de la cola</button>' : ''}
+            <button class="btn" id="fallo-otro">Registrar otro resultado</button>
+          </div></div>`;
+        document.getElementById('fallo-reintentar').addEventListener('click', () => iniciarLlamada(numero));
+        document.getElementById('fallo-reportar').addEventListener('click', async () => {
+          const b = document.getElementById('fallo-reportar'); b.disabled = true;
+          try { await api('llamadas/reportar', { method: 'POST', body: { uuid, lead_id: l.id, telefono: numero, codigo: info.codigo, estado: info.estadoVox, nota: 'desde el celular sí entra' } }); avisar('Reportado. Santiago lo ve en Pipeline → Fallos de marcación.'); b.textContent = 'Reportado ✓'; }
+          catch (e) { avisar(e.message, 'error'); b.disabled = false; }
+        });
+        const $sacar = document.getElementById('fallo-sacar');
+        if ($sacar) $sacar.addEventListener('click', () => abrirSacar(l, { razon: 'datos_malos', alTerminar: () => { location.hash = '#/cola'; } }));
+        document.getElementById('fallo-otro').addEventListener('click', () => abrirResultado(l, { callUuid: uuid }));
+      }
+    }
   }
 
   // Diálogo de resultado de la llamada (obligatorio al colgar) o de descarte.
@@ -450,6 +703,7 @@
         <div id="campos-descarte" hidden>
           <label>Razón</label>
           <select name="razon">${meta.razones.map(r => `<option value="${r.id}">${esc(r.label)}</option>`).join('')}</select>
+          ${camposReintento()}
         </div>
         <div id="campos-reunion" hidden>
           <label>Fecha y hora de la reunión</label>
@@ -484,6 +738,7 @@
     };
     $frm.querySelectorAll('input[name=resultado]').forEach(r => r.addEventListener('change', mostrar));
     mostrar();
+    enlazarReintento($frm);
     const $cancelar = document.getElementById('cancelar');
     if ($cancelar) $cancelar.addEventListener('click', () => { $modal.innerHTML = ''; });
     $frm.addEventListener('submit', async e => {
@@ -499,7 +754,7 @@
       } else {
         ruta = `leads/${l.id}/toques`;
         Object.assign(body, { canal: 'llamada', resultado, call_uuid: callUuid });
-        if (resultado === 'descartado') body.razon = f.get('razon');
+        if (resultado === 'descartado') { body.razon = f.get('razon'); body.reintento_meses = Number(f.get('reintento') || 0); }
         if (resultado === 'reunion_agendada') {
           const local = f.get('reunion_at');
           body.detalle = {
@@ -619,6 +874,9 @@
     try {
       if (partes[0] === 'importar') await vistaImportar();
       else if (partes[0] === 'pipeline') await vistaPipeline(new URLSearchParams(query));
+      else if (partes[0] === 'lista-negra') await vistaListaNegra();
+      else if (partes[0] === 'fallos') await vistaFallos();
+      else if (partes[0] === 'llamada' && partes[1]) await vistaLlamada(partes[1]);
       else if (partes[0] === 'marcar') vistaMarcar();
       else if (partes[0] === 'semana') await vistaSemana(new URLSearchParams(query));
       else if (partes[0] === 'lead' && partes[1]) {
