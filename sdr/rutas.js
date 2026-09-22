@@ -63,6 +63,7 @@ function rutas({ db, config }) {
     ['post', '/api/vox/webhook', async ({ headers, body }) => { sinDb(); return vox.recibirWebhook(db, process.env, headers || {}, body, config); }],
     // Pipeline de audio: transcripción y métricas por llamada (la app se las muestra solo a VER_TRANSCRIPCION).
     ['get', '/api/pipeline/estado', async () => { sinDb(); return { ...(await P.estado(db)), activo: !!process.env.DEEPGRAM_API_KEY }; }],
+    ['post', '/api/pipeline/revisar', async () => { sinDb(); return P.revisarTodas(db, config); }],
     ['get', '/api/llamadas/:id/transcripcion', async ({ params }) => { sinDb(); return P.transcripcionDeLlamada(db, params.id); }],
     ['post', '/api/llamadas/:id/reprocesar', async ({ params }) => { sinDb(); return P.reencolar(db, params.id); }],
     ['get', '/api/cola', async ({ query }) => { sinDb(); return consultarCola(db, config, { usuario: query.usuario || null }); }],
@@ -84,6 +85,9 @@ function rutas({ db, config }) {
     ['post', '/api/tareas/:id/mover', async ({ params, body }) => { sinDb(); const b = body || {}; return C.mover(db, config, process.env, params.id, { fecha: b.fecha, hora: b.hora, dias: b.dias, titulo: b.titulo, nota: b.nota }); }],
     ['get', '/api/compromisos', async ({ query }) => { sinDb(); return C.listar(db, config, { usuario: query.usuario || null, dias: Number(query.dias) || 7 }); }],
     ['get', '/api/calendario/estado', async () => ({ activo: cal.activo(process.env), usuarios: (config.USUARIOS || []).filter(u => u.email).map(u => u.nombre) })],
+    // Prueba de la delegación: crea y borra un evento en el calendario del usuario dado.
+    ['post', '/api/calendario/reintentar', async () => { sinDb(); return C.reintentarPendientes(db, config, process.env); }],
+    ['post', '/api/calendario/probar', async ({ body }) => cal.probar(process.env, config, (body || {}).usuario || 'Angie')],
     ['get', '/api/semana', async ({ query }) => { sinDb(); return ritmo.resumenSemana(db, config, { fecha: /^\d{4}-\d{2}-\d{2}$/.test(query.fecha || '') ? query.fecha : undefined, usuario: query.usuario || null }); }],
     ['get', '/api/pipeline', async () => { sinDb(); return L.pipeline(db); }],
     ['get', '/api/leads', async ({ query }) => {

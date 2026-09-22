@@ -158,6 +158,20 @@ async function listar(db, config, { usuario = null, ahora = new Date(), dias = 7
   };
 }
 
+// Vuelve a intentar los compromisos pendientes que no tienen evento (falló Google o no había llave).
+// Lo llama el servidor cada tanto y la API /calendario/reintentar.
+async function reintentarPendientes(db, config, env, { limite = 50, fetchFn } = {}) {
+  if (!cal.activo(env)) return { intentados: 0, ok: 0, omitido: 'sin llave' };
+  const r = await db.query(
+    `SELECT id FROM ${T.tasks} WHERE estado = 'pendiente' AND tipo <> 'secuencia' AND gcal_event_id IS NULL AND due_at > NOW() - INTERVAL '1 day' ORDER BY due_at LIMIT $1`, [limite]);
+  let ok = 0; const errores = [];
+  for (const { id } of r.rows) {
+    const g = await sincronizar(db, config, env, id, 'crear', { fetchFn });
+    if (g.ok) ok++; else if (g.error) errores.push({ id, error: g.error });
+  }
+  return { intentados: r.rows.length, ok, errores };
+}
+
 // Usuario con rol ejecutiva para la reunión: la que anotó Angie si existe, si no la primera.
 function ejecutivaPara(config, nombre) {
   const us = config.USUARIOS || [];
@@ -165,4 +179,4 @@ function ejecutivaPara(config, nombre) {
   return (pedida && pedida.rol === 'ejecutiva' ? pedida : us.find(u => u.rol === 'ejecutiva')) || null;
 }
 
-module.exports = { insertar, crear, hecha, eliminar, mover, listar, leer, sincronizar, ejecutivaPara, vencimiento };
+module.exports = { insertar, crear, hecha, eliminar, mover, listar, leer, sincronizar, reintentarPendientes, ejecutivaPara, vencimiento };

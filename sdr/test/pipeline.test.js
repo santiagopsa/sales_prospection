@@ -166,6 +166,15 @@ test('pipeline contra la base', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, a
     assert.match((await P.procesar(db, base, env, rs[1].call_id, { deps: vacio })).error, /vacía/);
   });
 
+  await t.test('revisarTodas: recalcula las que quedaron de antes', async () => {
+    await db.query(`UPDATE sdr.calls SET pipeline_status = 'pendiente_resultado' WHERE uuid = 'u2'`);
+    await db.query(`UPDATE sdr.calls SET pipeline_status = 'error' WHERE uuid = 'u1'`);
+    const r = await P.revisarTodas(db, base);
+    assert.strictEqual(r.pendientes, 1);
+    assert.strictEqual((await db.query(`SELECT pipeline_status FROM sdr.calls WHERE uuid='u2'`)).rows[0].pipeline_status, 'pendiente');
+    assert.strictEqual((await db.query(`SELECT pipeline_status FROM sdr.calls WHERE uuid='u1'`)).rows[0].pipeline_status, 'error');
+  });
+
   await t.test('iniciar: sin llave no arranca', () => {
     const logs = [];
     assert.strictEqual(P.iniciar(db, base, {}, { log: m => logs.push(m), error() {} }), null);

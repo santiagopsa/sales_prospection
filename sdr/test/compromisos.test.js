@@ -156,6 +156,17 @@ test('compromisos contra la base', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }
     assert.strictEqual((await db.query(`SELECT estado FROM sdr.tasks WHERE id=$1`, [c.id])).rows[0].estado, 'hecha');
   });
 
+  await t.test('reintentarPendientes sube los que quedaron sin evento', async () => {
+    const x = await C.crear(db, base, {}, { leadId: await id('ACME'), tipo: 'enviar', titulo: 'Caso de éxito', fecha: new Date(Date.now() + 86400000).toISOString().slice(0, 10), usuario: 'Angie' });
+    assert.strictEqual(x.calendario.omitido, 'sin llave');
+    assert.strictEqual((await C.reintentarPendientes(db, base, {})).omitido, 'sin llave');
+    const antes = g.eventos.size;
+    const r = await C.reintentarPendientes(db, base, ENV, opts);
+    assert.ok(r.ok >= 1);
+    assert.ok(g.eventos.size > antes);
+    assert.ok((await C.leer(db, x.id)).gcal_event_id);
+  });
+
   await t.test('descartar omite también los compromisos del lead', async () => {
     const x = await C.crear(db, base, {}, { leadId: await id('ACME'), tipo: 'enviar', titulo: 'Propuesta', fecha: '2026-09-23', usuario: 'Angie' });
     await registrarEjecutiva(db, base, { leadId: await id('ACME'), accion: 'descartado', razon: 'no_interesa', reintentoMeses: 0, usuario: 'Angie', env: {} });

@@ -153,6 +153,7 @@ async function main() {
       for (const a of inf.avisos) console.log(`  aviso fila ${a.fila}: ${a.avisos.join('; ')}`);
     } else if (cmd === 'pipeline') {
       const P = require('./pipeline');
+      if (args.revisar) { const r = await P.revisarTodas(db, config); console.log(`Revisadas ${r.revisadas} llamadas; ${r.pendientes} quedaron pendientes de transcribir.`); return; }
       if (args.estado || (!args.call && !process.env.DEEPGRAM_API_KEY)) {
         const e = await P.estado(db);
         console.log(`\nLlamadas por estado: ${Object.entries(e.conteo).map(([k, v]) => `${k} ${v}`).join(' · ') || 'ninguna'}`);

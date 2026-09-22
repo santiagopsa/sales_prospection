@@ -38,6 +38,15 @@ async function revisarLlamada(c, config, callId) {
   return r.rows.length ? r.rows[0].pipeline_status : null;
 }
 
+// Pasa por todas las llamadas que aún no entraron al pipeline y les recalcula el estado (por si
+// quedaron de antes de que existiera esta lógica, o si cambió DURACION_MINIMA_PIPELINE_S).
+async function revisarTodas(db, config) {
+  const r = await db.query(`SELECT id FROM ${T.calls} WHERE pipeline_status IN ('no_aplica', 'pendiente_resultado', 'omitida') ORDER BY id`);
+  let n = 0;
+  for (const { id } of r.rows) { const e = await revisarLlamada(db, config, id); if (e === 'pendiente') n++; }
+  return { revisadas: r.rows.length, pendientes: n };
+}
+
 async function leerLlamada(db, callId) {
   const r = await db.query(`SELECT * FROM ${T.calls} WHERE id = $1`, [Number(callId)]);
   if (!r.rows.length) throw error(404, 'Llamada no encontrada');
@@ -135,7 +144,8 @@ async function transcripcionDeLlamada(db, callId) {
 // Trabajador en el servidor: revisa cada PIPELINE_INTERVALO_S si hay pendientes. Sin
 // DEEPGRAM_API_KEY no arranca (y lo dice una vez). Devuelve el temporizador para poder pararlo.
 function iniciar(db, config, env = process.env, log = console) {
-  if (!env.DEEPGRAM_API_KEY) { log.log('[sdr/pipeline] sin DEEPGRAM_API_KEY: las llamadas quedan en "pendiente" hasta que la pongas'); return null; }
+  if (!env.DEEPGRAM_API_KEY && !env.GOOGLE_CALENDAR_KEY_FILE && !env.GOOGLE_CALENDAR_KEY) { log.log('[sdr/pipeline] sin DEEPGRAM_API_KEY ni llave de calendario: nada que hacer en segundo plano'); return null; }
+  if (!env.DEEPGRAM_API_KEY) log.log('[sdr/pipeline] sin DEEPGRAM_API_KEY: las llamadas quedan en "pendiente" hasta que la pongas');
   let enCurso = false;
   const tick = async () => {
     if (enCurso) return;
@@ -143,6 +153,9 @@ function iniciar(db, config, env = process.env, log = console) {
     try {
       const rs = await correrPendientes(db, config, env, { limite: 3 });
       for (const r of rs) log.log(`[sdr/pipeline] llamada ${r.call_id}: ${r.estado}${r.error ? ' · ' + r.error : ''}${r.turnos ? ' · ' + r.turnos + ' turnos' : ''}`);
+      // Compromisos que se quedaron sin evento en el calendario (Google falló): se reintentan aquí.
+      const c = await require('../compromisos').reintentarPendientes(db, config, env, { limite: 10 });
+      if (c.ok) log.log(`[sdr/calendario] ${c.ok} compromisos subidos al calendario en el reintento`);
     } catch (e) { log.error('[sdr/pipeline]', e.message); }
     finally { enCurso = false; }
   };
@@ -155,4 +168,4 @@ function iniciar(db, config, env = process.env, log = console) {
   return timer;
 }
 
-module.exports = { revisarLlamada, procesar, correrPendientes, recalcularMetricas, reencolar, estado, transcripcionDeLlamada, iniciar };
+module.exports = { revisarLlamada, revisarTodas, procesar, correrPendientes, recalcularMetricas, reencolar, estado, transcripcionDeLlamada, iniciar };
