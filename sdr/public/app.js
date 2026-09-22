@@ -28,30 +28,52 @@
   const pintarError = e => `<div class="error">${esc(e.message)}</div>`;
 
   // ---------------------------------------------------------------- cola
-  async function vistaCola() {
+  async function vistaCola(params = new URLSearchParams()) {
     const c = await api('cola');
     const i = c.indicadores;
-    const kpiMeta = (valor, meta, nombre) => `
-      <div class="kpi"><b>${valor == null ? '—' : valor}<span class="suave" style="font-size:14px"> / ${meta}</span></b>
-        <span>${nombre}</span>
-        <div class="meta"><i style="width:${valor == null ? 0 : Math.min(100, Math.round(valor / meta * 100))}%"></i></div>
-        ${valor == null ? '<small>Se cuenta al registrar llamadas (fase 2)</small>' : ''}
-      </div>`;
+    const ver = params.get('ver') || 'todas';   // todas | vencidas | hoy
+    const lista = ver === 'vencidas' ? c.tareas.filter(t => t.vencida) : ver === 'hoy' ? c.tareas.filter(t => !t.vencida) : c.tareas;
+    const kpiLink = (cual, activo) => `href="#/cola${cual === 'todas' ? '' : '?ver=' + cual}" class="kpi enlace ${activo ? 'activo' : ''}"`;
     const hoy = new Date(`${c.fecha}T12:00:00-05:00`).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' });
+    const b = c.bloque && c.bloque.enCurso;
+    const barra = (valor, meta) => `<div class="meta"><i style="width:${Math.min(100, Math.round(valor / Math.max(meta, 1) * 100))}%"></i></div>`;
+    const siguiente = c.tareas.find(t => t.canal === 'llamada' && t.telefono) || c.tareas[0];
     $app.innerHTML = `
       <div class="cabeza">
         <div><h1>Cola del día</h1><div class="suave">${esc(hoy)} · ${plural(c.tareas.length, 'toque pendiente', 'toques pendientes')}</div></div>
-        <a class="btn" href="#/importar">Cargar leads</a>
+        <div class="acciones" style="margin:0">
+          ${siguiente ? `<a class="btn primario grande" href="#/lead/${siguiente.lead_id}${siguiente.canal === 'llamada' && siguiente.telefono ? '?llamar=1' : ''}">${siguiente.canal === 'llamada' ? '📞 Llamar al siguiente' : 'Siguiente toque'} · ${esc(siguiente.empresa)}</a>` : ''}
+          <a class="btn" href="#/marcar">Marcar</a>
+        </div>
       </div>
-      <div class="kpis">
-        <div class="kpi ${i.vencidas ? 'mal' : ''}"><b>${i.vencidas}</b><span>Vencidas</span></div>
-        <div class="kpi"><b>${i.deHoy}</b><span>Para hoy</span></div>
-        <a class="kpi ${i.huerfanos ? 'alerta' : ''}" href="#/pipeline?huerfanos=1" style="color:inherit;text-decoration:none"><b>${i.huerfanos}</b><span>Leads sin próximo toque</span></a>
-        ${kpiMeta(i.marcaciones, i.metaMarcaciones, 'Marcaciones')}
-        ${kpiMeta(i.conversaciones, i.metaConversaciones, 'Conversaciones')}
+      <div class="ritmo">
+        <div class="ritmo-principal">
+          ${b ? `
+            <div class="ritmo-titulo"><b>${esc(b.nombre)}</b> <span class="suave">${b.inicio}–${b.fin} · quedan ${b.minutosRestantes} min</span></div>
+            <div class="ritmo-num"><b>${b.marcaciones}</b><span class="suave"> / ${b.metaMarcaciones} marcaciones en este bloque</span></div>
+            ${barra(b.marcaciones, b.metaMarcaciones)}
+            <div class="suave" style="font-size:12px;margin-top:6px">Hoy: ${i.marcaciones} / ${i.metaMarcaciones} marcaciones · ${i.conversaciones} / ${i.metaConversaciones} conversaciones</div>`
+          : `
+            <div class="ritmo-titulo"><b>Hoy</b> <span class="suave">${c.bloque && c.bloque.siguiente ? `próximo bloque: ${esc(c.bloque.siguiente.nombre)} a las ${c.bloque.siguiente.inicio}` : 'fuera de bloque de prospección'}</span></div>
+            <div class="ritmo-doble">
+              <div><div class="ritmo-num"><b>${i.marcaciones}</b><span class="suave"> / ${i.metaMarcaciones} marcaciones</span></div>${barra(i.marcaciones, i.metaMarcaciones)}</div>
+              <div><div class="ritmo-num"><b>${i.conversaciones}</b><span class="suave"> / ${i.metaConversaciones} conversaciones</span></div>${barra(i.conversaciones, i.metaConversaciones)}</div>
+            </div>`}
+        </div>
+        <div class="ritmo-lado">
+          <div class="racha ${c.racha.hoyCumple ? 'hoy' : ''}"><b>${c.racha.dias}</b><span>${c.racha.dias === 1 ? 'día seguido' : 'días seguidos'} cumpliendo la meta${c.racha.hoyCumple ? ' · hoy ✓' : ''}</span></div>
+          <a href="#/semana" class="suave" style="font-size:12px">Ver la semana →</a>
+        </div>
       </div>
-      ${c.tareas.length ? `<div class="cola">${c.tareas.map((t, n) => `
-        <a class="item" href="#/lead/${t.lead_id}">
+      <div class="alertas">
+        ${i.vencidas ? `<a ${kpiLink(ver === 'vencidas' ? 'todas' : 'vencidas', ver === 'vencidas')} data-mal><b>${i.vencidas}</b><span>${i.vencidas === 1 ? 'toque vencido' : 'toques vencidos'}</span></a>` : ''}
+        ${i.huerfanos ? `<a class="kpi enlace alerta" href="#/pipeline?huerfanos=1"><b>${i.huerfanos}</b><span>${i.huerfanos === 1 ? 'lead sin próximo toque' : 'leads sin próximo toque'}</span></a>` : ''}
+        ${!i.vencidas && !i.huerfanos ? '<span class="suave" style="font-size:12px">Sin vencidos ni leads huérfanos.</span>' : ''}
+        ${ver === 'todas' ? '' : `<a class="kpi enlace" href="#/cola"><b>${c.tareas.length}</b><span>ver todos</span></a>`}
+      </div>
+      ${ver !== 'todas' ? `<div class="filtro-activo suave">Mostrando solo <b>${ver === 'vencidas' ? 'vencidas' : 'las de hoy'}</b> · <a href="#/cola">ver todas</a></div>` : ''}
+      ${lista.length ? `<div class="cola">${lista.map((t, n) => `
+        <div class="item" data-lead="${t.lead_id}">
           <div class="pos">${n + 1}</div>
           <div class="quien">
             <b>${esc(t.empresa)}</b>
@@ -62,9 +84,24 @@
             <span class="chip ${t.canal}">${esc(etiqueta(meta.canales, t.canal))} · paso ${t.paso}/${t.pasos_total}</span>
             ${t.vencida ? `<span class="chip vencida">Vencida ${plural(t.diasVencida, 'día', 'días')}</span>` : '<span class="chip hoy">Hoy</span>'}
             ${t.etapa !== 'nuevo' ? `<span class="chip etapa">${esc(etiqueta(meta.etapas, t.etapa))}</span>` : ''}
+            <span class="mover"><button class="btn mini" data-posponer="1" data-task="${t.id}" title="Mover al siguiente día hábil">Mañana</button><button class="btn mini" data-posponer="5" data-task="${t.id}" title="Mover una semana">+1 semana</button></span>
           </div>
-        </a>`).join('')}</div>`
-        : `<div class="panel vacio">No hay toques pendientes para hoy.<br><a href="#/importar">Carga una lista de leads</a> para empezar.</div>`}`;
+        </div>`).join('')}</div>`
+        : `<div class="panel vacio">${ver === 'todas' ? 'No hay toques pendientes para hoy.<br><a href="#/importar">Carga una lista de leads</a> para empezar.' : 'Nada en este filtro. <a href="#/cola">Ver todas</a>'}</div>`}`;
+
+    // Clic en la tarjeta abre la ficha; los botones de posponer no.
+    $app.querySelectorAll('.item[data-lead]').forEach(el => el.addEventListener('click', e => {
+      if (e.target.closest('button')) return;
+      location.hash = '#/lead/' + el.dataset.lead;
+    }));
+    $app.querySelectorAll('[data-posponer]').forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        const r = await api(`tareas/${b.dataset.task}/posponer`, { method: 'POST', body: { dias: Number(b.dataset.posponer) } });
+        avisar(`Movida al ${fecha(new Date(r.due_at).getTime())}.`);
+        await vistaCola(params);
+      } catch (e) { avisar(e.message, 'error'); b.disabled = false; }
+    }));
   }
 
   // ---------------------------------------------------------------- cargar
@@ -455,6 +492,21 @@
         if (r.proxima) partes.push(`Próximo toque: ${etiqueta(meta.canales, r.proxima.canal)} el ${fecha(new Date(r.proxima.due_at).getTime())}.`);
         (r.avisos || []).forEach(a => partes.push(a));
         avisar(partes.join(' '), (r.avisos || []).length ? 'aviso' : 'ok');
+        // Doble toque: si no contestó, WhatsApp de una vez (abre el chat y registra el toque).
+        if (['no_contesto', 'buzon'].includes(resultado) && l.telefono && ['nuevo', 'contactado', 'conversacion'].includes(r.etapa)) {
+          $modal.innerHTML = `<div class="velo"><div class="dialogo" style="max-width:420px">
+            <h2>No contestó. ¿Enviar WhatsApp ahora?</h2>
+            <p class="suave" style="margin:0 0 12px">Abre el chat con ${esc(telVisible(l.telefono))} y registra el toque.</p>
+            <div class="acciones" style="margin:0"><button class="btn primario" id="wa-si">Sí, abrir WhatsApp</button><button class="btn" id="wa-no">Ahora no</button></div></div></div>`;
+          document.getElementById('wa-no').addEventListener('click', () => { $modal.innerHTML = ''; location.hash = '#/cola'; });
+          document.getElementById('wa-si').addEventListener('click', async () => {
+            window.open(waLink(l.telefono), '_blank', 'noopener');
+            try { const w = await api(`leads/${l.id}/toques`, { method: 'POST', body: { canal: 'whatsapp' } }); avisar(`WhatsApp registrado.${w.proxima ? ' Próximo: ' + etiqueta(meta.canales, w.proxima.canal) + ' el ' + fecha(new Date(w.proxima.due_at).getTime()) + '.' : ''}`); }
+            catch (e) { avisar(e.message, 'error'); }
+            $modal.innerHTML = ''; location.hash = '#/cola';
+          });
+          return;
+        }
         if (location.hash === '#/cola') render(); else location.hash = '#/cola';
       } catch (err) {
         document.getElementById('frm-error').innerHTML = pintarError(err);
@@ -491,6 +543,47 @@
     document.getElementById('solo-crear').addEventListener('click', () => ir(false));
   }
 
+  // ---------------------------------------------------------------- semana
+  async function vistaSemana(params) {
+    const f = params.get('fecha');
+    const w = await api('semana' + (f ? '?fecha=' + f : ''));
+    const dia = x => new Date(x + 'T12:00:00-05:00').toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'short', day: 'numeric' });
+    const rango = `${new Date(w.lunes + 'T12:00:00-05:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })} – ${new Date(w.domingo + 'T12:00:00-05:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}`;
+    const mover = n => { const d = new Date(w.lunes + 'T12:00:00-05:00'); d.setDate(d.getDate() + n * 7); return d.toISOString().slice(0, 10); };
+    const pct = (a, b) => b ? Math.min(100, Math.round(a / b * 100)) : 0;
+    const r = w.ratios;
+    const tasa = (v, nombre, num, den) => `<div class="kpi"><b>${v == null ? '—' : v + '%'}</b><span>${nombre}</span><small>${num} de ${den}</small></div>`;
+    $app.innerHTML = `
+      <div class="cabeza">
+        <div><h1>Semana</h1><div class="suave">${esc(rango)} · <a href="#/semana?fecha=${mover(-1)}">← anterior</a>${w.domingo < w.hoy ? ` · <a href="#/semana?fecha=${mover(1)}">siguiente →</a>` : ''}</div></div>
+        <div class="racha ${w.racha.hoyCumple ? 'hoy' : ''}"><b>${w.racha.dias}</b><span>${w.racha.dias === 1 ? 'día seguido' : 'días seguidos'} cumpliendo la meta</span></div>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><b>${w.totales.marcaciones}<span class="suave" style="font-size:14px"> / ${w.metas.marcaciones}</span></b><span>Marcaciones</span><div class="meta"><i style="width:${pct(w.totales.marcaciones, w.metas.marcaciones)}%"></i></div></div>
+        <div class="kpi"><b>${w.totales.conversaciones}<span class="suave" style="font-size:14px"> / ${w.metas.conversaciones}</span></b><span>Conversaciones</span><div class="meta"><i style="width:${pct(w.totales.conversaciones, w.metas.conversaciones)}%"></i></div></div>
+        <div class="kpi"><b>${w.totales.reuniones}</b><span>Reuniones agendadas</span></div>
+        <div class="kpi"><b>${w.metas.diasCumplidos}<span class="suave" style="font-size:14px"> / ${w.metas.diasHabilesTranscurridos}</span></b><span>Días con meta cumplida</span></div>
+      </div>
+      <div class="panel tabla-env">
+        <table><thead><tr><th>Día</th><th class="num">Marcaciones</th><th class="num">Conversaciones</th><th class="num">Reuniones</th><th class="num">WhatsApp</th><th class="num">Correo</th><th class="num">LinkedIn</th><th>Meta</th></tr></thead>
+        <tbody>${w.dias.map(d => `<tr class="${d.fecha === w.hoy ? 'hoy' : ''} ${d.habil ? '' : 'suave'}">
+          <td>${dia(d.fecha)}</td><td class="num">${d.marcaciones}</td><td class="num">${d.conversaciones}</td><td class="num">${d.reuniones}</td><td class="num">${d.whatsapp}</td><td class="num">${d.correo}</td><td class="num">${d.linkedin}</td>
+          <td>${!d.habil ? '' : d.cumplida ? '<span class="chip whatsapp">cumplida</span>' : (d.fecha < w.hoy ? '<span class="chip vencida">no</span>' : (d.fecha === w.hoy ? '<span class="chip hoy">en curso</span>' : ''))}</td>
+        </tr>`).join('')}</tbody></table>
+      </div>
+      <div class="panel bloque">
+        <h2>Mejora de la semana</h2>
+        <p class="suave" style="margin:0">Los hábitos, el foco de las próximas dos semanas y el mejor momento de la semana aparecen aquí cuando las llamadas con conversación pasen por transcripción y evaluación (siguiente fase).</p>
+      </div>
+      ${w.mostrarRatios ? `<div class="panel bloque"><h2>Tasas · últimos ${w.ratios.hasta === w.ratios.desde ? 1 : 14} días</h2>
+        <div class="kpis" style="margin:0">
+          ${tasa(r.tasaContacto, 'Tasa de contacto', r.conversaciones, r.marcaciones)}
+          ${tasa(r.conversacionAReunion, 'Conversación → reunión', r.agendadas, r.conversaciones)}
+          ${tasa(r.reunionRealizada, 'Reunión realizada', r.realizadas, r.realizadas + r.no_show)}
+          ${tasa(r.realizadaACalificado, 'Realizada → calificado', r.calificados, r.realizadas)}
+        </div></div>` : ''}`;
+  }
+
   // ---------------------------------------------------------------- router
   async function render() {
     const [ruta, query] = (location.hash.replace(/^#\/?/, '') || 'cola').split('?');
@@ -500,6 +593,7 @@
       if (partes[0] === 'importar') await vistaImportar();
       else if (partes[0] === 'pipeline') await vistaPipeline(new URLSearchParams(query));
       else if (partes[0] === 'marcar') vistaMarcar();
+      else if (partes[0] === 'semana') await vistaSemana(new URLSearchParams(query));
       else if (partes[0] === 'lead' && partes[1]) {
         await vistaLead(partes[1]);
         if (new URLSearchParams(query).get('llamar') === '1') {
@@ -508,7 +602,7 @@
           if ($b && !$b.disabled) $b.click(); else avisar('No se puede llamar: ' + (($b && $b.title) || 'sin telefonía'), 'aviso');
         }
       }
-      else await vistaCola();
+      else await vistaCola(new URLSearchParams(query));
     } catch (e) {
       $app.innerHTML = pintarError(e);
     }

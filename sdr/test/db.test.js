@@ -100,6 +100,18 @@ test('integración con Postgres', { skip: !url && 'sin SDR_TEST_DATABASE_URL' },
     await assert.rejects(L.detalleLead(db, 99999), /no encontrado/);
   });
 
+  await t.test('posponer una tarea pendiente', async () => {
+    const { posponerTarea } = require('../cola');
+    const t1 = (await db.query(`SELECT t.id FROM sdr.tasks t JOIN sdr.leads l ON l.id=t.lead_id WHERE l.empresa='Omega' AND t.estado='pendiente' ORDER BY paso LIMIT 1`)).rows[0];
+    const r = await posponerTarea(db, config, { taskId: t1.id, dias: 1, ahora: jueves });
+    assert.strictEqual(r.fecha, '2026-09-18');
+    const c = await consultarCola(db, config, { ahora: jueves });
+    assert.ok(!c.tareas.some(x => x.empresa === 'Omega'));           // ya no es de hoy
+    await assert.rejects(posponerTarea(db, config, { taskId: t1.id, dias: 0 }), /entre 1 y 60/);
+    await db.query(`UPDATE sdr.tasks SET estado='hecha' WHERE id=$1`, [t1.id]);
+    await assert.rejects(posponerTarea(db, config, { taskId: t1.id, dias: 2 }), /pendiente/);
+  });
+
   await t.test('marcación directa: crea lead con secuencia o devuelve el existente', async () => {
     const n = await L.leadParaMarcar(db, config, { telefono: '311 222 3344', empresa: '', ahora: jueves });
     assert.strictEqual(n.existente, false);

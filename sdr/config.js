@@ -124,4 +124,30 @@ module.exports = {
   // Qué mueve: llamadas más cortas que esto (segundos contestados) no pasan por transcripción ni
   // evaluación aunque el resultado sea "conversación". Fase 4.
   DURACION_MINIMA_PIPELINE_S: 45,
+
+  // ---------------------------------------------------------------------------
+  // Ritmo del día: bloques de prospección y racha
+  // ---------------------------------------------------------------------------
+  // Qué mueve: la barra grande de la cola. Dentro del horario de un bloque (hora de Bogotá) se
+  // muestran las marcaciones de ESE bloque contra su meta y el tiempo que queda; fuera de los
+  // bloques se muestra el día completo. Lista vacía = solo el día completo.
+  // Ver el efecto: node sdr/cli.js cola --set 'BLOQUES_PROSPECCION=[{"inicio":"08:00","fin":"12:00","metaMarcaciones":40}]'
+  BLOQUES_PROSPECCION: [
+    { nombre: 'Bloque de la mañana', inicio: '08:00', fin: '10:00', metaMarcaciones: 30 },
+    { nombre: 'Bloque de la tarde',  inicio: '14:00', fin: '16:00', metaMarcaciones: 30 },
+  ],
+
+  // Qué mueve: qué cuenta como "día cumplido" para la racha: llegar a la meta de marcaciones,
+  // a la de conversaciones, o a cualquiera de las dos. Solo cuentan días hábiles.
+  RACHA_CUMPLE_CON: 'marcaciones',   // 'marcaciones' | 'conversaciones' | 'cualquiera'
+
+  // ---------------------------------------------------------------------------
+  // Vista semanal
+  // ---------------------------------------------------------------------------
+  // Qué mueve: si la vista semanal muestra las tasas (contacto, conversación→reunión, no-show,
+  // realizada→calificado). Con pocas llamadas fluctúan y desmoralizan; se activa cuando haya volumen.
+  // Ver el efecto: node sdr/cli.js semana --set MOSTRAR_RATIOS=true
+  MOSTRAR_RATIOS: false,
+  // Qué mueve: la ventana móvil (días) sobre la que se calculan las tasas.
+  VENTANA_RATIOS_DIAS: 14,
 };

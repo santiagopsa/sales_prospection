@@ -5,6 +5,7 @@
 //   node sdr/cli.js secuencia [--desde 2026-09-21]            fechas de las tareas de un lead nuevo
 //   node sdr/cli.js cola                                        orden de la cola de hoy con el desglose del puntaje
 //   node sdr/cli.js importar archivo.csv [--confirmar]         carga desde la terminal (sin --confirmar, simula)
+//   node sdr/cli.js semana [--fecha 2026-09-22]                resumen semanal (actividad, racha, tasas si MOSTRAR_RATIOS)
 //   node sdr/cli.js vox:setup [--key ruta.json] [--url https://…] [--numero +57…] [--rotar]
 //                                                               deja Voximplant listo e imprime las variables de Render
 //   node sdr/cli.js vox:escenario                               imprime el escenario que se subiría (para revisarlo)
@@ -99,6 +100,16 @@ async function main() {
         const d = t.desglose;
         console.log(`  ${pad(n + 1, 4)}${pad(t.puntaje, 5)}${pad(`${d.etapa}+${d.canal}+${d.atraso}${t.diasVencida ? ` (${t.diasVencida}d)` : ''}`, 20)}${pad(CANAL_LABEL[t.canal], 10)}${pad(ETAPA_LABEL[t.etapa], 14)}${t.empresa}`);
       });
+    } else if (cmd === 'semana') {
+      const { resumenSemana } = require('./ritmo');
+      const r = await resumenSemana(db, config, { fecha: args.fecha });
+      console.log(`\nSemana del ${r.lunes} al ${r.domingo}\n`);
+      console.log(`  ${pad('fecha', 12)}${pad('marc', 6)}${pad('conv', 6)}${pad('reun', 6)}${pad('wa', 5)}${pad('mail', 6)}${pad('in', 4)}cumplida`);
+      for (const d of r.dias) console.log(`  ${pad(d.fecha, 12)}${pad(d.marcaciones, 6)}${pad(d.conversaciones, 6)}${pad(d.reuniones, 6)}${pad(d.whatsapp, 5)}${pad(d.correo, 6)}${pad(d.linkedin, 4)}${d.habil ? (d.cumplida ? 'sí' : (d.fecha <= r.hoy ? 'no' : '')) : '—'}`);
+      console.log(`\n  Totales: ${r.totales.marcaciones} marcaciones (meta ${r.metas.marcaciones}) · ${r.totales.conversaciones} conversaciones (meta ${r.metas.conversaciones}) · ${r.totales.reuniones} reuniones`);
+      console.log(`  Días cumplidos: ${r.metas.diasCumplidos} de ${r.metas.diasHabilesTranscurridos} · racha: ${r.racha.dias} día(s)`);
+      const x = r.ratios;
+      console.log(`  Tasas (${x.desde} → ${x.hasta})${r.mostrarRatios ? '' : ' [ocultas en la app: MOSTRAR_RATIOS=false]'}: contacto ${x.tasaContacto ?? '—'}% · conv→reunión ${x.conversacionAReunion ?? '—'}% · reunión realizada ${x.reunionRealizada ?? '—'}% · realizada→calificado ${x.realizadaACalificado ?? '—'}%`);
     } else if (cmd === 'importar') {
       const { importar } = require('./importar');
       const ruta = args._[1];

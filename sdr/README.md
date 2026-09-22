@@ -5,8 +5,9 @@ de la misma base. No toca `deals`, `wishlist` ni `verificacion`, salvo para **cr
 agenda una reunión. No tiene login: quien tenga el enlace `/sdr` opera todo (y puede llamar con cargo a la
 cuenta de Voximplant: no compartas el enlace fuera del equipo).
 
-Estado: fases 1 a 3 (leads, cola, resultados, etapas, llamadas desde el navegador). Pendientes: pipeline de
-audio (4), reporte semanal (5), calibración (6).
+Estado: fases 1 a 3 (leads, cola, resultados, etapas, llamadas desde el navegador) más la vista **Semana** con
+actividad, racha y tasas (ocultas tras `MOSTRAR_RATIOS`). Pendientes: pipeline de audio (4), la parte de mejora del
+reporte semanal (5), calibración (6).
 
 ## Variables de entorno (Render)
 
@@ -62,6 +63,8 @@ efecto con `--set`, que no guarda nada:
 node sdr/cli.js secuencia --desde 2026-09-21 --set SALTAR_FINES_DE_SEMANA=false
 node sdr/cli.js cola --set PRIORIDAD.porCanal.llamada=25
 node sdr/cli.js importar archivo.csv            # simula la carga; --confirmar para cargar
+node sdr/cli.js semana --set MOSTRAR_RATIOS=true    # resumen semanal con las tasas que la app oculta
+node sdr/cli.js cola --set RACHA_CUMPLE_CON=cualquiera
 ```
 
 `cola` e `importar` necesitan `DATABASE_URL`. Si el nombre del hueco tiene un error, el comando falla y lo dice.

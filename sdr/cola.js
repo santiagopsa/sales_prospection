@@ -7,6 +7,7 @@ const { T } = require('./schema');
 const { ETAPAS_DE_ANGIE } = require('./dominio');
 const tiempo = require('./tiempo');
 const { actividadDelDia } = require('./resultados');
+const ritmo = require('./ritmo');
 
 function prioridad(tarea, config, ahora) {
   const P = config.PRIORIDAD;
@@ -55,9 +56,12 @@ async function consultarCola(db, config, { ahora = new Date() } = {}) {
   )).rows[0].n;
 
   const act = await actividadDelDia(db, hoy);
+  const [bloque, racha] = await Promise.all([ritmo.bloqueActual(db, config, ahora), ritmo.racha(db, config, ahora)]);
   return {
     fecha: hoy,
     tareas,
+    bloque,
+    racha,
     indicadores: {
       vencidas: tareas.filter(t => t.vencida).length,
       deHoy: tareas.filter(t => !t.vencida).length,
@@ -71,4 +75,19 @@ async function consultarCola(db, config, { ahora = new Date() } = {}) {
   };
 }
 
-module.exports = { consultarCola, prioridad };
+// Posponer una tarea pendiente: la mueve `dias` días (hábiles según config) desde hoy, a la hora
+// de inicio de jornada. No toca el resto de la secuencia.
+async function posponerTarea(db, config, { taskId, dias, ahora = new Date() }) {
+  taskId = Number(taskId); dias = Number(dias);
+  if (!Number.isInteger(taskId)) throw Object.assign(new Error('tarea inválida'), { status: 400 });
+  if (!Number.isInteger(dias) || dias < 1 || dias > 60) throw Object.assign(new Error('Los días deben estar entre 1 y 60'), { status: 400 });
+  const fecha = tiempo.avanzar(tiempo.fechaBogota(ahora), dias, !!config.SALTAR_FINES_DE_SEMANA);
+  const due = tiempo.instante(fecha, config.HORA_INICIO_JORNADA);
+  const r = await db.query(
+    `UPDATE ${T.tasks} SET due_at = $2 WHERE id = $1 AND estado = 'pendiente' RETURNING id, lead_id, canal, due_at`,
+    [taskId, due.toISOString()]);
+  if (!r.rows.length) throw Object.assign(new Error('La tarea no existe o ya no está pendiente'), { status: 404 });
+  return { ...r.rows[0], fecha };
+}
+
+module.exports = { consultarCola, prioridad, posponerTarea };

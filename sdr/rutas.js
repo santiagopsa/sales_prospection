@@ -2,11 +2,12 @@
 // (producción) y el servidor de desarrollo sin dependencias (sdr/dev.js), así que las dos
 // formas de correr el módulo no pueden divergir.
 const { importar } = require('./importar');
-const { consultarCola } = require('./cola');
+const { consultarCola, posponerTarea } = require('./cola');
 const L = require('./leads');
 const D = require('./dominio');
 const { registrarToque, registrarEjecutiva } = require('./resultados');
 const vox = require('./vox/servidor');
+const ritmo = require('./ritmo');
 const { ETAPAS, ETAPA_LABEL, CANALES, CANAL_LABEL } = D;
 
 function rutas({ db, config }) {
@@ -41,6 +42,8 @@ function rutas({ db, config }) {
     ['post', '/api/vox/login-key', async ({ body }) => vox.firmarLogin(process.env, (body || {}).key)],
     ['post', '/api/vox/webhook', async ({ headers, body }) => { sinDb(); return vox.recibirWebhook(db, process.env, headers || {}, body); }],
     ['get', '/api/cola', async () => { sinDb(); return consultarCola(db, config); }],
+    ['post', '/api/tareas/:id/posponer', async ({ params, body }) => { sinDb(); return posponerTarea(db, config, { taskId: params.id, dias: (body || {}).dias }); }],
+    ['get', '/api/semana', async ({ query }) => { sinDb(); return ritmo.resumenSemana(db, config, { fecha: /^\d{4}-\d{2}-\d{2}$/.test(query.fecha || '') ? query.fecha : undefined }); }],
     ['get', '/api/pipeline', async () => { sinDb(); return L.pipeline(db); }],
     ['get', '/api/leads', async ({ query }) => {
       sinDb();
