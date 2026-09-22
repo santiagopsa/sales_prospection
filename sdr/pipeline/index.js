@@ -6,9 +6,12 @@
 //   pendiente_resultado  llegó el webhook (grabación) pero Angie no ha puesto resultado
 //   pendiente            lista: hay resultado con conversación, grabación y duración suficiente
 //   transcribiendo       en proceso
-//   transcrito           turnos y métricas guardados
+//   transcrito           turnos y métricas guardados; falta la evaluación con rúbrica
+//   evaluando            el evaluador (Claude) está en ello
+//   evaluado             transcripción + evaluación listas
 //   omitida              corta, sin grabación al final, o resultado sin conversación
 //   error                falló PIPELINE_REINTENTOS veces; se ve en `node sdr/cli.js pipeline --estado`
+//   error_evaluacion     la transcripción está, la evaluación falló EVALUADOR_REINTENTOS veces
 const { T } = require('../schema');
 const D = require('../dominio');
 const deepgram = require('./deepgram');
@@ -104,6 +107,34 @@ async function correrPendientes(db, config, env, { limite = 5, deps } = {}) {
   return resultados;
 }
 
+// Evalúa UNA llamada transcrita con la rúbrica activa. `forzar` reevalúa aunque ya esté evaluada.
+async function evaluar(db, config, env, callId, { deps = {}, forzar = false } = {}) {
+  const E = require('../evaluador');
+  const llamada = await leerLlamada(db, callId);
+  if (!forzar && llamada.pipeline_status !== 'transcrito') return { call_id: llamada.id, estado: llamada.pipeline_status, saltada: true };
+  if (!env.ANTHROPIC_API_KEY) return { call_id: llamada.id, estado: llamada.pipeline_status, saltada: true, motivo: 'sin ANTHROPIC_API_KEY' };
+  await db.query(`UPDATE ${T.calls} SET pipeline_status = 'evaluando', pipeline_at = NOW(), updated_at = NOW() WHERE id = $1`, [llamada.id]);
+  try {
+    const r = await E.evaluarLlamada(db, config, env, llamada.id, { fetchFn: deps.fetchFn });
+    await db.query(`UPDATE ${T.calls} SET pipeline_status = 'evaluado', pipeline_error = NULL, pipeline_intentos = 0, pipeline_at = NOW(), updated_at = NOW() WHERE id = $1`, [llamada.id]);
+    return { call_id: llamada.id, estado: 'evaluado', no_cumple: r.resultado.no_cumple, avisos: r.avisos, tokens: r.tokens };
+  } catch (e) {
+    const intentos = (llamada.pipeline_intentos || 0) + 1;
+    const estado = intentos >= (Number(config.EVALUADOR_REINTENTOS) || 1) ? 'error_evaluacion' : 'transcrito';
+    await db.query(`UPDATE ${T.calls} SET pipeline_status = $2, pipeline_error = $3, pipeline_intentos = $4, pipeline_at = NOW(), updated_at = NOW() WHERE id = $1`,
+      [llamada.id, estado, String(e.message).slice(0, 500), intentos]);
+    return { call_id: llamada.id, estado, error: e.message, intentos };
+  }
+}
+
+async function correrEvaluaciones(db, config, env, { limite = 3, deps } = {}) {
+  if (!env.ANTHROPIC_API_KEY) return [];
+  const r = await db.query(`SELECT id FROM ${T.calls} WHERE pipeline_status = 'transcrito' ORDER BY id LIMIT $1`, [limite]);
+  const out = [];
+  for (const { id } of r.rows) out.push(await evaluar(db, config, env, id, { deps }));
+  return out;
+}
+
 // Vuelve a calcular las métricas de una llamada con la config actual, sin transcribir de nuevo.
 async function recalcularMetricas(db, config, callId) {
   const r = await db.query(`SELECT id, turnos FROM ${T.transcripts} WHERE call_id = $1`, [Number(callId)]);
@@ -123,12 +154,12 @@ async function reencolar(db, callId) {
 
 async function estado(db) {
   const r = await db.query(`SELECT pipeline_status AS estado, COUNT(*)::int AS n FROM ${T.calls} GROUP BY pipeline_status ORDER BY 1`);
-  const errores = await db.query(`SELECT id, lead_id, pipeline_error, pipeline_intentos, pipeline_at FROM ${T.calls} WHERE pipeline_status = 'error' ORDER BY pipeline_at DESC LIMIT 10`);
+  const errores = await db.query(`SELECT id, lead_id, pipeline_status, pipeline_error, pipeline_intentos, pipeline_at FROM ${T.calls} WHERE pipeline_status IN ('error', 'error_evaluacion') ORDER BY pipeline_at DESC LIMIT 10`);
   return { conteo: Object.fromEntries(r.rows.map(x => [x.estado, x.n])), errores: errores.rows };
 }
 
 const ms = col => `(EXTRACT(EPOCH FROM ${col}) * 1000)::float8`;
-async function transcripcionDeLlamada(db, callId) {
+async function transcripcionDeLlamada(db, callId, config = require('../config')) {
   const r = await db.query(
     `SELECT k.id, k.lead_id, k.duracion_s, k.record_url, k.pipeline_status, k.pipeline_error, ${ms('COALESCE(k.started_at, k.created_at)')} AS started_ms,
             l.empresa, l.contacto, x.resultado, x.nota, x.usuario,
@@ -138,13 +169,15 @@ async function transcripcionDeLlamada(db, callId) {
      LEFT JOIN ${T.transcripts} tr ON tr.call_id = k.id
      WHERE k.id = $1`, [Number(callId)]);
   if (!r.rows.length) throw error(404, 'Llamada no encontrada');
-  return r.rows[0];
+  const fila = r.rows[0];
+  fila.evaluacion = await require('../evaluador').evaluacionDeLlamada(db, config, fila.id);
+  return fila;
 }
 
 // Trabajador en el servidor: revisa cada PIPELINE_INTERVALO_S si hay pendientes. Sin
 // DEEPGRAM_API_KEY no arranca (y lo dice una vez). Devuelve el temporizador para poder pararlo.
 function iniciar(db, config, env = process.env, log = console) {
-  if (!env.DEEPGRAM_API_KEY && !env.GOOGLE_CALENDAR_KEY_FILE && !env.GOOGLE_CALENDAR_KEY) { log.log('[sdr/pipeline] sin DEEPGRAM_API_KEY ni llave de calendario: nada que hacer en segundo plano'); return null; }
+  if (!env.DEEPGRAM_API_KEY && !env.GOOGLE_CALENDAR_KEY_FILE && !env.GOOGLE_CALENDAR_KEY && !env.ANTHROPIC_API_KEY) { log.log('[sdr/pipeline] sin DEEPGRAM_API_KEY ni llave de calendario: nada que hacer en segundo plano'); return null; }
   if (!env.DEEPGRAM_API_KEY) log.log('[sdr/pipeline] sin DEEPGRAM_API_KEY: las llamadas quedan en "pendiente" hasta que la pongas');
   let enCurso = false;
   const tick = async () => {
@@ -153,6 +186,10 @@ function iniciar(db, config, env = process.env, log = console) {
     try {
       const rs = await correrPendientes(db, config, env, { limite: 3 });
       for (const r of rs) log.log(`[sdr/pipeline] llamada ${r.call_id}: ${r.estado}${r.error ? ' · ' + r.error : ''}${r.turnos ? ' · ' + r.turnos + ' turnos' : ''}`);
+      const ev = await correrEvaluaciones(db, config, env, { limite: 3 });
+      for (const r of ev) log.log(`[sdr/evaluador] llamada ${r.call_id}: ${r.estado}${r.error ? ' · ' + r.error : ''}${r.no_cumple ? ' · no cumple: ' + (r.no_cumple.join(', ') || 'nada') : ''}`);
+      // Foto del informe semanal (viernes por la tarde), una vez por semana y usuario.
+      await require('../mejora').jobInforme(db, config, new Date()).catch(e => log.error('[sdr/mejora]', e.message));
       // Compromisos que se quedaron sin evento en el calendario (Google falló): se reintentan aquí.
       const c = await require('../compromisos').reintentarPendientes(db, config, env, { limite: 10 });
       if (c.ok) log.log(`[sdr/calendario] ${c.ok} compromisos subidos al calendario en el reintento`);
@@ -168,4 +205,4 @@ function iniciar(db, config, env = process.env, log = console) {
   return timer;
 }
 
-module.exports = { revisarLlamada, revisarTodas, procesar, correrPendientes, recalcularMetricas, reencolar, estado, transcripcionDeLlamada, iniciar };
+module.exports = { revisarLlamada, revisarTodas, procesar, evaluar, correrEvaluaciones, correrPendientes, recalcularMetricas, reencolar, estado, transcripcionDeLlamada, iniciar };

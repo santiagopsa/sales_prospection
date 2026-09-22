@@ -5,9 +5,9 @@ de la misma base. No toca `deals`, `wishlist` ni `verificacion`, salvo para **cr
 agenda una reunión. No tiene login: quien tenga el enlace `/sdr` opera todo (y puede llamar con cargo a la
 cuenta de Voximplant: no compartas el enlace fuera del equipo).
 
-Estado: fases 1 a 3 (leads, cola, resultados, etapas, llamadas desde el navegador), la vista **Semana** con
-actividad, racha y tasas (ocultas tras `MOSTRAR_RATIOS`) y la primera mitad de la fase 4: transcripción y
-métricas por llamada. Pendientes: evaluación con rúbrica (resto de 4), mejora del reporte semanal (5), calibración (6).
+Estado: fases 1 a 5 (leads, cola, resultados, etapas, llamadas desde el navegador, compromisos y calendario,
+transcripción + métricas, evaluación con rúbrica, mejora semanal). Pendiente: calibración con 20 llamadas
+puntuadas a mano (fase 6).
 
 ## Variables de entorno (Render)
 
@@ -23,6 +23,7 @@ métricas por llamada. Pendientes: evaluación con rúbrica (resto de 4), mejora
 | `PUBLIC_URL` | URL pública del servicio | `https://peaku-sandler.onrender.com` |
 | `VOX_NODE` | Nodo de la cuenta (1–13); sin él el SDK no conecta | Dashboard de Voximplant → "Credentials for working with API, SDK, SIP" |
 | `DEEPGRAM_API_KEY` | Transcripción de las llamadas con conversación | console.deepgram.com → API Keys |
+| `ANTHROPIC_API_KEY` | Evaluación de las llamadas con la rúbrica (ya existe para el Sandler) | Render |
 | `GOOGLE_CALENDAR_KEY_FILE` | Ruta al JSON de la cuenta de servicio (Secret File de Render: `/etc/secrets/google-calendar-key.json`) | Google Cloud → cuenta de servicio → clave JSON; delegación de dominio en el Admin de Workspace |
 
 Sin las `VOX_*` todo funciona menos el botón **Llamar**, que aparece apagado con el motivo. Angie puede registrar
@@ -99,6 +100,38 @@ node sdr/cli.js metricas --call 12 --set 'PALABRAS_PITCH=["peaku","ofrecemos"]' 
 Costo de referencia: Deepgram Nova cobra por minuto de audio; una llamada de 5 minutos en estéreo son 10 minutos
 facturados (dos canales). Si la URL de la grabación no es pública, el pipeline descarga el audio y lo manda en bytes
 (`PIPELINE_DESCARGAR_AUDIO` lo fuerza siempre).
+
+## Evaluación con rúbrica y mejora semanal
+
+Después de transcribir, cada llamada con conversación pasa por Claude con la **rúbrica activa** (`RUBRICA_ACTIVA`,
+versiones en `sdr/rubrica/`; la v1 tiene 10 criterios de *Cold Calling Sucks*, *Fanatical Prospecting* y *The
+Sales Development Playbook*). El evaluador devuelve JSON estricto por criterio: cumple / no cumple / no aplica,
+**cita literal** (sin cita no se acepta un "no cumple": el validador lo descarta), confianza 0–1 y una nota
+concreta; nunca consejo genérico. Se guarda en `sdr.evaluations` atado a la versión de la rúbrica, así una v2
+no contamina las comparaciones. Estados del pipeline: transcrito → evaluando → evaluado (o error_evaluacion
+tras `EVALUADOR_REINTENTOS`). Luisa y Santiago ven la evaluación en la página de la llamada; Angie no, por
+diseño: ella recibe el semanal.
+
+**Mejora de la semana** (vista *Semana*, para Angie): con las evaluaciones de la semana se calculan por
+criterio cuántas llamadas fallaron de las que aplicaban. Un criterio es **hábito** solo si falla en
+`HABITO_MIN_LLAMADAS` o más llamadas y en `HABITO_MIN_TASA` de las que aplicaban (una llamada mala no es un
+hábito). El hábito que más pesa (`PESOS_CRITERIOS`: las palancas pesan 2) se propone como **foco** para
+`FOCO_SEMANAS` semanas; Angie lo confirma desde la app (o elige otro criterio). Mientras el foco está activo, la
+vista muestra la tasa inicial contra la de la semana; cuando vence, aparece como *foco anterior* con su
+seguimiento y se propone el siguiente. También sale el **mejor momento** (la cita de Angie que más vale la
+pena repetir, de la llamada con más criterios cumplidos) y lo que no falló. Los viernes a las
+`INFORME_HORA` el servidor guarda una foto del informe (`sdr.informes_semana`) para el histórico.
+
+```
+node sdr/cli.js rubrica                          # la rúbrica activa con sus pesos
+node sdr/cli.js evaluar --call 12                # evalúa (o reevalúa) una llamada transcrita
+node sdr/cli.js mejora [--fecha 2026-09-25] [--usuario Angie]
+node sdr/cli.js mejora --set HABITO_MIN_LLAMADAS=2 --set PESOS_CRITERIOS.no_monologo=3   # ver el efecto de mover un hueco
+```
+
+Cambiar la rúbrica: copia `sdr/rubrica/v1.js` como `v2.js`, edita, pon `RUBRICA_ACTIVA: 'v2'` y despliega; las
+llamadas ya evaluadas conservan su v1. Costo de referencia: una llamada de 5 minutos son ~3–4 mil tokens de
+entrada y ~500 de salida.
 
 ## Mover un hueco
 

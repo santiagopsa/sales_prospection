@@ -220,6 +220,38 @@ module.exports = {
   VER_TRANSCRIPCION: ['admin', 'ejecutiva'],
 
   // ---------------------------------------------------------------------------
+  // Evaluación con rúbrica (resto de la fase 4) y mejora semanal (fase 5)
+  // ---------------------------------------------------------------------------
+  // Qué mueve: qué rúbrica se usa para evaluar. Las versiones viven en sdr/rubrica/ y se siembran
+  // al arrancar; cambiar de versión NO reevalúa lo viejo (cada evaluación guarda su versión).
+  RUBRICA_ACTIVA: 'v1',
+  // Qué mueve: el modelo de Claude del evaluador. null = el mismo del Sandler (ANALYZE_MODEL en
+  // Render) o claude-sonnet-4-5. Necesita ANTHROPIC_API_KEY (ya está en Render).
+  EVALUADOR_MODELO: null,
+  EVALUADOR_MAX_TOKENS: 2500,
+  // Qué mueve: cuántas veces se reintenta una evaluación fallida antes de dejarla en error.
+  EVALUADOR_REINTENTOS: 3,
+
+  // Qué mueve: cuánto pesa cada criterio al elegir el foco de la semana. Las palancas (apertura con
+  // permiso, pregunta antes del pitch, cierre concreto) son las que más mueven reuniones por
+  // llamada según la literatura; el resto pesa 1. Un criterio que no esté aquí pesa 1.
+  // Ver el efecto: node sdr/cli.js mejora --set PESOS_CRITERIOS.no_monologo=2
+  PESOS_CRITERIOS: { apertura_permiso: 2, pregunta_antes_pitch: 2, cierre_concreto: 2 },
+  // Qué mueve: un criterio es "hábito" (no rasgo de una llamada) cuando falla en al menos este
+  // número de llamadas evaluadas de la ventana. Con pocas llamadas nada es hábito, a propósito.
+  HABITO_MIN_LLAMADAS: 3,
+  // Qué mueve: y en al menos esta fracción de las llamadas donde aplicaba (0.5 = la mitad).
+  HABITO_MIN_TASA: 0.4,
+  // Qué mueve: la ventana (días hacia atrás desde el viernes) sobre la que se buscan hábitos.
+  VENTANA_MEJORA_DIAS: 7,
+  // Qué mueve: cuántas semanas dura un foco una vez confirmado.
+  FOCO_SEMANAS: 2,
+  // Qué mueve: día (1 = lunes … 5 = viernes) y hora (Bogotá) en que el servidor guarda la foto del
+  // informe semanal. La vista Semana siempre calcula en vivo; la foto es el histórico.
+  INFORME_DIA_SEMANA: 5,
+  INFORME_HORA: 16,
+
+  // ---------------------------------------------------------------------------
   // Teléfonos
   // ---------------------------------------------------------------------------
   // Qué mueve: Apollo y otras bases guardan los fijos viejos de Bogotá (+57 1 XXX XXXX) como si

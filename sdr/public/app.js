@@ -464,6 +464,31 @@
     }));
   }
 
+  // Evaluación con rúbrica de una llamada (la ven admin y ejecutiva; Angie recibe el semanal).
+  function pintarEvaluacion(c) {
+    const e = c.evaluacion;
+    const st = c.pipeline_status;
+    if (!e) {
+      const txt = st === 'evaluando' ? 'Evaluando con la rúbrica…' : st === 'error_evaluacion' ? `La evaluación falló: ${esc(c.pipeline_error || '')}` : st === 'transcrito' ? 'Pendiente de evaluar (el servidor lo hace en el próximo minuto).' : 'Sin evaluación.';
+      return `<div class="panel bloque"><h2>Evaluación con rúbrica</h2><p class="suave" style="margin:0 0 8px">${txt}</p>${c.turnos ? '<button class="btn" id="evaluar">Evaluar ahora</button>' : ''}</div>`;
+    }
+    const r = e.resultado;
+    const defs = Object.fromEntries((e.criterios || []).map(d => [d.id, d]));
+    const marca = x => x.estado === 'no_cumple' ? '<span class="pill mal">✗ No cumple</span>' : x.estado === 'no_aplica' ? '<span class="pill suave">– No aplica</span>' : '<span class="pill bien">✓ Cumple</span>';
+    return `<div class="panel bloque">
+      <h2>Evaluación con rúbrica ${esc(e.rubrica_version)} <span class="suave" style="font-weight:400;font-size:12px">${esc(e.modelo || '')} · ${fechaHora(e.created_ms)} · <button class="btn mini" id="evaluar">Evaluar de nuevo</button></span></h2>
+      ${r.resumen ? `<p style="margin:0 0 10px">${esc(r.resumen)}</p>` : ''}
+      <div class="suave" style="font-size:12px;margin-bottom:10px">${r.no_cumple.length ? `${plural(r.no_cumple.length, 'criterio sin cumplir', 'criterios sin cumplir')} de ${r.criterios.length}` : 'Nada que señalar en los ' + r.criterios.length + ' criterios'} · grabación mencionada: ${r.menciono_grabacion ? 'sí' : 'no'}</div>
+      <ul class="criterios">${r.criterios.map(x => `<li class="${x.estado}">
+        <div class="cab">${marca(x)} <b>${esc((defs[x.id] || {}).nombre || x.id)}</b> <span class="suave" style="font-size:12px">confianza ${Math.round(x.confianza * 100)} %</span></div>
+        ${x.nota ? `<div class="nota">${esc(x.nota)}</div>` : ''}
+        ${x.cita ? `<div class="cita">«${esc(x.cita)}»</div>` : ''}
+      </li>`).join('')}</ul>
+      ${r.mejor_momento ? `<div class="mejor"><b>Mejor momento:</b> «${esc(r.mejor_momento.cita)}»<div class="suave" style="font-size:12px">${esc(r.mejor_momento.por_que || '')}</div></div>` : ''}
+      ${(e.avisos || []).length ? `<div class="suave" style="font-size:11px;margin-top:8px">Validador: ${e.avisos.map(esc).join(' · ')}</div>` : ''}
+    </div>`;
+  }
+
   // ---------------------------------------------------------------- fallos de marcación
   async function vistaFallos() {
     const lista = await api('llamadas/fallidas');
@@ -492,12 +517,13 @@
   }
 
   // ---------------------------------------------------------------- llamada (transcripción y métricas)
-  const PIPELINE_LABEL = { pendiente_resultado: 'esperando resultado', pendiente: 'por transcribir', transcribiendo: 'transcribiendo…', transcrito: 'transcrita', omitida: 'sin transcribir', error: 'error al transcribir', no_aplica: '' };
+  const PIPELINE_LABEL = { pendiente_resultado: 'esperando resultado', pendiente: 'por transcribir', transcribiendo: 'transcribiendo…', transcrito: 'transcrita · evaluando', evaluando: 'evaluando…', evaluado: 'transcrita y evaluada', omitida: 'sin transcribir', error: 'error al transcribir', error_evaluacion: 'error al evaluar', no_aplica: '' };
   function pipelineChip(t) {
     const st = t.pipeline_status;
     if (!st || st === 'no_aplica') return '';
-    if (st === 'transcrito') return ` · <a href="#/llamada/${t.call_id}">Ver transcripción y métricas</a>`;
-    if (st === 'error') return ` · <a href="#/llamada/${t.call_id}" style="color:var(--mal)">${PIPELINE_LABEL[st]}</a>`;
+    if (st === 'evaluado') return ` · <a href="#/llamada/${t.call_id}">Ver transcripción, métricas y evaluación</a>`;
+    if (st === 'transcrito' || st === 'evaluando') return ` · <a href="#/llamada/${t.call_id}">Ver transcripción y métricas</a> <span class="suave">(${PIPELINE_LABEL[st]})</span>`;
+    if (st === 'error' || st === 'error_evaluacion') return ` · <a href="#/llamada/${t.call_id}" style="color:var(--mal)">${PIPELINE_LABEL[st]}</a>`;
     return ` · <span class="suave">${PIPELINE_LABEL[st] || st}</span>`;
   }
   const METRICAS = [
@@ -531,10 +557,17 @@
       ${c.nota ? `<div class="panel bloque"><b>Nota de Angie:</b> <span style="white-space:pre-wrap">${esc(c.nota)}</span></div>` : ''}
       <div class="kpis">${METRICAS.map(([k, nombre, fmt, ayuda]) => `<div class="kpi" title="${esc(ayuda)}"><b>${esc(String(fmt(m[k])))}</b><span>${nombre}</span></div>`).join('')}</div>
       ${m.muletillas_detalle && Object.keys(m.muletillas_detalle).length ? `<div class="suave" style="font-size:12px;margin:-6px 0 14px">Muletillas: ${Object.entries(m.muletillas_detalle).map(([k, v]) => `${esc(k)} ×${v}`).join(', ')}</div>` : ''}
+      ${pintarEvaluacion(c)}
       <div class="panel">
         <h2>Transcripción <span class="suave" style="font-weight:400;font-size:12px">${c.modelo ? esc(c.modelo) : ''}${c.transcrito_ms ? ' · ' + fechaHora(c.transcrito_ms) : ''}${c.meta && c.meta.modo === 'diarizacion' ? ' · grabación mono: voces separadas por diarización (Angie = quien dice Peaku)' : ''}</span></h2>
         <div class="turnos">${(c.turnos || []).map(t => `<div class="turno ${t.quien}"><span class="t">${mmss(t.inicio)}</span><span class="q">${t.quien === 'angie' ? 'Angie' : 'Prospecto'}</span><span class="x">${esc(t.texto)}</span></div>`).join('')}</div>
       </div>`}`;
+    const $ev = document.getElementById('evaluar');
+    if ($ev) $ev.addEventListener('click', async () => {
+      $ev.disabled = true; $ev.textContent = 'Evaluando…';
+      try { const r = await api(`llamadas/${c.id}/evaluar`, { method: 'POST', body: {} }); if (r.error) avisar('No se pudo evaluar: ' + r.error, 'error'); else avisar('Evaluada.'); await vistaLlamada(id); }
+      catch (e) { avisar(e.message, 'error'); $ev.disabled = false; $ev.textContent = 'Evaluar'; }
+    });
     const $re = document.getElementById('reprocesar');
     if ($re) $re.addEventListener('click', async () => {
       $re.disabled = true;
@@ -964,10 +997,7 @@
           <td>${!d.habil ? '' : d.cumplida ? '<span class="chip whatsapp">cumplida</span>' : (d.fecha < w.hoy ? '<span class="chip vencida">no</span>' : (d.fecha === w.hoy ? '<span class="chip hoy">en curso</span>' : ''))}</td>
         </tr>`).join('')}</tbody></table>
       </div>
-      <div class="panel bloque">
-        <h2>Mejora de la semana</h2>
-        <p class="suave" style="margin:0">Los hábitos, el foco de las próximas dos semanas y el mejor momento de la semana aparecen aquí cuando las llamadas con conversación pasen por transcripción y evaluación (siguiente fase).</p>
-      </div>
+      ${pintarMejora(w.mejora)}
       ${w.mostrarRatios ? `<div class="panel bloque"><h2>Tasas · últimos ${w.ratios.hasta === w.ratios.desde ? 1 : 14} días</h2>
         <div class="kpis" style="margin:0">
           ${tasa(r.tasaContacto, 'Tasa de contacto', r.conversaciones, r.marcaciones)}
@@ -975,6 +1005,46 @@
           ${tasa(r.reunionRealizada, 'Reunión realizada', r.realizadas, r.realizadas + r.no_show)}
           ${tasa(r.realizadaACalificado, 'Realizada → calificado', r.calificados, r.realizadas)}
         </div></div>` : ''}`;
+    const $foco = document.getElementById('confirmar-foco');
+    if ($foco) $foco.addEventListener('click', async () => {
+      const sel = document.getElementById('foco-criterio');
+      $foco.disabled = true;
+      try { const r = await api('mejora/foco', { method: 'POST', body: { criterio: sel ? sel.value : $foco.dataset.criterio } }); avisar(`Foco confirmado: ${r.nombre}, hasta el ${fecha(new Date(r.hasta + 'T12:00:00-05:00').getTime())}.`); await vistaSemana(params); }
+      catch (e) { avisar(e.message, 'error'); $foco.disabled = false; }
+    });
+  }
+
+  // Mejora de la semana (fase 5): hábitos, foco, mejor momento, seguimiento. Angie sí ve esto.
+  function pintarMejora(m) {
+    if (!m) return '';
+    const pct = v => v == null ? '—' : Math.round(v * 100) + ' %';
+    const ejemplos = xs => (xs || []).slice(0, 2).map(x => `<div class="cita">«${esc(x.cita || x.nota || '')}»${x.empresa ? ` <span class="suave">· ${esc(x.empresa)}${veTranscripcion() && x.call_id ? ` · <a href="#/llamada/${x.call_id}">ver</a>` : ''}</span>` : ''}</div>`).join('');
+    const foco = m.foco;
+    const focoHtml = !foco ? (m.suficiente ? '<p class="suave" style="margin:0">Sin hábitos que señalar esta semana: ningún criterio falla en varias llamadas.</p>' : '')
+      : foco.estado === 'activo' ? `
+        <div class="foco activo"><div class="suave" style="font-size:12px">Foco en curso · ${plural(foco.dias_restantes, 'día', 'días')} más (hasta ${fecha(new Date(foco.hasta + 'T12:00:00-05:00').getTime())})</div>
+          <b>${esc(foco.nombre)}</b><div class="suave" style="font-size:13px">${esc(foco.descripcion || '')}</div>
+          <div class="progreso">Al empezar fallaba en ${pct(foco.tasa_inicial)} de las llamadas · esta semana ${foco.aplican_actual ? pct(foco.tasa_actual) + ' (' + foco.no_cumple_actual + ' de ' + foco.aplican_actual + ')' : 'sin llamadas evaluadas aún'}${foco.tendencia != null ? (foco.tendencia < 0 ? ' · <span class="tend-bien">mejorando</span>' : foco.tendencia > 0 ? ' · <span class="tend-mal">peor</span>' : ' · igual') : ''}</div>
+          ${ejemplos(foco.ejemplos)}</div>`
+      : `
+        <div class="foco"><div class="suave" style="font-size:12px">Foco propuesto para las próximas ${foco.semanas || 2} semanas</div>
+          <b>${esc(foco.nombre)}</b><div class="suave" style="font-size:13px">${esc(foco.descripcion || '')}</div>
+          <div class="progreso">Falló en ${foco.no_cumple_actual} de ${foco.aplican_actual} llamadas (${pct(foco.tasa_inicial)}).</div>
+          ${ejemplos(foco.ejemplos)}
+          <div class="acciones" style="margin:10px 0 0;align-items:center">
+            <button class="btn primario" id="confirmar-foco" data-criterio="${esc(foco.criterio)}">Trabajar esto las próximas ${foco.semanas || 2} semanas</button>
+            <span class="suave" style="font-size:12px">o elige otro:</span>
+            <select id="foco-criterio">${(m.criterios || []).map(c => `<option value="${c.id}" ${c.id === foco.criterio ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('')}</select>
+          </div></div>`;
+    return `
+      <div class="panel bloque mejora">
+        <h2>Mejora de la semana <span class="suave" style="font-weight:400;font-size:12px">${plural(m.llamadas_evaluadas, 'llamada evaluada', 'llamadas evaluadas')} con la rúbrica ${esc(m.rubrica || '')}${m.suficiente ? '' : ' · con menos de ' + m.minimo_llamadas + ' no se habla de hábitos'}</span></h2>
+        ${focoHtml}
+        ${m.seguimiento ? `<div class="seguimiento"><b>Foco anterior · ${esc(m.seguimiento.nombre)}</b> (${m.seguimiento.desde} → ${m.seguimiento.hasta}): al empezar ${pct(m.seguimiento.tasa_inicial)}, esta semana ${m.seguimiento.aplican_actual ? pct(m.seguimiento.tasa_actual) : 'sin llamadas evaluadas'}${m.seguimiento.mejoro === true ? ' · <span class="tend-bien">mejoró</span>' : m.seguimiento.mejoro === false ? ' · <span class="tend-mal">sigue igual o peor</span>' : ''}</div>` : ''}
+        ${m.habitos && m.habitos.length > 1 ? `<h3>Otros hábitos de la semana</h3><ul class="habitos">${m.habitos.slice(1).map(h => `<li><b>${esc(h.nombre)}</b> <span class="suave">${h.no_cumple} de ${h.aplican} llamadas</span>${ejemplos(h.ejemplos)}</li>`).join('')}</ul>` : ''}
+        ${m.mejor_momento ? `<div class="mejor"><b>Mejor momento de la semana</b>${m.mejor_momento.empresa ? ` <span class="suave">· ${esc(m.mejor_momento.empresa)}</span>` : ''}<div>«${esc(m.mejor_momento.cita)}»</div><div class="suave" style="font-size:12px">${esc(m.mejor_momento.por_que || '')}</div></div>` : ''}
+        ${m.fortalezas && m.fortalezas.length ? `<div class="suave" style="font-size:12px;margin-top:8px">Sin fallas esta semana: ${m.fortalezas.map(f => esc(f.nombre)).join(' · ')}</div>` : ''}
+      </div>`;
   }
 
   // ---------------------------------------------------------------- router

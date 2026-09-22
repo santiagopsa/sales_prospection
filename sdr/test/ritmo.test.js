@@ -67,7 +67,7 @@ test('ritmo: bloques, racha y semana', { skip: !url && 'sin SDR_TEST_DATABASE_UR
     assert.strictEqual(s.ratios.tasaContacto, Math.round(3 / 11 * 100));   // 3 conversaciones / 11 marcaciones en 14 días
     assert.strictEqual(s.ratios.conversacionAReunion, Math.round(1 / 3 * 100));
     assert.strictEqual(s.ratios.reunionRealizada, null);
-    assert.strictEqual(s.mejora, null);
+    assert.strictEqual(s.mejora.llamadas_evaluadas, 0); assert.strictEqual(s.mejora.foco, null);
     const anterior = await ritmo.resumenSemana(db, config, { fecha: '2026-09-18', ahora: martes930 });
     assert.strictEqual(anterior.lunes, '2026-09-14');
     assert.strictEqual(anterior.totales.marcaciones, 4);

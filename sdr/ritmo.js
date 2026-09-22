@@ -128,8 +128,8 @@ async function resumenSemana(db, config, { fecha, usuario = null, ahora = new Da
     racha: await racha(db, config, ahora, usuario),
     ratios: await ratios(db, config, ahora, usuario),
     mostrarRatios: !!config.MOSTRAR_RATIOS,
-    // La parte de mejora (hábitos, foco, mejor momento) llega con las fases 4 y 5.
-    mejora: null,
+    // Mejora de la semana (fase 5): hábitos, foco, mejor momento. Solo tiene sentido para un sdr.
+    mejora: await require('./mejora').analizarSemana(db, config, { fecha: lunes, usuario: usuario || (require('./resultados').usuariosSdr(config)[0] || null), ahora }),
   };
 }
 

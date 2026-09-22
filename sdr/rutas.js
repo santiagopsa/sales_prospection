@@ -64,7 +64,12 @@ function rutas({ db, config }) {
     // Pipeline de audio: transcripción y métricas por llamada (la app se las muestra solo a VER_TRANSCRIPCION).
     ['get', '/api/pipeline/estado', async () => { sinDb(); return { ...(await P.estado(db)), activo: !!process.env.DEEPGRAM_API_KEY }; }],
     ['post', '/api/pipeline/revisar', async () => { sinDb(); return P.revisarTodas(db, config); }],
-    ['get', '/api/llamadas/:id/transcripcion', async ({ params }) => { sinDb(); return P.transcripcionDeLlamada(db, params.id); }],
+    ['get', '/api/llamadas/:id/transcripcion', async ({ params }) => { sinDb(); return P.transcripcionDeLlamada(db, params.id, config); }],
+    ['post', '/api/llamadas/:id/evaluar', async ({ params }) => { sinDb(); return P.evaluar(db, config, process.env, params.id, { forzar: true }); }],
+    // Mejora semanal: confirmar el foco y ver los informes guardados.
+    ['post', '/api/mejora/foco', async ({ body }) => { sinDb(); const b = body || {}; return require('./mejora').confirmarFoco(db, config, { usuario: require('./resultados').usuarioValido(config, b.usuario), criterio: b.criterio, nota: b.nota }); }],
+    ['get', '/api/mejora/informes', async ({ query }) => { sinDb(); return require('./mejora').informesGuardados(db, query.usuario || null); }],
+    ['get', '/api/rubrica', async () => { sinDb(); const r = await require('./evaluador').rubricaActiva(db, config); return { version: r.version, fuentes: r.fuentes, criterios: r.criterios, reglas: r.reglas, pesos: config.PESOS_CRITERIOS || {} }; }],
     ['post', '/api/llamadas/:id/reprocesar', async ({ params }) => { sinDb(); return P.reencolar(db, params.id); }],
     ['get', '/api/cola', async ({ query }) => { sinDb(); return consultarCola(db, config, { usuario: query.usuario || null }); }],
     ['post', '/api/tareas/:id/posponer', async ({ params, body }) => {

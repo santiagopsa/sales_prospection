@@ -17,6 +17,10 @@ const T = {
   calls: `${SCHEMA}.calls`,
   lista_negra: `${SCHEMA}.lista_negra`,
   transcripts: `${SCHEMA}.transcripts`,
+  rubricas: `${SCHEMA}.rubricas`,
+  evaluations: `${SCHEMA}.evaluations`,
+  focos: `${SCHEMA}.focos`,
+  informes: `${SCHEMA}.informes_semana`,
 };
 
 const lista = xs => xs.map(x => `'${x}'`).join(',');
@@ -205,6 +209,56 @@ const MIGRACIONES = [
      meta JSONB,
      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+   )`,
+  // ---- M5 · Rúbrica, evaluaciones y mejora semanal ---------------------------------------
+  // Una rúbrica es una versión inmutable (sdr/rubrica/v1.js). Cada evaluación queda atada a la
+  // versión con la que se hizo, así las comparaciones entre semanas son justas.
+  `CREATE TABLE IF NOT EXISTS ${T.rubricas} (
+     id SERIAL PRIMARY KEY,
+     version TEXT NOT NULL UNIQUE,
+     fuentes TEXT,
+     criterios JSONB NOT NULL,
+     reglas JSONB NOT NULL,
+     activa BOOLEAN NOT NULL DEFAULT false,
+     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+   )`,
+  `CREATE TABLE IF NOT EXISTS ${T.evaluations} (
+     id SERIAL PRIMARY KEY,
+     call_id INT NOT NULL REFERENCES ${T.calls}(id) ON DELETE CASCADE,
+     rubrica_version TEXT NOT NULL REFERENCES ${T.rubricas}(version),
+     modelo TEXT,
+     resultado JSONB NOT NULL,
+     avisos JSONB,
+     tokens_in INT,
+     tokens_out INT,
+     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+     UNIQUE (call_id, rubrica_version)
+   )`,
+  // El foco de mejora: un criterio por FOCO_SEMANAS semanas, propuesto por el sistema y confirmado
+  // por Angie desde la app. tasa_inicial es la tasa de "no cumple" cuando se propuso.
+  `CREATE TABLE IF NOT EXISTS ${T.focos} (
+     id SERIAL PRIMARY KEY,
+     usuario TEXT NOT NULL,
+     criterio TEXT NOT NULL,
+     rubrica_version TEXT NOT NULL,
+     desde DATE NOT NULL,
+     hasta DATE NOT NULL,
+     tasa_inicial REAL,
+     llamadas_inicial INT,
+     propuesto_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+     confirmado_at TIMESTAMPTZ,
+     cerrado_at TIMESTAMPTZ,
+     nota TEXT
+   )`,
+  `CREATE INDEX IF NOT EXISTS sdr_focos_usuario ON ${T.focos}(usuario, desde)`,
+  // Foto del informe semanal (el job del viernes la guarda; la vista puede recalcular en vivo).
+  `CREATE TABLE IF NOT EXISTS ${T.informes} (
+     id SERIAL PRIMARY KEY,
+     semana DATE NOT NULL,
+     usuario TEXT NOT NULL,
+     datos JSONB NOT NULL,
+     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+     UNIQUE (semana, usuario)
    )`,
 ];
 

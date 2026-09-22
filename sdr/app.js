@@ -37,6 +37,9 @@ function router({ pool, config = baseConfig }) {
 // Crea el schema y, si hay DEEPGRAM_API_KEY, deja corriendo el pipeline de audio en segundo plano.
 async function arrancar(pool, config = baseConfig) {
   await initSchema(pool);
+  // Rúbrica activa: se siembra una vez por versión (inmutable).
+  try { await require('./evaluador').sembrarRubrica(pool, require('./rubrica/' + (config.RUBRICA_ACTIVA || 'v1')), { activar: true }); }
+  catch (e) { console.error('[sdr] rúbrica:', e.message); }
   const P = require('./pipeline');
   P.revisarTodas(pool, config).then(r => { if (r.pendientes) console.log(`[sdr/pipeline] ${r.pendientes} llamadas quedaron pendientes de transcribir`); }).catch(e => console.error('[sdr/pipeline] revisar:', e.message));
   P.iniciar(pool, config, process.env);

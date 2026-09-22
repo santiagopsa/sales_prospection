@@ -209,3 +209,25 @@ h2.seccion .suave { font-weight: 500; font-size: 12px; margin-left: 6px; }
 .item .contexto { font-size: 12px; margin-top: 3px; }
 .item.tocado { background: var(--panel-2); }
 .item.tocado .pos { color: var(--suave); }
+/* Evaluación y mejora semanal */
+.pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.pill.bien { background: var(--bien-bg); color: #166534; }
+.pill.mal { background: var(--mal-bg); color: var(--mal); }
+.pill.suave { background: var(--panel-2); color: var(--suave); }
+.criterios { list-style: none; margin: 0; padding: 0; }
+.criterios li { padding: 8px 0; border-top: 1px solid var(--linea); }
+.criterios li:first-child { border-top: 0; }
+.criterios .cab { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.criterios .nota, .foco .nota { font-size: 13px; margin-top: 3px; }
+.cita { font-size: 13px; color: var(--suave); font-style: italic; margin-top: 3px; padding-left: 10px; border-left: 3px solid var(--linea); }
+.mejor { margin-top: 12px; padding: 10px 12px; background: var(--bien-bg); border-radius: 10px; }
+.foco { padding: 12px 14px; border: 1px solid var(--linea); border-radius: 10px; background: #e6f9ff; }
+.foco.activo { background: var(--panel-2); }
+.foco b { font-size: 16px; display: block; margin: 2px 0; }
+.foco .progreso, .seguimiento { font-size: 13px; margin-top: 6px; }
+.seguimiento { margin-top: 10px; padding: 8px 12px; border-left: 3px solid var(--azul-osc); }
+.tend-bien { color: #166534; font-weight: 600; }
+.tend-mal { color: var(--mal); font-weight: 600; }
+.habitos { margin: 4px 0 0; padding-left: 18px; }
+.habitos li { margin-bottom: 6px; }
+.mejora h3 { font-size: 13px; margin: 12px 0 4px; }

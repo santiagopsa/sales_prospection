@@ -15,6 +15,9 @@
 //   node sdr/cli.js calendario:probar --usuario Angie          crea y borra un evento de prueba en su Google Calendar
 //   node sdr/cli.js pipeline [--estado] [--call N] [--limite 5] transcribe las llamadas pendientes (necesita DEEPGRAM_API_KEY);
 //                                                               --estado muestra el conteo y los errores; --call N reprocesa una
+//   node sdr/cli.js evaluar --call N                            evalúa (o reevalúa) una llamada transcrita con la rúbrica activa
+//   node sdr/cli.js rubrica                                     imprime la rúbrica activa
+//   node sdr/cli.js mejora [--fecha 2026-09-25] [--usuario Angie]  hábitos, foco propuesto/activo y mejor momento de la semana
 //   node sdr/cli.js metricas --call N                          muestra transcripción y métricas de una llamada; con --set
 //                                                               recalcula las métricas (PALABRAS_PITCH, MONOLOGO_LARGO_S…) y las guarda
 //
@@ -137,6 +140,7 @@ async function main() {
         await db.query(`DELETE FROM public.deals WHERE id IN (SELECT deal_id FROM ${T.leads} WHERE deal_id IS NOT NULL)`);
         await db.query(`DELETE FROM ${T.touches}`); await db.query(`DELETE FROM ${T.calls}`); await db.query(`DELETE FROM ${T.tasks}`);
         await db.query(`DELETE FROM ${T.leads}`); await db.query(`DELETE FROM ${T.imports}`); await db.query(`DELETE FROM ${T.lista_negra}`);
+        await db.query(`DELETE FROM ${T.focos}`); await db.query(`DELETE FROM ${T.informes}`);
         await db.query('COMMIT');
       } catch (e) { await db.query('ROLLBACK'); throw e; }
       console.log('Borrado. El schema, la rúbrica y la configuración quedan intactos.');
@@ -171,6 +175,28 @@ async function main() {
       const rs = await P.correrPendientes(db, config, process.env, { limite: Number(args.limite) || 5 });
       if (!rs.length) console.log('No hay llamadas pendientes.');
       for (const r of rs) console.log(r.error ? `Llamada ${r.call_id}: ${r.estado} · ${r.error}` : `Llamada ${r.call_id}: ${r.estado} · ${r.turnos} turnos`);
+    } else if (cmd === 'evaluar') {
+      const P = require('./pipeline');
+      if (!args.call) throw new Error('Falta --call N');
+      const r = await P.evaluar(db, config, process.env, args.call, { forzar: true });
+      if (r.saltada) { console.log(`No se evaluó: ${r.motivo || r.estado}`); return; }
+      if (r.error) { console.log(`Llamada ${r.call_id}: ${r.estado} · ${r.error}`); return; }
+      const t = await P.transcripcionDeLlamada(db, args.call, config);
+      imprimirEvaluacion(t.evaluacion);
+      if (r.avisos && r.avisos.length) console.log('  Avisos del validador: ' + r.avisos.join(' · '));
+    } else if (cmd === 'rubrica') {
+      const r = await require('./evaluador').rubricaActiva(db, config);
+      console.log(`\nRúbrica ${r.version} · ${r.fuentes || ''}`);
+      r.criterios.forEach((c, i) => console.log(`  ${i + 1}. ${c.id} (peso ${(config.PESOS_CRITERIOS || {})[c.id] || 1}) · ${c.nombre}\n     ${c.descripcion}`));
+    } else if (cmd === 'mejora') {
+      const M = require('./mejora');
+      const a = await M.analizarSemana(db, config, { fecha: args.fecha, usuario: args.usuario || require('./resultados').usuariosSdr(config)[0] });
+      console.log(`\nSemana ${a.lunes} → ${a.domingo} · ${a.usuario} · ${a.llamadas_evaluadas} llamadas evaluadas (rúbrica ${a.rubrica})${a.suficiente ? '' : ' · pocas para hablar de hábitos (mínimo ' + a.minimo_llamadas + ')'}`);
+      for (const c of a.criterios) console.log(`  ${c.id.padEnd(24)} peso ${c.peso} · no cumple ${c.no_cumple}/${c.aplican}${c.tasa != null ? ' (' + Math.round(c.tasa * 100) + '%)' : ''}`);
+      console.log(`  Hábitos: ${a.habitos.map(h => h.id).join(', ') || 'ninguno'}`);
+      if (a.foco) console.log(`  Foco ${a.foco.estado}: ${a.foco.nombre}${a.foco.hasta ? ' hasta ' + a.foco.hasta : ''}${a.foco.tasa_inicial != null ? ' · tasa inicial ' + Math.round(a.foco.tasa_inicial * 100) + '%' : ''}${a.foco.tasa_actual != null ? ' · ahora ' + Math.round(a.foco.tasa_actual * 100) + '%' : ''}`);
+      if (a.seguimiento) console.log(`  Foco anterior (${a.seguimiento.nombre}): ${Math.round((a.seguimiento.tasa_inicial || 0) * 100)}% → ${a.seguimiento.tasa_actual != null ? Math.round(a.seguimiento.tasa_actual * 100) + '%' : 'sin datos'}`);
+      if (a.mejor_momento) console.log(`  Mejor momento (${a.mejor_momento.empresa}): «${a.mejor_momento.cita}» — ${a.mejor_momento.por_que}`);
     } else if (cmd === 'metricas') {
       const P = require('./pipeline');
       if (!args.call) throw new Error('Falta --call N');
@@ -187,6 +213,17 @@ async function main() {
   } finally {
     await (db.end ? db.end() : null);
   }
+}
+
+function imprimirEvaluacion(e) {
+  if (!e) { console.log('Sin evaluación.'); return; }
+  console.log(`\nEvaluación · rúbrica ${e.rubrica_version} · ${e.modelo}`);
+  for (const c of e.resultado.criterios) {
+    const marca = c.estado === 'no_cumple' ? '✗' : c.estado === 'no_aplica' ? '–' : '✓';
+    console.log(`  ${marca} ${c.id.padEnd(24)} ${c.estado.padEnd(10)} conf ${c.confianza}  ${c.nota || ''}${c.cita ? '\n      «' + c.cita + '»' : ''}`);
+  }
+  if (e.resultado.mejor_momento) console.log(`  Mejor momento: «${e.resultado.mejor_momento.cita}» — ${e.resultado.mejor_momento.por_que}`);
+  console.log(`  Resumen: ${e.resultado.resumen}`);
 }
 
 function imprimirMetricas(m) {
