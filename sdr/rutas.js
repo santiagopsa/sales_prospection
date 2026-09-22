@@ -21,6 +21,7 @@ function rutas({ db, config }) {
       resultadoLabel: D.RESULTADO_LABEL,
       razones: D.RAZONES_DESCARTE.filter(r => r !== 'sin_respuesta').map(r => ({ id: r, label: D.RAZON_LABEL[r] })),
       razonLabel: D.RAZON_LABEL,
+      usuarios: (config.USUARIOS || []).map(u => ({ nombre: u.nombre, rol: u.rol })),
     })],
     // Toque de Angie: llamada (con resultado obligatorio) o WhatsApp / correo / LinkedIn de un clic.
     ['post', '/api/leads/:id/toques', async ({ params, body }) => {
@@ -28,14 +29,14 @@ function rutas({ db, config }) {
       const b = body || {};
       return registrarToque(db, config, {
         leadId: params.id, canal: b.canal, resultado: b.resultado, razon: b.razon, nota: b.nota,
-        detalle: b.detalle, taskId: b.task_id, callUuid: b.call_uuid,
+        detalle: b.detalle, taskId: b.task_id, callUuid: b.call_uuid, usuario: b.usuario,
       });
     }],
     // Acciones de la ejecutiva comercial.
     ['post', '/api/leads/:id/ejecutiva', async ({ params, body }) => {
       sinDb();
       const b = body || {};
-      return registrarEjecutiva(db, config, { leadId: params.id, accion: b.accion, razon: b.razon, nota: b.nota });
+      return registrarEjecutiva(db, config, { leadId: params.id, accion: b.accion, razon: b.razon, nota: b.nota, usuario: b.usuario });
     }],
     // Telefonía (Voximplant)
     ['get', '/api/vox/config', async () => vox.configPublica(process.env)],
@@ -57,7 +58,7 @@ function rutas({ db, config }) {
       sinDb();
       const { archivo, contenido, confirmar } = body || {};
       if (!contenido) throw Object.assign(new Error('Falta el contenido del archivo'), { status: 400 });
-      return importar(db, config, { archivo, contenido, simular: !confirmar });
+      return importar(db, config, { archivo, contenido, simular: !confirmar, usuario: (body || {}).usuario });
     }],
   ];
 }

@@ -14,11 +14,28 @@
   };
   const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
 
+  // Quién está usando la app: etiqueta elegida en la barra, sin credenciales. Va en cada POST.
+  const USUARIO_KEY = 'sdr_usuario';
+  const usuarioActual = () => { try { return localStorage.getItem(USUARIO_KEY) || ''; } catch (_) { return ''; } };
+  function pintarUsuarios() {
+    const $sel = document.getElementById('usuario');
+    if (!$sel || !meta.usuarios) return;
+    const actual = usuarioActual();
+    $sel.innerHTML = '<option value="">¿Quién eres?</option>' + meta.usuarios.map(u => `<option value="${esc(u.nombre)}" ${u.nombre === actual ? 'selected' : ''}>${esc(u.nombre)}</option>`).join('');
+    $sel.classList.toggle('sin-usuario', !actual);
+    $sel.onchange = () => { try { localStorage.setItem(USUARIO_KEY, $sel.value); } catch (_) {} $sel.classList.toggle('sin-usuario', !$sel.value); avisar($sel.value ? `Hola, ${$sel.value}.` : 'Elige quién eres para que quede registrado.'); };
+  }
+
   async function api(ruta, opciones = {}) {
+    let body = opciones.body;
+    if (body && (opciones.method || 'GET') !== 'GET') {
+      if (!usuarioActual()) { const $sel = document.getElementById('usuario'); if ($sel) $sel.focus(); throw new Error('Elige quién eres en la barra de arriba antes de registrar algo.'); }
+      body = { ...body, usuario: usuarioActual() };
+    }
     const r = await fetch('api/' + ruta, {
       method: opciones.method || 'GET',
-      headers: opciones.body ? { 'Content-Type': 'application/json' } : undefined,
-      body: opciones.body ? JSON.stringify(opciones.body) : undefined,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
     });
     const datos = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(datos.error || `Error ${r.status}`);
@@ -268,7 +285,7 @@
         <div style="flex:1;min-width:0"><b>${esc(que)}</b>${extra ? ` <span class="suave">· ${esc(extra)}</span>` : ''}
           ${t.nota ? `<div class="suave" style="white-space:pre-wrap">${esc(t.nota)}</div>` : ''}
           ${t.record_url ? `<div><a href="${esc(t.record_url)}" target="_blank" rel="noopener">Escuchar grabación</a></div>` : ''}</div>
-        <span class="suave" style="font-size:12px;white-space:nowrap">${cuando}</span>
+        <span class="suave" style="font-size:12px;white-space:nowrap;text-align:right">${cuando}${t.usuario ? `<br>${esc(t.usuario)}` : ''}</span>
       </li>`;
     };
 
@@ -429,7 +446,7 @@
           <label>Fecha y hora de la reunión</label>
           <input type="datetime-local" name="reunion_at" value="${fechaLocal(enUnaHora)}" />
           <div class="dos">
-            <div><label>Ejecutiva que atiende</label><input name="ejecutiva" placeholder="Luisa" /></div>
+            <div><label>Ejecutiva que atiende</label><input name="ejecutiva" placeholder="Luisa" value="${esc((meta.usuarios || []).find(u => u.rol === 'ejecutiva') ? (meta.usuarios || []).find(u => u.rol === 'ejecutiva').nombre : '')}" /></div>
             <div><label>Línea de negocio</label><select name="linea_negocio"><option value="">—</option><option>Headhunting</option><option>EOR</option><option>SaaS</option></select></div>
           </div>
           <label>Cargos que necesita</label><input name="ficha_cargos" placeholder="Ej. 2 devs backend senior, 1 QA" />
@@ -610,5 +627,5 @@
   }
 
   window.addEventListener('hashchange', render);
-  api('meta').then(m => { meta = m; }).catch(() => {}).finally(render);
+  api('meta').then(m => { meta = m; pintarUsuarios(); }).catch(() => {}).finally(render);
 })();

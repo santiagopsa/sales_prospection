@@ -71,9 +71,17 @@ function siguienteEtapa(config, etapaActual, resultado) {
 
 // Registra un toque de Angie. `canal` llamada exige un `resultado` de RESULTADOS_LLAMADA; los
 // otros canales usan el nombre del canal como resultado.
+function usuarioValido(config, u) {
+  if (!u) return null;
+  const x = (config.USUARIOS || []).find(x => x.nombre.toLowerCase() === String(u).toLowerCase());
+  return x ? x.nombre : null;
+}
+const usuariosSdr = config => (config.USUARIOS || []).filter(u => u.rol === 'sdr').map(u => u.nombre);
+
 async function registrarToque(db, config, {
-  leadId, canal, resultado, razon, nota, detalle, taskId, callUuid, ahora = new Date(),
+  leadId, canal, resultado, razon, nota, detalle, taskId, callUuid, usuario, ahora = new Date(),
 }) {
+  usuario = usuarioValido(config, usuario);
   leadId = Number(leadId);
   if (!Number.isInteger(leadId)) throw error(400, 'lead_id inválido');
   if (!D.CANALES.includes(canal)) throw error(400, `canal inválido: ${canal}`);
@@ -118,9 +126,9 @@ async function registrarToque(db, config, {
 
     // 3 · El toque.
     const toque = (await c.query(
-      `INSERT INTO ${T.touches} (lead_id, task_id, canal, resultado, razon_descarte, nota, detalle, call_id, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-      [leadId, tarea ? tarea.id : null, canal, resultado, razon, nota || null, detalle ? JSON.stringify(detalle) : null, callId, ahora.toISOString()])).rows[0];
+      `INSERT INTO ${T.touches} (lead_id, task_id, canal, resultado, razon_descarte, nota, detalle, call_id, usuario, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [leadId, tarea ? tarea.id : null, canal, resultado, razon, nota || null, detalle ? JSON.stringify(detalle) : null, callId, usuario, ahora.toISOString()])).rows[0];
     if (callId) await c.query(`UPDATE ${T.calls} SET touch_id = $2 WHERE id = $1`, [callId, toque.id]);
 
     // 4 · Etapa y reprogramación.
@@ -172,8 +180,9 @@ async function registrarToque(db, config, {
 // Acciones de la ejecutiva comercial sobre un lead con reunión: realizada, no-show, calificado.
 // 'descartado' también entra por aquí: es una decisión sobre el lead, no un toque, y sirve
 // tanto para Angie (descartar sin llamar) como para la ejecutiva.
-async function registrarEjecutiva(db, config, { leadId, accion, razon, nota, ahora = new Date() }) {
+async function registrarEjecutiva(db, config, { leadId, accion, razon, nota, usuario, ahora = new Date() }) {
   leadId = Number(leadId);
+  usuario = usuarioValido(config, usuario);
   if (!['reunion_realizada', 'no_show', 'calificado', 'descartado'].includes(accion)) throw error(400, 'Acción desconocida');
   if (accion === 'descartado' && !D.RAZONES_DESCARTE.includes(razon)) throw error(400, 'Elige la razón del descarte');
   return enTransaccion(db, async c => {
@@ -199,8 +208,8 @@ async function registrarEjecutiva(db, config, { leadId, accion, razon, nota, aho
       await cambiarEtapa(c, leadId, 'calificado');
     }
     await c.query(
-      `INSERT INTO ${T.touches} (lead_id, canal, resultado, razon_descarte, nota, created_at) VALUES ($1, 'ejecutiva', $2, $3, $4, $5)`,
-      [leadId, accion, accion === 'descartado' ? razon : null, nota || null, ahora.toISOString()]);
+      `INSERT INTO ${T.touches} (lead_id, canal, resultado, razon_descarte, nota, usuario, created_at) VALUES ($1, 'ejecutiva', $2, $3, $4, $5, $6)`,
+      [leadId, accion, accion === 'descartado' ? razon : null, nota || null, usuario, ahora.toISOString()]);
     return { etapa: (await c.query(`SELECT etapa FROM ${T.leads} WHERE id = $1`, [leadId])).rows[0].etapa, proxima };
   });
 }
@@ -241,16 +250,22 @@ async function crearDeal(c, lead, detalle, reunionAt) {
 }
 
 // Marcaciones y conversaciones de un día (Bogotá).
-async function actividadDelDia(db, fecha) {
+// Solo cuenta a los usuarios con rol sdr (y toques sin usuario, de antes de la etiqueta).
+async function actividadDelDia(db, fecha, config = {}) {
   const desde = tiempo.instante(fecha, 0).toISOString();
   const hasta = tiempo.instante(tiempo.sumarDias(fecha, 1), 0).toISOString();
   const r = await db.query(
     `SELECT COUNT(*) FILTER (WHERE canal = 'llamada')::int AS marcaciones,
             COUNT(*) FILTER (WHERE resultado IN (SELECT jsonb_array_elements_text($3::jsonb)))::int AS conversaciones,
             COUNT(*)::int AS toques
-     FROM ${T.touches} WHERE created_at >= $1 AND created_at < $2`,
-    [desde, hasta, JSON.stringify(D.RESULTADOS_CON_CONVERSACION)]);
+     FROM ${T.touches} WHERE created_at >= $1 AND created_at < $2 ${filtroSdr(config, 4)}`,
+    [desde, hasta, JSON.stringify(D.RESULTADOS_CON_CONVERSACION), JSON.stringify(usuariosSdr(config))]);
   return r.rows[0];
 }
 
-module.exports = { registrarToque, registrarEjecutiva, actividadDelDia, siguienteEtapa, enTransaccion };
+// Fragmento SQL: toques de usuarios sdr o sin usuario. `n` es la posición del parámetro con la lista.
+function filtroSdr(config, n) {
+  return (config.USUARIOS || []).length ? `AND (usuario IS NULL OR usuario IN (SELECT jsonb_array_elements_text($${n}::jsonb)))` : '';
+}
+
+module.exports = { registrarToque, registrarEjecutiva, actividadDelDia, siguienteEtapa, enTransaccion, usuarioValido, usuariosSdr, filtroSdr };

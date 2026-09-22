@@ -13,7 +13,8 @@ const MAX_FILAS = 5000; // una carga más grande casi siempre es el archivo equi
 
 function error(status, message) { return Object.assign(new Error(message), { status }); }
 
-async function importar(db, config, { archivo, contenido, simular = true, ahora = new Date() }) {
+async function importar(db, config, { archivo, contenido, simular = true, usuario = null, ahora = new Date() }) {
+  usuario = require('./resultados').usuarioValido(config, usuario);
   const leido = leerArchivo(contenido);
   if (leido.error) throw error(400, leido.error);
   if (leido.filas.length + leido.errores.length > MAX_FILAS) {
@@ -83,7 +84,7 @@ async function importar(db, config, { archivo, contenido, simular = true, ahora 
   const tareas = plan.map(p => ({ paso: p.paso, canal: p.canal, due_at: p.due_at.toISOString() }));
   const r = await db.query(
     `WITH imp AS (
-       INSERT INTO ${T.imports} (archivo, filas) VALUES ($1, $2) RETURNING id
+       INSERT INTO ${T.imports} (archivo, filas, usuario) VALUES ($1, $2, $5) RETURNING id
      ), entrada AS (
        SELECT * FROM jsonb_to_recordset($3::jsonb) AS x(
          fila INT, empresa TEXT, contacto TEXT, cargo TEXT, telefono TEXT, telefono_original TEXT,
@@ -103,7 +104,7 @@ async function importar(db, config, { archivo, contenido, simular = true, ahora 
      SELECT (SELECT id FROM imp) AS import_id,
             (SELECT COALESCE(json_agg(json_build_object('id', id, 'telefono', telefono, 'email', email)), '[]'::json) FROM nuevos) AS nuevos,
             (SELECT COUNT(*) FROM tareas)::int AS tareas`,
-    [archivo || null, informe.filas, JSON.stringify(entrada), JSON.stringify(tareas)],
+    [archivo || null, informe.filas, JSON.stringify(entrada), JSON.stringify(tareas), usuario],
   );
   const { import_id, nuevos } = r.rows[0];
   const idPor = new Map();

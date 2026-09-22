@@ -55,7 +55,7 @@ async function consultarCola(db, config, { ahora = new Date() } = {}) {
     [etapasDeAngie],
   )).rows[0].n;
 
-  const act = await actividadDelDia(db, hoy);
+  const act = await actividadDelDia(db, hoy, config);
   const [bloque, racha] = await Promise.all([ritmo.bloqueActual(db, config, ahora), ritmo.racha(db, config, ahora)]);
   return {
     fecha: hoy,

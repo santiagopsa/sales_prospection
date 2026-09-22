@@ -2,12 +2,13 @@
 const { T } = require('./schema');
 const D = require('./dominio');
 const tiempo = require('./tiempo');
+const { usuariosSdr, filtroSdr } = require('./resultados');
 
 const minutos = hhmm => { const [h, m] = String(hhmm).split(':').map(Number); return h * 60 + (m || 0); };
 const conv = JSON.stringify(D.RESULTADOS_CON_CONVERSACION);
 
 // Actividad por día (Bogotá) entre dos fechas inclusive: marcaciones, conversaciones, reuniones, toques.
-async function actividadPorDia(db, desde, hasta) {
+async function actividadPorDia(db, desde, hasta, config = {}) {
   const r = await db.query(
     `SELECT to_char(created_at AT TIME ZONE 'America/Bogota', 'YYYY-MM-DD') AS fecha,
             COUNT(*) FILTER (WHERE canal = 'llamada')::int AS marcaciones,
@@ -18,9 +19,9 @@ async function actividadPorDia(db, desde, hasta) {
             COUNT(*) FILTER (WHERE canal = 'linkedin')::int AS linkedin,
             COUNT(*) FILTER (WHERE canal <> 'ejecutiva')::int AS toques
      FROM ${T.touches}
-     WHERE created_at >= $1 AND created_at < $2
+     WHERE created_at >= $1 AND created_at < $2 ${filtroSdr(config, 4)}
      GROUP BY 1 ORDER BY 1`,
-    [tiempo.instante(desde, 0).toISOString(), tiempo.instante(tiempo.sumarDias(hasta, 1), 0).toISOString(), conv]);
+    [tiempo.instante(desde, 0).toISOString(), tiempo.instante(tiempo.sumarDias(hasta, 1), 0).toISOString(), conv, JSON.stringify(usuariosSdr(config))]);
   const porFecha = Object.fromEntries(r.rows.map(x => [x.fecha, x]));
   const dias = [];
   for (let f = desde; f <= hasta; f = tiempo.sumarDias(f, 1)) {
@@ -37,7 +38,7 @@ function diaCumplido(config, d) {
 // Días hábiles seguidos cumpliendo la meta, contando hacia atrás desde ayer (hoy suma si ya cumplió).
 async function racha(db, config, ahora = new Date()) {
   const hoy = tiempo.fechaBogota(ahora);
-  const dias = await actividadPorDia(db, tiempo.sumarDias(hoy, -60), hoy);
+  const dias = await actividadPorDia(db, tiempo.sumarDias(hoy, -60), hoy, config);
   const porFecha = Object.fromEntries(dias.map(d => [d.fecha, d]));
   let n = 0;
   const hoyCumple = diaCumplido(config, porFecha[hoy]);
@@ -62,8 +63,8 @@ async function bloqueActual(db, config, ahora = new Date()) {
   const r = await db.query(
     `SELECT COUNT(*) FILTER (WHERE canal = 'llamada')::int AS marcaciones,
             COUNT(*) FILTER (WHERE resultado IN (SELECT jsonb_array_elements_text($3::jsonb)))::int AS conversaciones
-     FROM ${T.touches} WHERE created_at >= $1 AND created_at < $2`,
-    [desde.toISOString(), ahora.toISOString(), conv]);
+     FROM ${T.touches} WHERE created_at >= $1 AND created_at < $2 ${filtroSdr(config, 4)}`,
+    [desde.toISOString(), ahora.toISOString(), conv, JSON.stringify(usuariosSdr(config))]);
   return {
     enCurso: {
       nombre: b.nombre || `Bloque ${idx + 1}`, inicio: b.inicio, fin: b.fin,
@@ -85,8 +86,9 @@ async function ratios(db, config, ahora = new Date()) {
             COUNT(*) FILTER (WHERE resultado = 'reunion_realizada')::int AS realizadas,
             COUNT(*) FILTER (WHERE resultado = 'no_show')::int AS no_show,
             COUNT(*) FILTER (WHERE resultado = 'calificado')::int AS calificados
-     FROM ${T.touches} WHERE created_at >= $1 AND created_at < $2`,
-    [tiempo.instante(desde, 0).toISOString(), tiempo.instante(tiempo.sumarDias(hasta, 1), 0).toISOString(), conv]);
+     FROM ${T.touches} WHERE created_at >= $1 AND created_at < $2
+       AND (canal = 'ejecutiva' OR usuario IS NULL OR usuario IN (SELECT jsonb_array_elements_text($4::jsonb)))`,
+    [tiempo.instante(desde, 0).toISOString(), tiempo.instante(tiempo.sumarDias(hasta, 1), 0).toISOString(), conv, JSON.stringify(usuariosSdr(config))]);
   const x = r.rows[0];
   const pct = (a, b) => (b ? Math.round((a / b) * 100) : null);
   return {
@@ -108,7 +110,7 @@ function semanaDe(fecha) {
 async function resumenSemana(db, config, { fecha, ahora = new Date() } = {}) {
   const hoy = tiempo.fechaBogota(ahora);
   const { lunes, domingo } = semanaDe(fecha || hoy);
-  const dias = await actividadPorDia(db, lunes, domingo);
+  const dias = await actividadPorDia(db, lunes, domingo, config);
   const habiles = dias.filter(d => !tiempo.esFinDeSemana(d.fecha) && d.fecha <= hoy);
   const suma = k => dias.reduce((s, d) => s + d[k], 0);
   const totales = { marcaciones: suma('marcaciones'), conversaciones: suma('conversaciones'), reuniones: suma('reuniones'), whatsapp: suma('whatsapp'), correo: suma('correo'), linkedin: suma('linkedin'), toques: suma('toques') };

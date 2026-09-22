@@ -129,6 +129,9 @@ const MIGRACIONES = [
   `ALTER TABLE ${T.touches} DROP CONSTRAINT IF EXISTS touches_canal_check`,
   `ALTER TABLE ${T.touches} DROP CONSTRAINT IF EXISTS sdr_touches_canal_check`,
   `ALTER TABLE ${T.touches} ADD CONSTRAINT sdr_touches_canal_check CHECK (canal IN (${lista(CANALES)}, 'ejecutiva'))`,
+  // Quién lo hizo (etiqueta elegida en la barra, sin credenciales).
+  `ALTER TABLE ${T.touches} ADD COLUMN IF NOT EXISTS usuario TEXT`,
+  `ALTER TABLE ${T.imports} ADD COLUMN IF NOT EXISTS usuario TEXT`,
 ];
 
 async function initSchema(db, log = console) {

@@ -69,6 +69,19 @@ node sdr/cli.js cola --set RACHA_CUMPLE_CON=cualquiera
 
 `cola` e `importar` necesitan `DATABASE_URL`. Si el nombre del hueco tiene un error, el comando falla y lo dice.
 
+## Usuarios
+Sin credenciales: el desplegable de la barra (Angie, Luisa, Santiago; lista en `USUARIOS` de `config.js`) marca
+quién hizo cada cosa y queda en el historial. La app no deja registrar nada sin elegir uno. Solo los toques del
+rol `sdr` cuentan para marcaciones, conversaciones, bloques y racha; así las pruebas no ensucian los números.
+
+## Borrar datos de prueba
+```
+node sdr/cli.js limpiar               # muestra cuánto hay
+node sdr/cli.js limpiar --confirmar   # borra leads, tareas, toques, llamadas, cargas y los deals que el SDR creó en el Sandler
+```
+Necesita `DATABASE_URL`. Lo más cómodo es correrlo desde la pestaña **Shell** del servicio en Render (ya tiene
+la variable); desde tu máquina necesitas `npm install` (para `pg`) y la URL externa de la base.
+
 ## Pruebas
 ```
 npm run test:sdr                                        # unitarias; las de base se saltan sin la variable

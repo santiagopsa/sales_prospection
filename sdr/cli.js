@@ -6,6 +6,9 @@
 //   node sdr/cli.js cola                                        orden de la cola de hoy con el desglose del puntaje
 //   node sdr/cli.js importar archivo.csv [--confirmar]         carga desde la terminal (sin --confirmar, simula)
 //   node sdr/cli.js semana [--fecha 2026-09-22]                resumen semanal (actividad, racha, tasas si MOSTRAR_RATIOS)
+//   node sdr/cli.js limpiar --confirmar                        BORRA todos los leads, toques, llamadas y cargas del
+//                                                               schema sdr (y los deals que el SDR creó en el Sandler).
+//                                                               Sin --confirmar solo muestra cuánto se borraría.
 //   node sdr/cli.js vox:setup [--key ruta.json] [--url https://…] [--numero +57…] [--rotar]
 //                                                               deja Voximplant listo e imprime las variables de Render
 //   node sdr/cli.js vox:escenario                               imprime el escenario que se subiría (para revisarlo)
@@ -110,6 +113,20 @@ async function main() {
       console.log(`  Días cumplidos: ${r.metas.diasCumplidos} de ${r.metas.diasHabilesTranscurridos} · racha: ${r.racha.dias} día(s)`);
       const x = r.ratios;
       console.log(`  Tasas (${x.desde} → ${x.hasta})${r.mostrarRatios ? '' : ' [ocultas en la app: MOSTRAR_RATIOS=false]'}: contacto ${x.tasaContacto ?? '—'}% · conv→reunión ${x.conversacionAReunion ?? '—'}% · reunión realizada ${x.reunionRealizada ?? '—'}% · realizada→calificado ${x.realizadaACalificado ?? '—'}%`);
+    } else if (cmd === 'limpiar') {
+      const { T } = require('./schema');
+      const n = async (tabla) => (await db.query(`SELECT COUNT(*)::int AS n FROM ${tabla}`)).rows[0].n;
+      const deals = (await db.query(`SELECT COUNT(*)::int AS n FROM public.deals WHERE id IN (SELECT deal_id FROM ${T.leads} WHERE deal_id IS NOT NULL)`)).rows[0].n;
+      console.log(`\nEn la base: ${await n(T.leads)} leads · ${await n(T.tasks)} tareas · ${await n(T.touches)} toques · ${await n(T.calls)} llamadas · ${await n(T.imports)} cargas · ${deals} deals del SDR en el Sandler`);
+      if (!args.confirmar) { console.log('Nada borrado. Para borrar de verdad: node sdr/cli.js limpiar --confirmar'); return; }
+      await db.query('BEGIN');
+      try {
+        await db.query(`DELETE FROM public.deals WHERE id IN (SELECT deal_id FROM ${T.leads} WHERE deal_id IS NOT NULL)`);
+        await db.query(`DELETE FROM ${T.touches}`); await db.query(`DELETE FROM ${T.calls}`); await db.query(`DELETE FROM ${T.tasks}`);
+        await db.query(`DELETE FROM ${T.leads}`); await db.query(`DELETE FROM ${T.imports}`);
+        await db.query('COMMIT');
+      } catch (e) { await db.query('ROLLBACK'); throw e; }
+      console.log('Borrado. El schema, la rúbrica y la configuración quedan intactos.');
     } else if (cmd === 'importar') {
       const { importar } = require('./importar');
       const ruta = args._[1];

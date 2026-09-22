@@ -133,6 +133,17 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
     await registrarEjecutiva(db, base, { leadId: await id('Beta'), accion: 'no_show', ahora: lunes });
   });
 
+  await t.test('usuario: se guarda la etiqueta y solo los sdr cuentan en las metas', async () => {
+    const before = (await consultarCola(db, base, { ahora: lunes })).indicadores.marcaciones;
+    await registrarToque(db, base, { leadId: await id('Beta'), canal: 'llamada', resultado: 'no_contesto', usuario: 'santiago', ahora: lunes });
+    await registrarToque(db, base, { leadId: await id('Beta'), canal: 'llamada', resultado: 'no_contesto', usuario: 'Angie', ahora: lunes });
+    await registrarToque(db, base, { leadId: await id('Beta'), canal: 'llamada', resultado: 'no_contesto', usuario: 'nadie', ahora: lunes });
+    const u = (await db.query(`SELECT usuario FROM sdr.touches ORDER BY id DESC LIMIT 3`)).rows.map(x => x.usuario);
+    assert.deepStrictEqual(u, [null, 'Angie', 'Santiago']);   // 'nadie' no existe → null; 'santiago' se normaliza
+    const after = (await consultarCola(db, base, { ahora: lunes })).indicadores.marcaciones;
+    assert.strictEqual(after - before, 2);                     // Angie + sin usuario cuentan; Santiago no
+  });
+
   await t.test('descartar sin llamar (decisión) exige razón', async () => {
     await assert.rejects(registrarEjecutiva(db, base, { leadId: await id('Beta'), accion: 'descartado' }), /razón/);
   });

@@ -126,6 +126,18 @@ module.exports = {
   DURACION_MINIMA_PIPELINE_S: 45,
 
   // ---------------------------------------------------------------------------
+  // Usuarios (sin credenciales): la etiqueta de quién hizo cada cosa
+  // ---------------------------------------------------------------------------
+  // Qué mueve: el desplegable de la barra y qué actividad cuenta para las metas y la racha.
+  // Solo los toques de usuarios con rol 'sdr' cuentan como marcaciones/conversaciones; así las
+  // pruebas de Santiago o los registros de Luisa no inflan los números de Angie.
+  USUARIOS: [
+    { nombre: 'Angie',    rol: 'sdr' },
+    { nombre: 'Luisa',    rol: 'ejecutiva' },
+    { nombre: 'Santiago', rol: 'admin' },
+  ],
+
+  // ---------------------------------------------------------------------------
   // Ritmo del día: bloques de prospección y racha
   // ---------------------------------------------------------------------------
   // Qué mueve: la barra grande de la cola. Dentro del horario de un bloque (hora de Bogotá) se

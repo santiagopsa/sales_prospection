@@ -59,7 +59,7 @@ async function detalleLead(db, id) {
     `SELECT id, paso, canal, estado, ${ms('due_at')} AS due_ms, ${ms('done_at')} AS done_ms
      FROM ${T.tasks} WHERE lead_id = $1 ORDER BY paso`, [id]);
   const toques = await db.query(
-    `SELECT t.id, t.task_id, t.canal, t.resultado, t.razon_descarte, t.nota, t.detalle, t.call_id,
+    `SELECT t.id, t.task_id, t.canal, t.resultado, t.razon_descarte, t.nota, t.detalle, t.call_id, t.usuario,
             ${ms('t.created_at')} AS created_ms, c.duracion_s, c.record_url, c.origen AS call_origen
      FROM ${T.touches} t LEFT JOIN ${T.calls} c ON c.id = t.call_id
      WHERE t.lead_id = $1 ORDER BY t.created_at DESC, t.id DESC`, [id]);
