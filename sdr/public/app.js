@@ -134,10 +134,10 @@
     const cargas = await api('cargas').catch(() => []);
     $app.innerHTML = `
       <div class="cabeza"><div><h1>Cargar leads</h1>
-        <div class="suave">CSV con empresa, contacto, cargo, teléfono, correo, ciudad y fuente. Separado por comas o punto y coma.</div></div></div>
+        <div class="suave">CSV o Excel (.xlsx). Sirve la exportación de Apollo tal cual, o un archivo con empresa, contacto, cargo, teléfono, correo, ciudad y fuente.</div></div></div>
       <div id="msg"></div>
       <label class="soltar" id="soltar">
-        <input type="file" id="archivo" accept=".csv,text/csv" hidden />
+        <input type="file" id="archivo" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
         <b>Arrastra el archivo aquí o haz clic para elegirlo</b>
         <p class="suave">Primero verás qué va a entrar. Nada se guarda hasta que confirmes.</p>
       </label>
@@ -151,8 +151,12 @@
     const $input = document.getElementById('archivo');
     const tomar = async file => {
       if (!file) return;
-      const contenido = await leerArchivo(file);
-      await analizar(file.name, contenido);
+      if (/\.xlsx$/i.test(file.name)) {
+        const buf = await file.arrayBuffer();
+        let bin = ''; const bytes = new Uint8Array(buf);
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        await analizar(file.name, null, btoa(bin));
+      } else await analizar(file.name, await leerArchivo(file));
     };
     $input.addEventListener('change', () => tomar($input.files[0]));
     $soltar.addEventListener('dragover', e => { e.preventDefault(); $soltar.classList.add('encima'); });
@@ -160,20 +164,20 @@
     $soltar.addEventListener('drop', e => { e.preventDefault(); $soltar.classList.remove('encima'); tomar(e.dataTransfer.files[0]); });
   }
 
-  async function analizar(archivo, contenido) {
+  async function analizar(archivo, contenido, base64) {
     const $inf = document.getElementById('informe');
     const $msg = document.getElementById('msg');
     $msg.innerHTML = '';
     $inf.innerHTML = '<p class="vacio">Revisando el archivo…</p>';
     let inf;
-    try { inf = await api('importar', { method: 'POST', body: { archivo, contenido } }); }
+    try { inf = await api('importar', { method: 'POST', body: { archivo, contenido, base64 } }); }
     catch (e) { $inf.innerHTML = ''; $msg.innerHTML = pintarError(e); return; }
     $inf.innerHTML = pintarInforme(inf, true);
     const $ok = document.getElementById('confirmar');
     if ($ok) $ok.addEventListener('click', async () => {
       $ok.disabled = true; $ok.textContent = 'Cargando…';
       try {
-        const final = await api('importar', { method: 'POST', body: { archivo, contenido, confirmar: true } });
+        const final = await api('importar', { method: 'POST', body: { archivo, contenido, base64, confirmar: true } });
         $inf.innerHTML = pintarInforme(final, false);
       } catch (e) { $msg.innerHTML = pintarError(e); $ok.disabled = false; $ok.textContent = 'Reintentar'; }
     });
@@ -336,7 +340,11 @@
               <dt>Ciudad</dt><dd>${esc(l.ciudad || '—')}</dd>
               <dt>Fuente</dt><dd>${esc(l.fuente || '—')}</dd>
               <dt>Cargado</dt><dd>${fechaHora(l.created_ms)}</dd>
+              ${l.extra ? Object.entries({ industria: 'Industria', empleados: 'Empleados', seniority: 'Seniority', departamento: 'Área', pais: 'País', region: 'Región', ingresos: 'Ingresos', tecnologias: 'Tecnologías' })
+                .filter(([k]) => l.extra[k]).map(([k, lab]) => `<dt>${lab}</dt><dd>${esc(l.extra[k])}</dd>`).join('') : ''}
+              ${l.extra && (l.extra.linkedin || l.extra.sitio_web || l.extra.linkedin_empresa) ? `<dt>Enlaces</dt><dd>${[l.extra.linkedin && `<a href="${esc(l.extra.linkedin)}" target="_blank" rel="noopener">LinkedIn</a>`, l.extra.linkedin_empresa && `<a href="${esc(l.extra.linkedin_empresa)}" target="_blank" rel="noopener">LinkedIn empresa</a>`, l.extra.sitio_web && `<a href="${esc(/^https?:/.test(l.extra.sitio_web) ? l.extra.sitio_web : 'https://' + l.extra.sitio_web)}" target="_blank" rel="noopener">Sitio web</a>`].filter(Boolean).join(' · ')}</dd>` : ''}
             </dl>
+            ${l.extra && l.extra.keywords ? `<p class="suave" style="font-size:12px;margin:10px 0 0"><b>Keywords:</b> ${esc(l.extra.keywords)}</p>` : ''}
           </div>
         </div>
         <div class="panel">

@@ -15,7 +15,7 @@ function error(status, message) { return Object.assign(new Error(message), { sta
 
 async function importar(db, config, { archivo, contenido, simular = true, usuario = null, ahora = new Date() }) {
   usuario = require('./resultados').usuarioValido(config, usuario);
-  const leido = leerArchivo(contenido);
+  const leido = leerArchivo(contenido, archivo || '');
   if (leido.error) throw error(400, leido.error);
   if (leido.filas.length + leido.errores.length > MAX_FILAS) {
     throw error(400, `El archivo tiene más de ${MAX_FILAS} filas. Pártelo en varias cargas.`);
@@ -88,10 +88,10 @@ async function importar(db, config, { archivo, contenido, simular = true, usuari
      ), entrada AS (
        SELECT * FROM jsonb_to_recordset($3::jsonb) AS x(
          fila INT, empresa TEXT, contacto TEXT, cargo TEXT, telefono TEXT, telefono_original TEXT,
-         email TEXT, ciudad TEXT, fuente TEXT)
+         email TEXT, ciudad TEXT, fuente TEXT, extra JSONB)
      ), nuevos AS (
-       INSERT INTO ${T.leads} (empresa, contacto, cargo, telefono, telefono_original, email, ciudad, fuente, import_id)
-       SELECT e.empresa, e.contacto, e.cargo, e.telefono, e.telefono_original, e.email, e.ciudad, e.fuente, (SELECT id FROM imp)
+       INSERT INTO ${T.leads} (empresa, contacto, cargo, telefono, telefono_original, email, ciudad, fuente, extra, import_id)
+       SELECT e.empresa, e.contacto, e.cargo, e.telefono, e.telefono_original, e.email, e.ciudad, e.fuente, e.extra, (SELECT id FROM imp)
        FROM entrada e ORDER BY e.fila
        ON CONFLICT DO NOTHING
        RETURNING id, telefono, email

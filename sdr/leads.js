@@ -50,7 +50,7 @@ async function detalleLead(db, id) {
   id = Number(id);
   if (!Number.isInteger(id)) throw error(400, 'id inválido');
   const l = await db.query(
-    `SELECT id, empresa, contacto, cargo, telefono, telefono_original, email, ciudad, fuente, etapa,
+    `SELECT id, empresa, contacto, cargo, telefono, telefono_original, email, ciudad, fuente, etapa, extra,
             razon_descarte, deal_id, import_id, ${ms('created_at')} AS created_ms, ${ms('etapa_at')} AS etapa_ms,
             ${ms('reunion_at')} AS reunion_ms
      FROM ${T.leads} WHERE id = $1`, [id]);

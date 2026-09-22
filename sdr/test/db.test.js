@@ -27,7 +27,7 @@ test('integración con Postgres', { skip: !url && 'sin SDR_TEST_DATABASE_URL' },
     'Beta;Luis;CTO;(4) 444 1234;;Medellín;lista A',
     'Gama;Eva;CEO;;EVA@gama.co;Bogotá;lista A',
     'ACME bis;Ana otra vez;;+57 300 1234567;;;lista A',   // repetido en archivo por teléfono
-    ';Sin empresa;;3009998888;;;',                         // error
+    ';;;3009998888;;;',                                    // error: sin empresa ni nombre
     'Delta;Juan;;12;;;',                                   // error: teléfono inválido y sin correo
   ].join('\n');
 

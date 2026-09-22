@@ -69,6 +69,15 @@ node sdr/cli.js cola --set RACHA_CUMPLE_CON=cualquiera
 
 `cola` e `importar` necesitan `DATABASE_URL`. Si el nombre del hueco tiene un error, el comando falla y lo dice.
 
+## Archivos de leads
+CSV (coma o punto y coma, UTF-8 o Windows-1252) o **.xlsx** (primera hoja). Se reconocen encabezados en español y
+los de una exportación de **Apollo** tal cual: `First Name` + `Last Name` → contacto, `Title` → cargo,
+`Company Name` → empresa (si falta, el lead se llama como el contacto), `Email`, teléfonos en orden
+`Mobile Phone → Work Direct Phone → Corporate Phone → Company Phone → Other Phone → Home Phone` (el primero válido),
+`City` o `Company City`, `Lists` → fuente. `Do Not Call = TRUE` deja la fila fuera. Industria, empleados, seniority,
+país, LinkedIn, sitio web, keywords y tecnologías quedan en la ficha del lead. Los números que Excel guarda como
+`3.016572696E9` se leen bien.
+
 ## Usuarios
 Sin credenciales: el desplegable de la barra (Angie, Luisa, Santiago; lista en `USUARIOS` de `config.js`) marca
 quién hizo cada cosa y queda en el historial. La app no deja registrar nada sin elegir uno. Solo los toques del

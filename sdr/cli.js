@@ -4,7 +4,7 @@
 //
 //   node sdr/cli.js secuencia [--desde 2026-09-21]            fechas de las tareas de un lead nuevo
 //   node sdr/cli.js cola                                        orden de la cola de hoy con el desglose del puntaje
-//   node sdr/cli.js importar archivo.csv [--confirmar]         carga desde la terminal (sin --confirmar, simula)
+//   node sdr/cli.js importar archivo.csv|.xlsx [--confirmar]   carga desde la terminal (sin --confirmar, simula)
 //   node sdr/cli.js semana [--fecha 2026-09-22] [--usuario Angie]  resumen semanal (actividad, racha, tasas si MOSTRAR_RATIOS)
 //   node sdr/cli.js limpiar --confirmar                        BORRA todos los leads, toques, llamadas y cargas del
 //                                                               schema sdr (y los deals que el SDR creó en el Sandler).
@@ -131,7 +131,8 @@ async function main() {
       const { importar } = require('./importar');
       const ruta = args._[1];
       if (!ruta) throw new Error('Uso: node sdr/cli.js importar archivo.csv [--confirmar]');
-      const inf = await importar(db, config, { archivo: require('path').basename(ruta), contenido: require('./normalizar').decodificar(fs.readFileSync(ruta)), simular: !args.confirmar });
+      const bytes = fs.readFileSync(ruta);
+      const inf = await importar(db, config, { archivo: require('path').basename(ruta), contenido: /\.xlsx$/i.test(ruta) ? bytes : require('./normalizar').decodificar(bytes), simular: !args.confirmar, usuario: args.usuario });
       console.log(`\n${inf.simulado ? 'SIMULACIÓN (usa --confirmar para cargar)' : 'Carga #' + inf.import_id}`);
       console.log(`  filas ${inf.filas} · ${inf.simulado ? 'se crearían ' + inf.aCrear : 'creados ' + inf.creados.length} · duplicados ${inf.duplicados.length} · con error ${inf.errores.length}`);
       for (const d of inf.duplicados) console.log(`  dup  fila ${d.fila}: ${d.empresa} — ${d.motivo}`);

@@ -56,9 +56,10 @@ function rutas({ db, config }) {
     ['get', '/api/cargas/:id', async ({ params }) => { sinDb(); return L.detalleCarga(db, params.id); }],
     ['post', '/api/importar', async ({ body }) => {
       sinDb();
-      const { archivo, contenido, confirmar } = body || {};
-      if (!contenido) throw Object.assign(new Error('Falta el contenido del archivo'), { status: 400 });
-      return importar(db, config, { archivo, contenido, simular: !confirmar, usuario: (body || {}).usuario });
+      const { archivo, contenido, base64, confirmar } = body || {};
+      const entrada = base64 ? Buffer.from(String(base64), 'base64') : contenido;
+      if (!entrada) throw Object.assign(new Error('Falta el contenido del archivo'), { status: 400 });
+      return importar(db, config, { archivo, contenido: entrada, simular: !confirmar, usuario: (body || {}).usuario });
     }],
   ];
 }

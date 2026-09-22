@@ -24,7 +24,7 @@ test('Decodificar: UTF-8 y Windows-1252 de Excel', () => {
 
 test('Columnas: alias con tildes y mayúsculas', () => {
   const m = N.mapearColumnas(['Compañía', 'Nombre completo', 'Cargo', 'Teléfono Móvil', 'Correo electrónico', 'Ciudad', 'Fuente']);
-  assert.deepStrictEqual(m, { empresa: 0, contacto: 1, cargo: 2, telefono: 3, email: 4, ciudad: 5, fuente: 6 });
+  assert.deepStrictEqual(m, { empresa: 0, contacto: 1, cargo: 2, email: 4, fuente: 6, telefonos: [{ i: 3, orden: 8 }], ciudades: [{ i: 5, orden: 0 }], extra: {} });
 });
 
 test('Teléfono: formatos colombianos y extranjeros', () => {
@@ -50,14 +50,15 @@ test('Correo: normaliza y rechaza inválidos', () => {
 });
 
 test('leerArchivo: errores, avisos y nombre+apellido', () => {
-  const r = N.leerArchivo('empresa,nombre,apellido,telefono,email\nACME,Ana,Gómez,3001234567,ana@acme.co\n,Sin,Empresa,3001112222,\nBeta,Luis,,12,\nGama,Eva,,12,eva@gama.co');
+  const r = N.leerArchivo('empresa,nombre,apellido,telefono,email\nACME,Ana,Gómez,3001234567,ana@acme.co\n,,,3001112222,\nBeta,Luis,,12,\nGama,Eva,,12,eva@gama.co');
   assert.strictEqual(r.filas.length, 2);
   assert.strictEqual(r.filas[0].lead.contacto, 'Ana Gómez');
   assert.deepStrictEqual(r.errores.map(x => x.fila), [3, 4]);
+  assert.match(r.errores[0].motivo, /sin empresa ni nombre/);
   assert.match(r.errores[1].motivo, /teléfono/);
   assert.strictEqual(r.filas[1].lead.telefono, null);                 // Gama entra por correo…
   assert.strictEqual(r.filas[1].avisos.length, 1);                    // …con aviso del teléfono malo
-  assert.match(N.leerArchivo('nombre,cargo\nAna,CEO').error, /empresa y teléfono o correo/);
+  assert.match(N.leerArchivo('cargo,ciudad\nCEO,Bogotá').error, /empresa.*y teléfono o correo/);
 });
 
 test('Tiempo: fecha de Bogotá cruza la medianoche UTC', () => {
@@ -85,4 +86,30 @@ test('Prioridad: etapa + canal + atraso con tope', () => {
   assert.strictEqual(t('nuevo', 'llamada', '2026-09-28').desglose.atraso, 6);
   assert.strictEqual(t('nuevo', 'llamada', '2026-09-01').desglose.atraso, 21);        // tope 7 días × 3
   assert.ok(t('conversacion', 'correo', '2026-09-30').puntaje > t('nuevo', 'llamada', '2026-09-28').puntaje);
+});
+
+test('xlsx de Apollo: columnas en inglés, varios teléfonos, extra y Do Not Call', () => {
+  const buf = require('fs').readFileSync(require('path').join(__dirname, 'fixtures', 'apollo.xlsx'));
+  const r = N.leerArchivo(buf, 'apollo.xlsx');
+  assert.ok(!r.error, r.error);
+  assert.strictEqual(r.filas.length, 4);
+  const [ana, luis, eva, solo] = r.filas.map(f => f.lead);
+  assert.strictEqual(ana.empresa, 'ACME'); assert.strictEqual(ana.contacto, 'Ana Gómez'); assert.strictEqual(ana.cargo, 'Head of Talent');
+  assert.strictEqual(ana.telefono, '+573001234567'); assert.strictEqual(ana.telefono_original, '3001234567');   // número de Excel, no "3.001234567E9"
+  assert.strictEqual(ana.email, 'ana@acme.co'); assert.strictEqual(ana.ciudad, 'Medellín'); assert.strictEqual(ana.fuente, 'TA Antioquia');
+  assert.deepStrictEqual(ana.extra, { seniority: 'Director', empleados: '250', industria: 'Software', linkedin: 'https://linkedin.com/in/ana', sitio_web: 'acme.co', pais: 'Colombia' });
+  assert.strictEqual(luis.telefono, '+576044441234');    // segunda columna de teléfono
+  assert.strictEqual(luis.ciudad, 'Medellín');           // Company City cuando City está vacío
+  assert.strictEqual(eva.telefono, '+525512345678');     // el "12" inválido se salta y queda como aviso
+  assert.match(r.filas[2].avisos[0], /"12"/);
+  assert.strictEqual(solo.empresa, 'Solo Nombre');       // sin empresa: el lead se llama como el contacto
+  assert.strictEqual(r.errores.length, 1);
+  assert.match(r.errores[0].motivo, /Do Not Call/);
+  assert.match(r.columnas.telefono, /Mobile Phone → Work Direct Phone → Corporate Phone/);
+});
+
+test('teléfono en notación científica de Excel', () => {
+  assert.strictEqual(N.normalizarTelefono('3.016572696E9').e164, '+573016572696');
+  assert.strictEqual(N.normalizarTelefono('3016572696.0').e164, '+573016572696');
+  assert.strictEqual(N.normalizarTelefono(3016572696).e164, '+573016572696');
 });

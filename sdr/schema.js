@@ -132,6 +132,8 @@ const MIGRACIONES = [
   // Quién lo hizo (etiqueta elegida en la barra, sin credenciales).
   `ALTER TABLE ${T.touches} ADD COLUMN IF NOT EXISTS usuario TEXT`,
   `ALTER TABLE ${T.imports} ADD COLUMN IF NOT EXISTS usuario TEXT`,
+  // Contexto del contacto que trae el archivo (Apollo: industria, empleados, LinkedIn, país…).
+  `ALTER TABLE ${T.leads} ADD COLUMN IF NOT EXISTS extra JSONB`,
 ];
 
 async function initSchema(db, log = console) {
