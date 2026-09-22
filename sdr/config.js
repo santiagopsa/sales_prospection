@@ -109,8 +109,14 @@ module.exports = {
   // que correr `node sdr/cli.js vox:setup` para subir la versión nueva.
   // ---------------------------------------------------------------------------
   // Qué mueve: lo que oye el prospecto al contestar, antes de que se una la voz de Angie.
-  // Vacío = sin aviso (no recomendado: habeas data).
-  AVISO_GRABACION: 'Hola, le habla Angie de Peaku. Le informo que esta llamada está siendo grabada con fines de calidad.',
+  // Vacío = sin aviso automático: Angie lo menciona ella misma cuando ya hay conversación (la
+  // franja de la llamada se lo recuerda con RECORDATORIO_GRABACION). Un robot antes del saludo
+  // mata la llamada en frío; grabar una llamada en la que uno participa es legal en Colombia, y
+  // lo que exige la Ley 1581 es informar el uso de los datos, que es lo que Angie dice.
+  AVISO_GRABACION: '',
+  // Qué mueve: el texto que ve Angie en pantalla mientras la llamada está activa, para que no
+  // se le olvide decirlo. Vacío = sin recordatorio.
+  RECORDATORIO_GRABACION: 'Cuando haya conversación: "te cuento que estoy grabando la llamada para mejorar mi trabajo, ¿te parece?"',
   // Qué mueve: la voz sintética del aviso, en la forma Proveedor.Nombre de VoiceList de Voximplant.
   // Si el nombre no existe, el escenario cae a la voz estándar en español.
   VOZ_AVISO: 'Google.es_US_Standard_A',

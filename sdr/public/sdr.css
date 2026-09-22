@@ -168,3 +168,4 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .alertas .kpi { display: flex; align-items: baseline; gap: 8px; padding: 8px 12px; }
 .alertas .kpi b { font-size: 20px; }
 tr.hoy td { background: #f0fbff; }
+.recordatorio { margin: -4px 0 8px; padding: 8px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; color: #92400e; font-size: 13px; }

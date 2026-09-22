@@ -406,7 +406,8 @@
         $estado.innerHTML = `<div class="llamada ${fase}">
           <span class="punto"></span>
           <div class="txt"><b>${esc(texto)}</b><span class="num" id="reloj">${inicio ? mmss(Date.now() - inicio) : ''}</span></div>
-          <button class="btn colgar" type="button" id="colgar">Colgar</button></div>`;
+          <button class="btn colgar" type="button" id="colgar">Colgar</button></div>
+          ${fase === 'activa' && meta.recordatorioGrabacion ? `<div class="recordatorio">🎙 ${esc(meta.recordatorioGrabacion)}</div>` : ''}`;
         document.getElementById('colgar').addEventListener('click', () => { if (enCurso) tel.colgar(); });
       };
       $llamar.disabled = true;

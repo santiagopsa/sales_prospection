@@ -22,6 +22,7 @@ function rutas({ db, config }) {
       razones: D.RAZONES_DESCARTE.filter(r => r !== 'sin_respuesta').map(r => ({ id: r, label: D.RAZON_LABEL[r] })),
       razonLabel: D.RAZON_LABEL,
       usuarios: (config.USUARIOS || []).map(u => ({ nombre: u.nombre, rol: u.rol })),
+      recordatorioGrabacion: config.RECORDATORIO_GRABACION || '',
     })],
     // Toque de Angie: llamada (con resultado obligatorio) o WhatsApp / correo / LinkedIn de un clic.
     ['post', '/api/leads/:id/toques', async ({ params, body }) => {

@@ -47,7 +47,8 @@ Para cambiar el aviso de grabación o la voz: edita `AVISO_GRABACION` / `VOZ_AVI
 ## Cómo funciona una llamada
 
 Navegador (Web SDK, login con llave de un solo uso firmada por el servidor) → escenario VoxEngine → `callPSTN`
-con `VOX_CALLER_ID` → al contestar, el prospecto oye el aviso → se unen los audios y se graba en estéreo
+con `VOX_CALLER_ID` → al contestar se unen los audios y se graba en estéreo (sin aviso automático: Angie lo dice
+ella misma; la franja de la llamada se lo recuerda con `RECORDATORIO_GRABACION`. `AVISO_GRABACION` vuelve a activarlo)
 (prospecto izquierda, Angie derecha; ver `CANAL_ANGIE_EN_GRABACION`) → al colgar, Angie **tiene** que elegir un
 resultado → el escenario manda un webhook a `/sdr/api/vox/webhook` con duración, estado y enlace de la grabación.
 Resultado y webhook se unen por el `uuid` que genera el navegador, en cualquier orden.
