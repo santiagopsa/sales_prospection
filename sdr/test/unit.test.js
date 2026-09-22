@@ -113,3 +113,16 @@ test('teléfono en notación científica de Excel', () => {
   assert.strictEqual(N.normalizarTelefono('3016572696.0').e164, '+573016572696');
   assert.strictEqual(N.normalizarTelefono(3016572696).e164, '+573016572696');
 });
+
+test('fijos viejos de Colombia y el "+1 571" de Apollo', () => {
+  const e = v => N.normalizarTelefono(v).e164;
+  assert.strictEqual(e('+1 571-702-6044'), '+576017026044');   // Bogotá mal leída como Virginia
+  assert.strictEqual(e('+1 571-425-2600'), '+576014252600');
+  assert.strictEqual(e('+57 1 7026044'), '+576017026044');     // fijo viejo con +57
+  assert.strictEqual(e('+57 4 4441234'), '+576044441234');     // Medellín viejo
+  assert.strictEqual(e('+57 601 7470213'), '+576017470213');   // fijo nuevo
+  assert.strictEqual(e('+57 317 8345327'), '+573178345327');
+  assert.strictEqual(e('+1 571-443-0900'), '+576014430900');
+  assert.strictEqual(N.normalizarTelefono('+1 571-702-6044', null, { TELEFONO_1_571_ES_BOGOTA: false }).e164, '+15717026044');
+  assert.strictEqual(e('+1 212-555-0100'), '+12125550100');    // otros +1 se respetan
+});

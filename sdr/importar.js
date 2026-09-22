@@ -15,7 +15,7 @@ function error(status, message) { return Object.assign(new Error(message), { sta
 
 async function importar(db, config, { archivo, contenido, simular = true, usuario = null, ahora = new Date() }) {
   usuario = require('./resultados').usuarioValido(config, usuario);
-  const leido = leerArchivo(contenido, archivo || '');
+  const leido = leerArchivo(contenido, archivo || '', config);
   if (leido.error) throw error(400, leido.error);
   if (leido.filas.length + leido.errores.length > MAX_FILAS) {
     throw error(400, `El archivo tiene más de ${MAX_FILAS} filas. Pártelo en varias cargas.`);

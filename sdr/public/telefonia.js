@@ -83,14 +83,32 @@
     try { await conectando; } finally { conectando = null; }
   }
 
+  // Lo que pasó en un intento fallido se manda al servidor para que quede en el registro de
+  // Render (así se puede revisar después sin depender de la pantalla de Angie).
+  function reportar(lead, uuid, motivo) {
+    try {
+      fetch('api/vox/bitacora', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: lead.id, uuid, telefono: lead.telefono, motivo, bitacora: bitacora.slice(-15), usuario: (localStorage.getItem('sdr_usuario') || '') }) });
+    } catch (_) { /* nada */ }
+  }
+
   function llamar({ lead, uuid }, cb) {
     const V = SDK();
     const estado = t => cb.estado && cb.estado(t);
     let terminado = false;
-    const fin = info => { if (terminado) return; terminado = true; llamadaActual = null; cb.fin && cb.fin(info || {}); };
-    (async () => {
+    const fin = info => { if (terminado) return; terminado = true; llamadaActual = null; if (info && info.error) reportar(lead, uuid, info.error); cb.fin && cb.fin(info || {}); };
+    let intentos = 0;
+
+    const marcar = async () => {
+      intentos++;
+      // La sesión pudo caerse entre una llamada y otra (Render reinicia, la red se va): se
+      // comprueba el estado real del SDK, no la bandera.
+      if (cliente && conectado) {
+        const st = cliente.getClientState();
+        if (st !== V.ClientState.LOGGED_IN) { anotar('sesión perdida (estado ' + st + '); reconectando'); conectado = false; }
+      }
       await sesion(estado);
-      anotar('llamando a ' + lead.telefono + ' uuid=' + uuid);
+      anotar('llamando a ' + lead.telefono + ' uuid=' + uuid + ' intento ' + intentos);
       estado('Marcando a ' + lead.telefono + '…');
       const call = cliente.call({
         number: lead.telefono,
@@ -105,10 +123,13 @@
       call.addEventListener(V.CallEvents.Failed, ev => {
         anotar('Failed code=' + ev.code + ' reason=' + ev.reason);
         // 486 ocupado, 480/487 no contesta: son resultados normales, no errores.
-        const normal = [480, 486, 487, 603].includes(ev.code);
-        fin(normal ? { contesto: false, codigo: ev.code, motivo: ev.reason } : { error: (ev.reason || 'falló') + ' (código ' + ev.code + ')', codigo: ev.code });
+        if ([480, 486, 487, 603].includes(ev.code)) return fin({ contesto: false, codigo: ev.code, motivo: ev.reason });
+        // Fallas transitorias del lado de la central: un reintento automático antes de rendirse.
+        if (intentos < 2 && [500, 502, 503, 504, 408].includes(ev.code)) { estado('La central no respondió; reintentando…'); return setTimeout(() => marcar().catch(err => fin({ error: err.message || String(err) })), 1500); }
+        fin({ error: (ev.reason || 'falló') + ' (código ' + ev.code + ')', codigo: ev.code });
       });
-    })().catch(e => { anotar('error: ' + (e.message || e)); fin({ error: e.message || String(e) }); });
+    };
+    marcar().catch(e => { anotar('error: ' + (e.message || e)); fin({ error: e.message || String(e) }); });
   }
 
   function colgar() {

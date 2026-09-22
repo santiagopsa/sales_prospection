@@ -126,6 +126,16 @@ module.exports = {
   DURACION_MINIMA_PIPELINE_S: 45,
 
   // ---------------------------------------------------------------------------
+  // Teléfonos
+  // ---------------------------------------------------------------------------
+  // Qué mueve: Apollo y otras bases guardan los fijos viejos de Bogotá (+57 1 XXX XXXX) como si
+  // fueran de Estados Unidos (+1 571-XXX-XXXX). Con true, un "+1 571" de 11 dígitos se lee como
+  // Bogotá y se convierte al formato actual (+57 601 XXX XXXX). Ponlo en false si prospectas en
+  // Virginia (EE. UU.), donde 571 es un indicativo real.
+  // Ver el efecto: node sdr/cli.js importar archivo.xlsx --set TELEFONO_1_571_ES_BOGOTA=false
+  TELEFONO_1_571_ES_BOGOTA: true,
+
+  // ---------------------------------------------------------------------------
   // Usuarios (sin credenciales): la etiqueta de quién hizo cada cosa
   // ---------------------------------------------------------------------------
   // Qué mueve: el desplegable de la barra y qué actividad cuenta para las metas y la racha.

@@ -89,7 +89,7 @@ async function leadParaMarcar(db, config, { telefono, empresa, contacto, ahora =
   const { normalizarTelefono } = require('./normalizar');
   const { planificar } = require('./secuencia');
   const tiempo = require('./tiempo');
-  const tel = normalizarTelefono(telefono);
+  const tel = normalizarTelefono(telefono, null, config);
   if (!tel.e164) throw error(400, tel.error || 'Escribe un teléfono');
   const existe = await db.query(`SELECT id, empresa, etapa FROM ${T.leads} WHERE telefono = $1`, [tel.e164]);
   if (existe.rows.length) return { lead_id: existe.rows[0].id, existente: true, empresa: existe.rows[0].empresa, etapa: existe.rows[0].etapa };

@@ -171,9 +171,11 @@ const INDICATIVO_CIUDAD = {
   ibague: '8', neiva: '8', villavicencio: '8',
 };
 
-// Devuelve { e164 } o { error }. Colombia es el país por defecto: cualquier otro país tiene
+// Devuelve { e164, texto } o { error }. Colombia es el país por defecto: cualquier otro país tiene
 // que venir con su indicativo (+52, +56…), porque adivinarlo sería inventar el número.
-function normalizarTelefono(valor, ciudad) {
+// Fijos viejos (indicativo de una cifra + 7 dígitos, con o sin +57) pasan al formato 60X.
+function normalizarTelefono(valor, ciudad, opciones = {}) {
+  const cfg = { ...require('./config'), ...opciones };
   let bruto = String(valor == null ? '' : valor).trim();
   if (!bruto) return { e164: null };
   // Excel guarda los números como 3.016572696E9 o 3016572696.0: se vuelven enteros.
@@ -182,16 +184,17 @@ function normalizarTelefono(valor, ciudad) {
   const conMas = /^\s*\+/.test(s) || /^\s*00/.test(s);
   let d = s.replace(/\D/g, '');
   if (/^\s*00/.test(s)) d = d.slice(2);
-
   const con = r => (r.e164 ? { ...r, texto: bruto } : r);
+
   if (conMas) {
     if (d.length < 8 || d.length > 15) return { error: 'teléfono con indicativo de longitud inválida' };
+    // "+1 571 XXX XXXX": casi siempre es un fijo de Bogotá (+57 1) mal leído como Virginia.
+    if (cfg.TELEFONO_1_571_ES_BOGOTA && d.length === 11 && d.startsWith('1571')) return con(validarColombia('1' + d.slice(4)));
     if (d.startsWith('57')) return con(validarColombia(d.slice(2)));
     return { e164: '+' + d, texto: bruto };
   }
   if (d.length === 12 && d.startsWith('57')) return con(validarColombia(d.slice(2)));
-  if (d.length === 10) return con(validarColombia(d));
-  if (d.length === 8 && /^[1-8]/.test(d)) return { e164: '+5760' + d, texto: bruto };          // fijo viejo con indicativo
+  if (d.length === 10 || d.length === 8) return con(validarColombia(d));
   if (d.length === 7) {
     const ind = INDICATIVO_CIUDAD[clave(ciudad)];
     if (ind) return { e164: '+5760' + ind + d, texto: bruto };
@@ -200,9 +203,11 @@ function normalizarTelefono(valor, ciudad) {
   return { error: 'no parece un número colombiano; si es de otro país, agrega el indicativo (+52, +56…)' };
 }
 
+// Parte nacional colombiana: celular 3XX XXX XXXX, fijo nuevo 60X XXX XXXX, o fijo viejo X XXX XXXX.
 function validarColombia(d) {
   if (d.length === 10 && (d.startsWith('3') || d.startsWith('60'))) return { e164: '+57' + d };
-  return { error: 'número colombiano inválido (celular 3xx o fijo 60x, 10 dígitos)' };
+  if (d.length === 8 && /^[1-8]/.test(d)) return { e164: '+5760' + d };
+  return { error: 'número colombiano inválido (celular 3xx, fijo 60x, o fijo viejo de 8 dígitos)' };
 }
 
 // --- Correo -------------------------------------------------------------------
@@ -221,7 +226,7 @@ const limpio = v => { const s = String(v == null ? '' : v).replace(/\s+/g, ' ').
 // De un archivo a { columnas, filas:[{ fila, lead, avisos }], errores:[{ fila, motivo }] }.
 // `entrada` es el texto de un CSV o un Buffer/base64 de un .xlsx (nombre con esa extensión).
 // `fila` es el número de línea como lo ve Angie en Excel (el encabezado es la 1).
-function leerArchivo(entrada, nombre = '') {
+function leerArchivo(entrada, nombre = '', opciones = {}) {
   let tabla;
   if (/\.xlsx$/i.test(nombre) || Buffer.isBuffer(entrada)) {
     try { tabla = leerXlsx(Buffer.isBuffer(entrada) ? entrada : Buffer.from(String(entrada), 'base64')); }
@@ -252,7 +257,7 @@ function leerArchivo(entrada, nombre = '') {
     for (const c of col.telefonos) {
       const bruto = celda(c.i);
       if (!bruto) continue;
-      const t = normalizarTelefono(bruto, ciudad);
+      const t = normalizarTelefono(bruto, ciudad, opciones);
       if (t.e164) { tel = t; telOriginal = t.texto || bruto; break; }
       avisos.push(`teléfono "${bruto}": ${t.error}`);
     }

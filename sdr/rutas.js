@@ -41,6 +41,12 @@ function rutas({ db, config }) {
     // Telefonía (Voximplant)
     ['get', '/api/vox/config', async () => vox.configPublica(process.env)],
     ['post', '/api/vox/login-key', async ({ body }) => vox.firmarLogin(process.env, (body || {}).key)],
+    // Bitácora de un intento fallido desde el navegador → queda en el registro del servidor.
+    ['post', '/api/vox/bitacora', async ({ body }) => {
+      const b = body || {};
+      console.error('[sdr/tel] llamada fallida', JSON.stringify({ lead_id: b.lead_id, uuid: b.uuid, telefono: b.telefono, usuario: b.usuario, motivo: b.motivo }), '\n  ' + (Array.isArray(b.bitacora) ? b.bitacora.map(String).slice(-15).join('\n  ') : ''));
+      return { ok: true };
+    }],
     ['post', '/api/vox/webhook', async ({ headers, body }) => { sinDb(); return vox.recibirWebhook(db, process.env, headers || {}, body); }],
     ['get', '/api/cola', async ({ query }) => { sinDb(); return consultarCola(db, config, { usuario: query.usuario || null }); }],
     ['post', '/api/tareas/:id/posponer', async ({ params, body }) => { sinDb(); return posponerTarea(db, config, { taskId: params.id, dias: (body || {}).dias }); }],
