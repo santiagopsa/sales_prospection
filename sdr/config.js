@@ -235,11 +235,37 @@ module.exports = {
   // Qué mueve: el desplegable de la barra y qué actividad cuenta para las metas y la racha.
   // Solo los toques de usuarios con rol 'sdr' cuentan como marcaciones/conversaciones; así las
   // pruebas de Santiago o los registros de Luisa no inflan los números de Angie.
+  // `email` es el calendario de Google Workspace donde caen sus compromisos (ver CALENDARIO_*).
   USUARIOS: [
-    { nombre: 'Angie',    rol: 'sdr' },
-    { nombre: 'Luisa',    rol: 'ejecutiva' },
+    { nombre: 'Angie',    rol: 'sdr',       email: 'angie@peaku.co' },
+    { nombre: 'Luisa',    rol: 'ejecutiva', email: 'luisa@peaku.co' },
     { nombre: 'Santiago', rol: 'admin' },
   ],
+
+  // ---------------------------------------------------------------------------
+  // Compromisos (tareas con hora que nacen de una conversación) y Google Calendar
+  // ---------------------------------------------------------------------------
+  // Qué mueve: los tipos de compromiso que se pueden crear, con su etiqueta y el canal por defecto.
+  // Los toques de secuencia no son compromisos: viven en la cola y NO van al calendario (60
+  // marcaciones al día lo inundarían). Al calendario van solo los compromisos.
+  TIPOS_COMPROMISO: {
+    seguimiento: { label: 'Seguimiento',      canal: 'llamada',  descripcion: 'Quedé en volver a hablar (con hora pactada)' },
+    enviar:      { label: 'Enviar algo',      canal: 'correo',   descripcion: 'Propuesta, presentación, caso' },
+    reunion:     { label: 'Reunión',          canal: 'llamada',  descripcion: 'La reunión agendada (la atiende la ejecutiva)' },
+    otro:        { label: 'Otra tarea',       canal: 'correo',   descripcion: 'Cualquier otro pendiente' },
+  },
+  // Qué mueve: al agendar una reunión con fecha, se crea un compromiso "reunión" para la ejecutiva
+  // (la del diálogo, o la primera con rol ejecutiva) y Angie queda invitada. null = no crear.
+  REUNION_CREA_COMPROMISO: true,
+  // Qué mueve: duración (minutos) del evento en el calendario según el tipo. Un compromiso sin
+  // hora es un evento de todo el día.
+  CALENDARIO_DURACION_MIN: { seguimiento: 15, enviar: 30, reunion: 45, otro: 30 },
+  // Qué mueve: minutos antes en que el calendario avisa (notificación de Google Calendar).
+  CALENDARIO_AVISO_MIN: 10,
+  // Qué mueve: qué tipos se sincronizan con Google Calendar. Quita uno y se queda solo en la app.
+  CALENDARIO_TIPOS: ['seguimiento', 'enviar', 'reunion', 'otro'],
+  // Qué mueve: prefijo del título del evento, para reconocerlos en el calendario.
+  CALENDARIO_PREFIJO: 'SDR · ',
 
   // ---------------------------------------------------------------------------
   // Ritmo del día: bloques de prospección y racha

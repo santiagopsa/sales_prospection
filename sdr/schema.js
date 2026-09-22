@@ -167,6 +167,22 @@ const MIGRACIONES = [
   // Segundo teléfono del lead (el principal sigue siendo la llave de deduplicación).
   `ALTER TABLE ${T.leads} ADD COLUMN IF NOT EXISTS telefono_alt TEXT`,
 
+  // ---- M3c · Compromisos (tareas con hora que nacen de una conversación) y calendario ----------
+  // tipo: 'secuencia' (los toques de la cadencia) o un tipo de TIPOS_COMPROMISO. Un compromiso
+  // puede no tener lead (una tarea suelta del día). El evento de Google Calendar queda enlazado
+  // por gcal_event_id en el calendario de gcal_usuario.
+  `ALTER TABLE ${T.tasks} ALTER COLUMN lead_id DROP NOT NULL`,
+  `ALTER TABLE ${T.tasks} ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'secuencia'`,
+  `ALTER TABLE ${T.tasks} ADD COLUMN IF NOT EXISTS titulo TEXT`,
+  `ALTER TABLE ${T.tasks} ADD COLUMN IF NOT EXISTS nota TEXT`,
+  `ALTER TABLE ${T.tasks} ADD COLUMN IF NOT EXISTS con_hora BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE ${T.tasks} ADD COLUMN IF NOT EXISTS usuario TEXT`,
+  `ALTER TABLE ${T.tasks} ADD COLUMN IF NOT EXISTS creado_por TEXT`,
+  `ALTER TABLE ${T.tasks} ADD COLUMN IF NOT EXISTS gcal_event_id TEXT`,
+  `ALTER TABLE ${T.tasks} ADD COLUMN IF NOT EXISTS gcal_usuario TEXT`,
+  `ALTER TABLE ${T.tasks} ADD COLUMN IF NOT EXISTS gcal_error TEXT`,
+  `CREATE INDEX IF NOT EXISTS sdr_tasks_compromisos ON ${T.tasks}(due_at) WHERE estado = 'pendiente' AND tipo <> 'secuencia'`,
+
   // ---- M4 · Pipeline de audio ------------------------------------------------------------
   // Estados de calls.pipeline_status: no_aplica (manual / sin resultado con conversación),
   // pendiente_resultado (llegó el webhook, falta el resultado), pendiente (lista para transcribir),

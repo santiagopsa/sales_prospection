@@ -57,13 +57,15 @@
     const hoy = new Date(`${c.fecha}T12:00:00-05:00`).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' });
     const b = c.bloque && c.bloque.enCurso;
     const barra = (valor, meta) => `<div class="meta"><i style="width:${Math.min(100, Math.round(valor / Math.max(meta, 1) * 100))}%"></i></div>`;
-    const siguiente = c.tareas.find(t => t.canal === 'llamada' && t.telefono) || c.tareas[0];
+    const pendientes = c.tareas.filter(t => !t.tocado_hoy);
+    const siguiente = pendientes.find(t => t.canal === 'llamada' && t.telefono) || pendientes[0] || c.tareas[0];
     $app.innerHTML = `
       <div class="cabeza">
         <div><h1>Cola del día</h1><div class="suave">${esc(hoy)} · ${plural(c.tareas.length, 'toque pendiente', 'toques pendientes')}${c.usuario ? ` · ritmo de <b>${esc(c.usuario)}</b>` : ''}</div></div>
         <div class="acciones" style="margin:0">
           ${siguiente ? `<a class="btn primario grande" href="#/lead/${siguiente.lead_id}${siguiente.canal === 'llamada' && siguiente.telefono ? '?llamar=1' : ''}">${siguiente.canal === 'llamada' ? '📞 Llamar al siguiente' : 'Siguiente toque'} · ${esc(siguiente.empresa)}</a>` : ''}
           <a class="btn" href="#/marcar">Marcar</a>
+          <button class="btn" id="nuevo-compromiso" title="Una tarea con fecha (y hora) que no es de la secuencia">+ Compromiso</button>
         </div>
       </div>
       <div class="ritmo">
@@ -91,28 +93,22 @@
         ${!i.vencidas && !i.huerfanos ? '<span class="suave" style="font-size:12px">Sin vencidos ni leads huérfanos.</span>' : ''}
         ${ver === 'todas' ? '' : `<a class="kpi enlace" href="#/cola"><b>${c.tareas.length}</b><span>ver todos</span></a>`}
       </div>
+      ${pintarCompromisos(c.compromisos)}
       ${ver !== 'todas' ? `<div class="filtro-activo suave">Mostrando solo <b>${ver === 'vencidas' ? 'vencidas' : 'las de hoy'}</b> · <a href="#/cola">ver todas</a></div>` : ''}
-      ${lista.length ? `<div class="cola">${lista.map((t, n) => `
-        <div class="item" data-lead="${t.lead_id}">
-          <div class="pos">${n + 1}</div>
-          <div class="quien">
-            <b>${esc(t.empresa)}</b>
-            <div>${esc([t.contacto, t.cargo].filter(Boolean).join(' · ') || 'Sin contacto')}${t.ciudad ? ' · ' + esc(t.ciudad) : ''}</div>
-            <div class="num">${esc(telVisible(t.telefono) || t.email || '')}</div>
-          </div>
-          <div class="lado">
-            <span class="chip ${t.canal}">${esc(etiqueta(meta.canales, t.canal))} · paso ${t.paso}/${t.pasos_total}</span>
-            ${t.vencida ? `<span class="chip vencida">Vencida ${plural(t.diasVencida, 'día', 'días')}</span>` : '<span class="chip hoy">Hoy</span>'}
-            ${t.etapa !== 'nuevo' ? `<span class="chip etapa">${esc(etiqueta(meta.etapas, t.etapa))}</span>` : ''}
-            <span class="mover"><button class="btn mini" data-posponer="1" data-task="${t.id}" title="Mover al siguiente día hábil">Mañana</button><button class="btn mini" data-posponer="5" data-task="${t.id}" title="Mover una semana">+1 semana</button><button class="btn mini sacar" data-sacar="${t.lead_id}" title="Descartar o pausar: sale de la cola">Sacar</button></span>
-          </div>
-        </div>`).join('')}</div>`
-        : `<div class="panel vacio">${ver === 'todas' ? 'No hay toques pendientes para hoy.<br><a href="#/importar">Carga una lista de leads</a> para empezar.' : 'Nada en este filtro. <a href="#/cola">Ver todas</a>'}</div>`}
+      ${(() => {
+        const porContactar = lista.filter(t => !t.tocado_hoy), tocados = lista.filter(t => t.tocado_hoy);
+        const vacio = ver === 'todas' ? 'No hay toques pendientes para hoy.<br><a href="#/importar">Carga una lista de leads</a> para empezar.' : 'Nada en este filtro. <a href="#/cola">Ver todas</a>';
+        return `
+        <h2 class="seccion">Por contactar <span class="suave">${plural(porContactar.length, 'lead', 'leads')} · en orden de prioridad</span></h2>
+        ${porContactar.length ? `<div class="cola">${porContactar.map((t, n) => tarjetaCola(t, n + 1)).join('')}</div>` : `<div class="panel vacio">${tocados.length ? 'Todos los de hoy ya tienen un toque. Los siguientes pasos están abajo.' : vacio}</div>`}
+        ${tocados.length ? `<h2 class="seccion" style="margin-top:18px">Ya tocados hoy <span class="suave">${plural(tocados.length, 'lead', 'leads')} · el siguiente paso de su secuencia cae hoy</span></h2>
+        <div class="cola tocados">${tocados.map((t, n) => tarjetaCola(t, null)).join('')}</div>` : ''}`;
+      })()}
       <div id="modal"></div>`;
 
     // Clic en la tarjeta abre la ficha; los botones de posponer no.
     $app.querySelectorAll('.item[data-lead]').forEach(el => el.addEventListener('click', e => {
-      if (e.target.closest('button')) return;
+      if (e.target.closest('button') || e.target.closest('a')) return;
       location.hash = '#/lead/' + el.dataset.lead;
     }));
     $app.querySelectorAll('[data-posponer]').forEach(b => b.addEventListener('click', async () => {
@@ -127,6 +123,107 @@
       const t = c.tareas.find(x => String(x.lead_id) === b.dataset.sacar);
       abrirSacar({ id: t.lead_id, empresa: t.empresa }, { alTerminar: () => vistaCola(params) });
     }));
+    document.getElementById('nuevo-compromiso').addEventListener('click', () => abrirCompromiso({}, { alTerminar: () => vistaCola(params) }));
+    enlazarCompromisos(() => vistaCola(params));
+  }
+
+  // Tarjeta de la cola: la acción que toca (verbo + canal), el contexto del último toque y el paso.
+  const ACCION = { llamada: '📞 Llamar', whatsapp: '💬 Enviar WhatsApp', correo: '✉️ Enviar correo', linkedin: '💼 Mensaje por LinkedIn' };
+  function contextoToque(t) {
+    if (!t.ultimo_ms) return 'Sin contacto todavía';
+    const cuando = t.tocado_hoy ? 'hoy ' + new Date(t.ultimo_ms).toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit' }) : fecha(t.ultimo_ms);
+    const que = meta.resultadoLabel[t.ultimo_resultado] || t.ultimo_resultado || t.ultimo_canal;
+    return `Último: ${cuando} · ${que}${t.ultimo_nota ? ' · «' + t.ultimo_nota.slice(0, 80) + (t.ultimo_nota.length > 80 ? '…' : '') + '»' : ''}`;
+  }
+  function tarjetaCola(t, n) {
+    const href = `#/lead/${t.lead_id}${t.canal === 'llamada' && t.telefono ? '?llamar=1' : ''}`;
+    return `<div class="item ${t.tocado_hoy ? 'tocado' : ''}" data-lead="${t.lead_id}">
+      <div class="pos">${n == null ? '↻' : n}</div>
+      <div class="quien">
+        <a class="btn ${t.canal === 'llamada' ? 'primario' : ''} accion" href="${href}">${ACCION[t.canal] || esc(etiqueta(meta.canales, t.canal))}</a>
+        <b>${esc(t.empresa)}</b> <span class="suave">${esc([t.contacto, t.cargo].filter(Boolean).join(' · ') || 'Sin contacto')}${t.ciudad ? ' · ' + esc(t.ciudad) : ''}</span>
+        <div class="num">${esc(telVisible(t.telefono) || t.email || '')}</div>
+        <div class="contexto suave">${esc(contextoToque(t))} · <span title="Paso ${t.paso} de los ${t.pasos_total} toques de la secuencia">toque ${t.paso} de ${t.pasos_total}</span></div>
+      </div>
+      <div class="lado">
+        ${t.vencida ? `<span class="chip vencida">Vencida ${plural(t.diasVencida, 'día', 'días')}</span>` : '<span class="chip hoy">Hoy</span>'}
+        ${t.etapa !== 'nuevo' ? `<span class="chip etapa">${esc(etiqueta(meta.etapas, t.etapa))}</span>` : ''}
+        <span class="mover"><button class="btn mini" data-posponer="1" data-task="${t.id}" title="Mover al siguiente día hábil">Mañana</button><button class="btn mini" data-posponer="5" data-task="${t.id}" title="Mover una semana">+1 semana</button><button class="btn mini sacar" data-sacar="${t.lead_id}" title="Descartar o pausar: sale de la cola">Sacar</button></span>
+      </div>
+    </div>`;
+  }
+
+  // ---------------------------------------------------------------- compromisos
+  const TIPO_LABEL = id => ((meta.tiposCompromiso || []).find(t => t.id === id) || {}).label || id;
+  function pintarCompromisos(cs) {
+    if (!cs || (!cs.hoy.length && !cs.proximos.length)) return '';
+    const item = t => `<div class="compromiso ${t.vencido ? 'vencido' : ''}" data-cid="${t.id}">
+        <div class="hora">${t.hora ? esc(t.hora) : (t.fecha ? fecha(t.due_ms) : 'hoy')}</div>
+        <div class="que"><b>${esc(t.titulo || TIPO_LABEL(t.tipo))}</b> <span class="chip ${t.canal}">${esc(TIPO_LABEL(t.tipo))}</span>${t.gcal_event_id ? ' <span class="suave" title="En Google Calendar">📅</span>' : t.gcal_error ? ` <span class="suave" title="${esc(t.gcal_error)}" style="color:var(--mal)">📅!</span>` : ''}
+          ${t.lead_id ? `<div><a href="#/lead/${t.lead_id}">${esc(t.empresa || 'lead')}</a>${t.contacto ? ' · ' + esc(t.contacto) : ''}${t.telefono ? ' · <span class="num">' + esc(telVisible(t.telefono)) + '</span>' : ''}</div>` : ''}
+          ${t.nota ? `<div class="suave" style="font-size:12px;white-space:pre-wrap">${esc(t.nota)}</div>` : ''}
+          ${t.usuario && t.usuario !== usuarioActual() ? `<div class="suave" style="font-size:12px">de ${esc(t.usuario)}</div>` : ''}</div>
+        <span class="mover"><button class="btn mini" data-checha="${t.id}" title="Marcar como hecha">Hecha</button><button class="btn mini" data-cposponer="1" data-cid2="${t.id}" title="Mover al siguiente día hábil">Mañana</button><button class="btn mini" data-cmover="${t.id}" title="Elegir fecha y hora">Mover</button><button class="btn mini sacar" data-cquitar="${t.id}" title="Quitar (no se hizo ni se hará)">Quitar</button></span>
+      </div>`;
+    return `<div class="panel compromisos">
+      <h2>Compromisos de hoy <span class="suave" style="font-weight:400;font-size:12px">${cs.hoy.filter(t => t.vencido).length ? cs.hoy.filter(t => t.vencido).length + ' con la hora pasada · ' : ''}lo que quedaste con alguien, a su hora</span></h2>
+      ${cs.hoy.length ? cs.hoy.map(item).join('') : '<div class="suave" style="font-size:13px">Nada pactado para hoy.</div>'}
+      ${cs.proximos.length ? `<details style="margin-top:8px"><summary class="suave" style="cursor:pointer;font-size:12px">Próximos días: ${plural(cs.proximos.length, 'compromiso', 'compromisos')}</summary>${cs.proximos.map(item).join('')}</details>` : ''}
+    </div>`;
+  }
+  function enlazarCompromisos(recargar) {
+    const accion = async (b, ruta, body, ok) => { b.disabled = true; try { const r = await api(ruta, { method: 'POST', body: body || {} }); if (ok) ok(r); await recargar(); } catch (e) { avisar(e.message, 'error'); b.disabled = false; } };
+    $app.querySelectorAll('[data-checha]').forEach(b => b.addEventListener('click', () => accion(b, `tareas/${b.dataset.checha}/hecha`, {}, () => avisar('Hecha.'))));
+    $app.querySelectorAll('[data-cposponer]').forEach(b => b.addEventListener('click', () => accion(b, `tareas/${b.dataset.cid2}/mover`, { dias: Number(b.dataset.cposponer) }, r => avisar(`Movido al ${fecha(new Date(r.due_at).getTime())}.`))));
+    $app.querySelectorAll('[data-cquitar]').forEach(b => b.addEventListener('click', () => { if (window.confirm('¿Quitar este compromiso?')) accion(b, `tareas/${b.dataset.cquitar}/eliminar`, {}, () => avisar('Quitado.')); }));
+    $app.querySelectorAll('[data-cmover]').forEach(b => b.addEventListener('click', () => abrirMover(b.dataset.cmover, recargar)));
+  }
+  function abrirMover(id, alTerminar) {
+    const $modal = document.getElementById('modal');
+    $modal.innerHTML = `<div class="velo"><form class="dialogo" id="frm-mover" style="max-width:380px">
+        <h2>Mover compromiso</h2>
+        <div class="dos"><div><label>Fecha</label><input type="date" name="fecha" required value="${new Date(Date.now() + 86400000).toISOString().slice(0, 10)}" /></div><div><label>Hora (opcional)</label><input type="time" name="hora" /></div></div>
+        <div class="acciones"><button class="btn primario" type="submit">Mover</button><button class="btn" type="button" id="mover-cancelar">Cancelar</button></div>
+        <div id="mover-error"></div></form></div>`;
+    document.getElementById('mover-cancelar').addEventListener('click', () => { $modal.innerHTML = ''; });
+    document.getElementById('frm-mover').addEventListener('submit', async e => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      try { await api(`tareas/${id}/mover`, { method: 'POST', body: { fecha: f.get('fecha'), hora: f.get('hora') || null } }); $modal.innerHTML = ''; avisar('Movido.'); await alTerminar(); }
+      catch (err) { document.getElementById('mover-error').innerHTML = pintarError(err); }
+    });
+  }
+  // Diálogo de nuevo compromiso: tipo, título, fecha, hora, dueño y nota. `lead` opcional.
+  function abrirCompromiso({ lead = null, tipo = 'seguimiento' } = {}, { alTerminar } = {}) {
+    const $modal = document.getElementById('modal');
+    const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+    $modal.innerHTML = `<div class="velo"><form class="dialogo" id="frm-comp" style="max-width:460px">
+        <h2>Nuevo compromiso${lead ? ' · ' + esc(lead.empresa) : ''}</h2>
+        <label>¿Qué?</label>
+        <div class="opciones fila">${(meta.tiposCompromiso || []).filter(t => t.id !== 'reunion').map(t => `<label class="opcion" title="${esc(t.descripcion || '')}"><input type="radio" name="tipo" value="${t.id}" ${t.id === tipo ? 'checked' : ''}> ${esc(t.label)}</label>`).join('')}</div>
+        <label>Título</label><input name="titulo" placeholder="Ej. Llamar a Ana por la propuesta de EOR" required />
+        <div class="dos"><div><label>Fecha</label><input type="date" name="fecha" required value="${hoy}" /></div><div><label>Hora (si la pactaste)</label><input type="time" name="hora" /></div></div>
+        <div class="dos"><div><label>Dueño</label><select name="dueno">${(meta.usuarios || []).map(u => `<option value="${esc(u.nombre)}" ${u.nombre === usuarioActual() ? 'selected' : ''}>${esc(u.nombre)}</option>`).join('')}</select></div>
+          <div><label>Por dónde</label><select name="canal">${(meta.canales || []).map(c => `<option value="${c.id}">${esc(c.label)}</option>`).join('')}</select></div></div>
+        <label>Nota</label><textarea name="nota" rows="2" placeholder="Contexto para cuando llegue el momento"></textarea>
+        <p class="suave" style="font-size:12px;margin:6px 0 0">${meta.calendarioActivo ? 'Queda en el Google Calendar del dueño (si tiene correo configurado).' : 'Google Calendar aún no está conectado: queda solo en la app.'}</p>
+        <div class="acciones"><button class="btn primario" type="submit">Guardar</button><button class="btn" type="button" id="comp-cancelar">Cancelar</button></div>
+        <div id="comp-error"></div></form></div>`;
+    const $frm = document.getElementById('frm-comp');
+    const ajustarCanal = () => { const t = (meta.tiposCompromiso || []).find(x => x.id === ($frm.querySelector('input[name=tipo]:checked') || {}).value); if (t && t.canal) $frm.querySelector('select[name=canal]').value = t.canal; };
+    $frm.querySelectorAll('input[name=tipo]').forEach(r => r.addEventListener('change', ajustarCanal)); ajustarCanal();
+    document.getElementById('comp-cancelar').addEventListener('click', () => { $modal.innerHTML = ''; });
+    $frm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const f = new FormData($frm);
+      $frm.querySelector('button[type=submit]').disabled = true;
+      try {
+        const r = await api('tareas', { method: 'POST', body: { lead_id: lead ? lead.id : null, tipo: f.get('tipo'), titulo: f.get('titulo'), fecha: f.get('fecha'), hora: f.get('hora') || null, dueno: f.get('dueno'), canal: f.get('canal'), nota: f.get('nota') || '' } });
+        $modal.innerHTML = '';
+        avisar(r.calendario && r.calendario.ok ? 'Compromiso guardado y en el calendario.' : r.calendario && r.calendario.error ? 'Compromiso guardado; el calendario falló: ' + r.calendario.error : 'Compromiso guardado.', r.calendario && r.calendario.error ? 'aviso' : 'ok');
+        if (alTerminar) await alTerminar();
+      } catch (err) { document.getElementById('comp-error').innerHTML = pintarError(err); $frm.querySelector('button[type=submit]').disabled = false; }
+    });
   }
 
   // Diálogo "Sacar de la cola": razón cerrada + ¿volver a intentar? (descartar de verdad, o pausa
@@ -517,6 +614,7 @@
                 <button class="btn" data-toque="whatsapp" ${l.telefono ? '' : 'disabled'}>WhatsApp enviado</button>
                 <button class="btn" data-toque="correo" ${l.email ? '' : 'disabled'}>Correo enviado</button>
                 <button class="btn" data-toque="linkedin">LinkedIn enviado</button>
+                <button class="btn" id="compromiso" title="Algo que quedaste con el prospecto, con fecha y hora">Compromiso</button>
                 <button class="btn peligro" id="descartar" title="Descartar o pausar">Sacar de la cola</button>
                 ${l.pausado_ms ? '<button class="btn" data-ejecutiva="reactivar" title="Quitar la pausa y volver a la cola desde hoy">Retomar ahora</button>' : ''}
               </div>
@@ -528,6 +626,7 @@
                 ${l.etapa === 'reunion_agendada' ? `<button class="btn primario" data-ejecutiva="reunion_realizada">Reunión realizada</button>
                 <button class="btn" data-ejecutiva="no_show">No se presentó</button>` : ''}
                 ${['reunion_agendada', 'reunion_realizada'].includes(l.etapa) ? `<button class="btn primario" data-ejecutiva="calificado">Calificado</button>` : ''}
+                <button class="btn" id="compromiso" title="Una tarea con fecha y hora sobre este lead">Compromiso</button>
                 ${l.etapa !== 'calificado' ? `<button class="btn peligro" id="descartar">Descartar</button>` : ''}
               </div>`}
           </div>
@@ -553,9 +652,9 @@
           ${l.toques.length ? `<ul class="pasos historial">${l.toques.map(pintaToque).join('')}</ul>` : '<p class="suave" style="margin:0 0 14px">Todavía no hay toques registrados.</p>'}
           <h2 style="margin-top:16px">Secuencia</h2>
           <ul class="pasos">${l.tareas.map(t => `<li>
-            <span class="n">${t.paso}</span>
-            <span class="chip ${t.canal}">${esc(etiqueta(meta.canales, t.canal))}</span>
-            <span class="${t.estado !== 'pendiente' ? 'hecha' : ''}">${fecha(t.due_ms)}</span>
+            <span class="n">${t.tipo === 'secuencia' ? t.paso : '★'}</span>
+            <span class="chip ${t.canal}">${esc(t.tipo === 'secuencia' ? etiqueta(meta.canales, t.canal) : TIPO_LABEL(t.tipo))}</span>
+            <span class="${t.estado !== 'pendiente' ? 'hecha' : ''}">${t.con_hora ? fechaHora(t.due_ms) : fecha(t.due_ms)}${t.tipo !== 'secuencia' && t.titulo ? ' · ' + esc(t.titulo) : ''}${t.usuario && t.tipo !== 'secuencia' ? ` <span class="suave">(${esc(t.usuario)})</span>` : ''}</span>
             <span class="suave" style="margin-left:auto;font-size:12px">${esc(t.estado)}</span>
           </li>`).join('')}</ul>
         </div>
@@ -592,6 +691,8 @@
 
     const $desc = document.getElementById('descartar');
     if ($desc) $desc.addEventListener('click', () => abrirSacar(l, { alTerminar: () => vistaLead(l.id) }));
+    const $comp = document.getElementById('compromiso');
+    if ($comp) $comp.addEventListener('click', () => abrirCompromiso({ lead: l }, { alTerminar: () => vistaLead(l.id) }));
 
     const $manual = document.getElementById('llamada-manual');
     if ($manual) $manual.addEventListener('click', () => abrirResultado(l, {}));
@@ -724,6 +825,11 @@
         </div>
         <label>Nota</label>
         <textarea name="nota" rows="3" placeholder="Lo que valga la pena recordar de esta llamada"></textarea>
+        <details id="quede" style="margin-top:10px"><summary style="cursor:pointer;font-weight:600;font-size:13px">¿Quedaste en algo? (seguimiento con hora, enviar algo…)</summary>
+          <div class="opciones fila" style="margin-top:8px">${(meta.tiposCompromiso || []).filter(t => ['seguimiento', 'enviar', 'otro'].includes(t.id)).map((t, i) => `<label class="opcion"><input type="radio" name="c_tipo" value="${t.id}" ${i === 0 ? 'checked' : ''}> ${esc(t.label)}</label>`).join('')}</div>
+          <label>Qué</label><input name="c_titulo" placeholder="Ej. Llamarlo el jueves con la propuesta" />
+          <div class="dos"><div><label>Fecha</label><input type="date" name="c_fecha" /></div><div><label>Hora</label><input type="time" name="c_hora" /></div></div>
+        </details>
         <div class="acciones">
           <button class="btn primario" type="submit">Guardar</button>
           ${obligatorio ? '' : '<button class="btn" type="button" id="cancelar">Cancelar</button>'}
@@ -768,6 +874,11 @@
       $frm.querySelector('button[type=submit]').disabled = true;
       try {
         const r = await api(ruta, { method: 'POST', body });
+        // El compromiso que quedó pactado en la llamada, si lo llenó.
+        if (f.get('c_titulo') && f.get('c_fecha') && resultado !== 'descartado') {
+          try { const rc = await api('tareas', { method: 'POST', body: { lead_id: l.id, tipo: f.get('c_tipo') || 'seguimiento', titulo: f.get('c_titulo'), fecha: f.get('c_fecha'), hora: f.get('c_hora') || null } }); (r.avisos = r.avisos || []).push(rc.calendario && rc.calendario.ok ? 'Compromiso anotado y en el calendario.' : 'Compromiso anotado.'); }
+          catch (err) { (r.avisos = r.avisos || []).push('El compromiso no se guardó: ' + err.message); }
+        } else if (f.get('c_titulo') && !f.get('c_fecha')) (r.avisos = r.avisos || []).push('El compromiso no se guardó: faltó la fecha.');
         $modal.innerHTML = '';
         const partes = [`Registrado. Etapa: ${etiqueta(meta.etapas, r.etapa)}.`];
         if (r.proxima) partes.push(`Próximo toque: ${etiqueta(meta.canales, r.proxima.canal)} el ${fecha(new Date(r.proxima.due_at).getTime())}.`);

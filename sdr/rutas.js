@@ -8,6 +8,8 @@ const D = require('./dominio');
 const { registrarToque, registrarEjecutiva, agregarAListaNegra } = require('./resultados');
 const LN = require('./listanegra');
 const P = require('./pipeline');
+const C = require('./compromisos');
+const cal = require('./calendario');
 const vox = require('./vox/servidor');
 const ritmo = require('./ritmo');
 const { ETAPAS, ETAPA_LABEL, CANALES, CANAL_LABEL } = D;
@@ -27,6 +29,8 @@ function rutas({ db, config }) {
       usuarios: (config.USUARIOS || []).map(u => ({ nombre: u.nombre, rol: u.rol })),
       recordatorioGrabacion: config.RECORDATORIO_GRABACION || '',
       verTranscripcion: config.VER_TRANSCRIPCION || [],
+      tiposCompromiso: Object.entries(config.TIPOS_COMPROMISO || {}).map(([id, t]) => ({ id, label: t.label, canal: t.canal, descripcion: t.descripcion })),
+      calendarioActivo: cal.activo(process.env),
     })],
     // Toque de Angie: llamada (con resultado obligatorio) o WhatsApp / correo / LinkedIn de un clic.
     ['post', '/api/leads/:id/toques', async ({ params, body }) => {
@@ -62,7 +66,24 @@ function rutas({ db, config }) {
     ['get', '/api/llamadas/:id/transcripcion', async ({ params }) => { sinDb(); return P.transcripcionDeLlamada(db, params.id); }],
     ['post', '/api/llamadas/:id/reprocesar', async ({ params }) => { sinDb(); return P.reencolar(db, params.id); }],
     ['get', '/api/cola', async ({ query }) => { sinDb(); return consultarCola(db, config, { usuario: query.usuario || null }); }],
-    ['post', '/api/tareas/:id/posponer', async ({ params, body }) => { sinDb(); return posponerTarea(db, config, { taskId: params.id, dias: (body || {}).dias }); }],
+    ['post', '/api/tareas/:id/posponer', async ({ params, body }) => {
+      sinDb();
+      const t = (await db.query(`SELECT tipo FROM sdr.tasks WHERE id = $1`, [Number(params.id)])).rows[0];
+      if (t && t.tipo !== 'secuencia') return C.mover(db, config, process.env, params.id, { dias: (body || {}).dias });
+      return posponerTarea(db, config, { taskId: params.id, dias: (body || {}).dias });
+    }],
+    // Compromisos: tareas con hora que nacen de una conversación (van al calendario del dueño).
+    ['post', '/api/tareas', async ({ body }) => {
+      sinDb();
+      const b = body || {};
+      const usuario = require('./resultados').usuarioValido(config, b.usuario);
+      return C.crear(db, config, process.env, { leadId: b.lead_id, tipo: b.tipo, titulo: b.titulo, canal: b.canal, fecha: b.fecha, hora: b.hora, nota: b.nota, usuario: require('./resultados').usuarioValido(config, b.dueno) || usuario, creadoPor: usuario });
+    }],
+    ['post', '/api/tareas/:id/hecha', async ({ params, body }) => { sinDb(); return C.hecha(db, config, process.env, params.id, { deshacer: !!(body || {}).deshacer }); }],
+    ['post', '/api/tareas/:id/eliminar', async ({ params }) => { sinDb(); return C.eliminar(db, config, process.env, params.id); }],
+    ['post', '/api/tareas/:id/mover', async ({ params, body }) => { sinDb(); const b = body || {}; return C.mover(db, config, process.env, params.id, { fecha: b.fecha, hora: b.hora, dias: b.dias, titulo: b.titulo, nota: b.nota }); }],
+    ['get', '/api/compromisos', async ({ query }) => { sinDb(); return C.listar(db, config, { usuario: query.usuario || null, dias: Number(query.dias) || 7 }); }],
+    ['get', '/api/calendario/estado', async () => ({ activo: cal.activo(process.env), usuarios: (config.USUARIOS || []).filter(u => u.email).map(u => u.nombre) })],
     ['get', '/api/semana', async ({ query }) => { sinDb(); return ritmo.resumenSemana(db, config, { fecha: /^\d{4}-\d{2}-\d{2}$/.test(query.fecha || '') ? query.fecha : undefined, usuario: query.usuario || null }); }],
     ['get', '/api/pipeline', async () => { sinDb(); return L.pipeline(db); }],
     ['get', '/api/leads', async ({ query }) => {

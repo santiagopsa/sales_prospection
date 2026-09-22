@@ -12,6 +12,7 @@
 //   node sdr/cli.js vox:setup [--key ruta.json] [--url https://…] [--numero +57…] [--rotar]
 //                                                               deja Voximplant listo e imprime las variables de Render
 //   node sdr/cli.js vox:escenario                               imprime el escenario que se subiría (para revisarlo)
+//   node sdr/cli.js calendario:probar --usuario Angie          crea y borra un evento de prueba en su Google Calendar
 //   node sdr/cli.js pipeline [--estado] [--call N] [--limite 5] transcribe las llamadas pendientes (necesita DEEPGRAM_API_KEY);
 //                                                               --estado muestra el conteo y los errores; --call N reprocesa una
 //   node sdr/cli.js metricas --call N                          muestra transcripción y métricas de una llamada; con --set
@@ -87,6 +88,14 @@ async function main() {
   if (cmd === 'vox:setup') {
     const { setup } = require('./vox/setup');
     await setup({ key: args.key, url: args.url, numero: args.numero, rotar: args.rotar === true, config });
+    return;
+  }
+  if (cmd === 'calendario:probar') {
+    const cal = require('./calendario');
+    const u = args.usuario || 'Angie';
+    console.log(`Probando el calendario de ${u} (${cal.emailDe(config, u) || 'sin correo en USUARIOS'})…`);
+    const r = await cal.probar(process.env, config, u);
+    console.log(`OK: se creó y se borró un evento en ${r.calendario}. La delegación funciona.`);
     return;
   }
   if (cmd === 'vox:escenario') {

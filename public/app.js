@@ -1493,8 +1493,8 @@ async function submitDeal(btn) {
   const prevText = target ? target.innerHTML : '';
   if (target) target.innerHTML = '<span class="spinner"></span> Guardando…';
   try {
-    const r = await fetch('/api/deals', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+    const r = await fetch(state.sdrDealId ? `/api/deals/${state.sdrDealId}/completar` : '/api/deals', {
+      method: state.sdrDealId ? 'PUT' : 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify(state),
     });
     const j = await r.json();
@@ -1619,7 +1619,18 @@ async function renderDealDetail(id) {
     </div>`;
   };
 
+  // Deal que agendó el SDR (Angie) desde /sdr: todavía no tiene demo. La ejecutiva lo "toma": el
+  // asistente arranca con la ficha de Angie prellenada y, al terminar, actualiza ESTE deal.
+  const deSdr = (row.canal_adquisicion === 'sdr_interno' || d.canalAdquisicion === 'sdr_interno') && row.outcome !== 'won' && row.outcome !== 'lost' && !(d.transcript && String(d.transcript).trim());
+  const tomarHtml = deSdr ? `
+    <div class="card" style="border-left:6px solid var(--peaku-blue, #00C3FF);">
+      <h2>Agendado por el SDR · pendiente de demo</h2>
+      <p class="muted" style="font-size:13px;">Este deal lo creó ${esc(row.freelancer_nombre || d.freelancerNombre || 'el SDR')} al agendar la reunión. Lo que ves en rojo es lo que se llena en el demo: tómalo y el asistente arranca con la ficha de Angie ya puesta. Al guardar, se actualiza este mismo deal (no se crea otro).</p>
+      <button class="btn" data-tomar="${row.id}">▶ Tomar este deal y hacer el demo</button>
+    </div>` : '';
+
   h(`
+    ${tomarHtml}
     <div class="split">
       <h1>Deal #${row.id} · ${esc(d.company || row.company || '—')}</h1>
       ${seg ? `<span class="segment-badge ${seg}">Segmento ${seg}</span>` : ''}
@@ -1769,6 +1780,19 @@ async function renderDealDetail(id) {
     }
     reasonSel.style.display = ''; reasonTxt.style.display = ''; saveBtn.style.display = '';
   }
+  const tomarBtn = el.querySelector('[data-tomar]');
+  if (tomarBtn) tomarBtn.addEventListener('click', () => {
+    const borrador = loadDraft();
+    const hayOtro = borrador && (borrador.company || borrador.transcript) && Number(borrador.sdrDealId) !== row.id;
+    if (hayOtro && !confirm(`Tienes un borrador en curso (${borrador.company || 'sin empresa'}). ¿Lo reemplazo con este deal del SDR?`)) return;
+    const base = newDraft();
+    state = { ...base, ...(d || {}), sdrDealId: row.id };
+    if (!state.company) state.company = row.company || '';
+    if (!state.canalAdquisicion) state.canalAdquisicion = 'sdr_interno';
+    if (!state.freelancerNombre) state.freelancerNombre = row.freelancer_nombre || 'Angie (SDR)';
+    state.transcript = state.transcript || ''; state.iaExtracted = null; state.iaError = null;
+    stepIdx = 0; saveDraft(); location.hash = '#/';
+  });
   if (saveBtn) saveBtn.addEventListener('click', async () => {
     const mode = el.querySelector('#outcome-panel').getAttribute('data-mode');
     const motivo = [reasonSel.value, reasonTxt.value.trim()].filter(Boolean).join(' — ');

@@ -23,6 +23,7 @@ métricas por llamada. Pendientes: evaluación con rúbrica (resto de 4), mejora
 | `PUBLIC_URL` | URL pública del servicio | `https://peaku-sandler.onrender.com` |
 | `VOX_NODE` | Nodo de la cuenta (1–13); sin él el SDK no conecta | Dashboard de Voximplant → "Credentials for working with API, SDK, SIP" |
 | `DEEPGRAM_API_KEY` | Transcripción de las llamadas con conversación | console.deepgram.com → API Keys |
+| `GOOGLE_CALENDAR_KEY_FILE` | Ruta al JSON de la cuenta de servicio (Secret File de Render: `/etc/secrets/google-calendar-key.json`) | Google Cloud → cuenta de servicio → clave JSON; delegación de dominio en el Admin de Workspace |
 
 Sin las `VOX_*` todo funciona menos el botón **Llamar**, que aparece apagado con el motivo. Angie puede registrar
 llamadas hechas por fuera mientras tanto.
@@ -64,6 +65,10 @@ motivo (`MENSAJES_LLAMADA`) y la ficha lo muestra con el código y los intentos,
 marcar**, **Desde el celular sí entra: reportar** (queda en *Pipeline → Fallos de marcación* con el código,
 para revisar la ruta con Voximplant) o **Número malo: sacar de la cola**. Un fallo del operador no abre el
 diálogo de resultado: no es una marcación. Un 480/487 (timbró y no contestaron) o 486 (ocupado) sí lo abre.
+
+**Deal en el Sandler.** Al agendar una reunión, el lead crea un deal (`canal_adquisicion = sdr_interno`) con la
+ficha de Angie. En el Sandler, el detalle de ese deal muestra **Tomar este deal y hacer el demo**: la ejecutiva
+entra al asistente con la ficha prellenada y, al guardar, se actualiza ese mismo deal (no se crea otro).
 
 **Datos del lead.** En la ficha, *Editar* corrige empresa, contacto, cargo, ciudad, correo, teléfono principal
 y un segundo teléfono (con su propio botón de llamar). Los teléfonos se normalizan igual que en la carga; si
@@ -118,6 +123,36 @@ los de una exportación de **Apollo** tal cual: `First Name` + `Last Name` → c
 `City` o `Company City`, `Lists` → fuente. `Do Not Call = TRUE` deja la fila fuera. Industria, empleados, seniority,
 país, LinkedIn, sitio web, keywords y tecnologías quedan en la ficha del lead. Los números que Excel guarda como
 `3.016572696E9` se leen bien.
+
+## Cola del día: por contactar y ya tocados hoy
+Cada tarjeta dice la acción que toca (**Llamar**, **Enviar WhatsApp**, **Enviar correo**, **Mensaje por LinkedIn**), el
+contexto del último toque ("Último: hoy 10:32 · No contestó") y el paso ("toque 2 de 9"). Los leads que ya
+recibieron un toque hoy (llamó y no contestó, ya mandó el WhatsApp…) van en su propia sección **Ya tocados hoy**,
+debajo, con su siguiente paso; los de arriba son los que faltan por contactar, en orden de prioridad.
+
+## Compromisos y Google Calendar
+Un compromiso es una tarea con fecha (y hora, si se pactó) que nace de una conversación, distinta de los toques
+de la secuencia: **seguimiento** ("me dijo que lo llamara el jueves a las 3"), **enviar algo**, **reunión** (se crea
+sola al agendar, para la ejecutiva, con Angie invitada) y **otra tarea** (con o sin lead). Se crean desde la cola
+(**+ Compromiso**), desde la ficha (**Compromiso**) y desde el resultado de la llamada (**¿Quedaste en algo?**).
+En la cola aparecen arriba, en **Compromisos de hoy**, por hora, con *Hecha*, *Mañana*, *Mover* y *Quitar*, y un
+desplegable con los próximos días. Cada compromiso tiene dueño (`USUARIOS`); solo ve los suyos quien esté elegido
+en la barra. Al descartar o pausar un lead se quitan también sus compromisos.
+
+Con `GOOGLE_CALENDAR_KEY_FILE` y correo en `USUARIOS`, cada compromiso es un evento en el calendario del dueño
+(se crea, se mueve y se borra con la tarea; aviso `CALENDARIO_AVISO_MIN` minutos antes; duración por tipo en
+`CALENDARIO_DURACION_MIN`; tipos que se sincronizan en `CALENDARIO_TIPOS`). Los toques de secuencia no van al
+calendario a propósito. Si Google falla, el compromiso queda igual y el error se ve en la tarjeta (📅!).
+
+```
+node sdr/cli.js calendario:probar --usuario Angie   # crea y borra un evento de prueba: confirma la delegación
+```
+
+Cómo se monta la cuenta de servicio (una vez): Google Cloud → proyecto → habilitar *Google Calendar API* → crear
+cuenta de servicio sin roles → clave JSON (guardarla como `sdr/google-calendar-key.json`, ignorada por git) →
+copiar su *ID único* → Admin de Workspace → Seguridad → Controles de API → Delegación de todo el dominio →
+agregar el ID con el scope `https://www.googleapis.com/auth/calendar` → en Render, Secret File con el JSON y la
+variable `GOOGLE_CALENDAR_KEY_FILE` apuntando a él.
 
 ## Sacar un lead de la cola: descartar, pausar, lista negra
 Desde la cola (botón **Sacar** en la tarjeta), desde la ficha (**Sacar de la cola**) o como resultado

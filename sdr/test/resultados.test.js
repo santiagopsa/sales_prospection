@@ -27,7 +27,7 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
   await importar(db, base, { archivo: 'x.csv', contenido: csv, simular: false, ahora: lunes });
   const id = async empresa => (await db.query(`SELECT id FROM sdr.leads WHERE empresa=$1`, [empresa])).rows[0].id;
   const lead = async empresa => (await db.query(`SELECT * FROM sdr.leads WHERE empresa=$1`, [empresa])).rows[0];
-  const pendientes = async empresa => (await db.query(`SELECT paso, canal, estado FROM sdr.tasks WHERE lead_id=$1 AND estado='pendiente' ORDER BY paso`, [await id(empresa)])).rows;
+  const pendientes = async empresa => (await db.query(`SELECT paso, canal, estado FROM sdr.tasks WHERE lead_id=$1 AND estado='pendiente' AND tipo='secuencia' ORDER BY paso`, [await id(empresa)])).rows;
 
   await t.test('siguienteEtapa solo avanza', () => {
     assert.strictEqual(siguienteEtapa(base, 'nuevo', 'gatekeeper'), 'contactado');
@@ -88,7 +88,8 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
     });
     assert.strictEqual(r.etapa, 'reunion_agendada');
     assert.ok(r.deal_id);
-    assert.deepStrictEqual(r.avisos, []);
+    assert.deepStrictEqual(r.avisos, ['Reunión anotada como compromiso de Luisa.']);
+    assert.ok(r.compromiso_id);
     const deal = (await db.query('SELECT * FROM public.deals WHERE id=$1', [r.deal_id])).rows[0];
     assert.strictEqual(deal.company, 'ACME');
     assert.strictEqual(deal.canal_adquisicion, 'sdr_interno');

@@ -212,6 +212,37 @@ app.post('/api/deals', async (req, res) => {
   }
 });
 
+// Completar un deal que creó el SDR (/sdr) al agendar la reunión: la ejecutiva lo "toma" en el
+// asistente y al terminar se actualiza ESTA fila (misma lógica de score que el POST), sin crear otra.
+app.put('/api/deals/:id/completar', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const d = req.body || {};
+    delete d.sdrDealId;
+    const s = scoreDeal(d);
+    const fechaLim = (d.fechaLimiteDecision && String(d.fechaLimiteDecision).match(/^\d{4}-\d{2}-\d{2}$/)) ? d.fechaLimiteDecision : null;
+    if (!pool) return res.status(503).json({ ok: false, error: 'sin base de datos' });
+    const r = await pool.query(
+      `UPDATE deals SET executive=$1, company=$2, segment=$3, has_ats=$4, data=$5,
+         score_fundamentals=$6, score_nice_to_have=$7, linea_negocio=$8, calificacion_sandler=$9, fecha_limite_decision=$10,
+         canal_adquisicion=COALESCE(canal_adquisicion, $11), freelancer_nombre=COALESCE(freelancer_nombre, $12)
+       WHERE id=$13 RETURNING id`,
+      [d.executive || null, d.company || null, d.segment || null, !!d.hasAts, d, s.fundamentalsPct, s.niceToHavePct,
+       d.lineaNegocio || null, s.calificacion.label, fechaLim, d.canalAdquisicion || null, d.freelancerNombre || null, id]);
+    if (!r.rows.length) return res.status(404).json({ ok: false, error: 'not found' });
+    await pool.query(`DELETE FROM wishlist WHERE deal_id=$1`, [id]);
+    if (Array.isArray(d.idealRequests)) {
+      for (const item of d.idealRequests) {
+        if (item && item.text) await pool.query(`INSERT INTO wishlist (deal_id, segment, item, we_have) VALUES ($1,$2,$3,$4)`, [id, d.segment || null, item.text, !!item.weHave]);
+      }
+    }
+    return res.json({ ok: true, id, score: s });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get('/api/deals', async (req, res) => {
   try {
     if (pool) {

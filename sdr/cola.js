@@ -33,9 +33,13 @@ async function consultarCola(db, config, { ahora = new Date(), usuario = null } 
               t.id, t.lead_id, t.paso, t.canal,
               (EXTRACT(EPOCH FROM t.due_at) * 1000)::float8 AS due_ms,
               l.empresa, l.contacto, l.cargo, l.telefono, l.email, l.ciudad, l.etapa,
-              (SELECT COUNT(*) FROM ${T.tasks} x WHERE x.lead_id = t.lead_id)::int AS pasos_total
+              (SELECT COUNT(*) FROM ${T.tasks} x WHERE x.lead_id = t.lead_id AND x.tipo = 'secuencia')::int AS pasos_total,
+              u.canal AS ultimo_canal, u.resultado AS ultimo_resultado, u.nota AS ultimo_nota, u.usuario AS ultimo_usuario,
+              (EXTRACT(EPOCH FROM u.created_at) * 1000)::float8 AS ultimo_ms
        FROM ${T.tasks} t JOIN ${T.leads} l ON l.id = t.lead_id
-       WHERE t.estado = 'pendiente'
+       LEFT JOIN LATERAL (SELECT x.canal, x.resultado, x.nota, x.usuario, x.created_at FROM ${T.touches} x
+                          WHERE x.lead_id = t.lead_id AND x.canal <> 'ejecutiva' ORDER BY x.created_at DESC, x.id DESC LIMIT 1) u ON true
+       WHERE t.estado = 'pendiente' AND t.tipo = 'secuencia'
          AND l.etapa IN (SELECT jsonb_array_elements_text($1::jsonb))
        ORDER BY t.lead_id, t.paso
      ) s
@@ -43,10 +47,12 @@ async function consultarCola(db, config, { ahora = new Date(), usuario = null } 
     [etapasDeAngie, finHoy.getTime()],
   );
 
+  // Un lead ya tocado hoy (llamó y no contestó, mandó el WhatsApp…) no compite con los que faltan
+  // por contactar: va en su propia sección, con el siguiente paso claro.
   const tareas = r.rows.map(t => {
     const p = prioridad(t, config, ahora);
-    return { ...t, ...p, vencida: t.due_ms < inicioHoy.getTime() };
-  }).sort((a, b) => b.puntaje - a.puntaje || a.due_ms - b.due_ms || a.lead_id - b.lead_id);
+    return { ...t, ...p, vencida: t.due_ms < inicioHoy.getTime(), tocado_hoy: t.ultimo_ms != null && t.ultimo_ms >= inicioHoy.getTime() };
+  }).sort((a, b) => (a.tocado_hoy - b.tocado_hoy) || b.puntaje - a.puntaje || a.due_ms - b.due_ms || a.lead_id - b.lead_id);
 
   const huerfanos = (await db.query(
     `SELECT COUNT(*)::int AS n FROM ${T.leads} l
@@ -56,15 +62,20 @@ async function consultarCola(db, config, { ahora = new Date(), usuario = null } 
   )).rows[0].n;
 
   const act = await actividadDelDia(db, hoy, config, usuario);
-  const [bloque, racha] = await Promise.all([ritmo.bloqueActual(db, config, ahora, usuario), ritmo.racha(db, config, ahora, usuario)]);
+  const [bloque, racha, compromisos] = await Promise.all([ritmo.bloqueActual(db, config, ahora, usuario), ritmo.racha(db, config, ahora, usuario), require('./compromisos').listar(db, config, { usuario, ahora })]);
   return {
     fecha: hoy,
     tareas,
+    compromisos,
     usuario: usuario || null,
     bloque,
     racha,
     indicadores: {
       vencidas: tareas.filter(t => t.vencida).length,
+      porContactar: tareas.filter(t => !t.tocado_hoy).length,
+      tocadosHoy: tareas.filter(t => t.tocado_hoy).length,
+      compromisosHoy: compromisos.hoy.length,
+      compromisosVencidos: compromisos.hoy.filter(t => t.vencido).length,
       deHoy: tareas.filter(t => !t.vencida).length,
       huerfanos,
       marcaciones: act.marcaciones,
@@ -85,7 +96,7 @@ async function posponerTarea(db, config, { taskId, dias, ahora = new Date() }) {
   const fecha = tiempo.avanzar(tiempo.fechaBogota(ahora), dias, !!config.SALTAR_FINES_DE_SEMANA);
   const due = tiempo.instante(fecha, config.HORA_INICIO_JORNADA);
   const r = await db.query(
-    `UPDATE ${T.tasks} SET due_at = $2 WHERE id = $1 AND estado = 'pendiente' RETURNING id, lead_id, canal, due_at`,
+    `UPDATE ${T.tasks} SET due_at = $2 WHERE id = $1 AND estado = 'pendiente' AND tipo = 'secuencia' RETURNING id, lead_id, canal, due_at`,
     [taskId, due.toISOString()]);
   if (!r.rows.length) throw Object.assign(new Error('La tarea no existe o ya no está pendiente'), { status: 404 });
   return { ...r.rows[0], fecha };

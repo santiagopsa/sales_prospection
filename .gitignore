@@ -1,3 +1,4 @@
 # Voximplant: llave del service account y variables generadas por vox:setup
 voximplant-key.json
 voximplant-render.env
+google-calendar-key.json

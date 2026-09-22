@@ -13,6 +13,18 @@ function instante(fecha, hora = 0) {
   return new Date(`${fecha}T${String(hora).padStart(2, '0')}:00:00${OFFSET}`);
 }
 
+// Instante de `fecha` a las 'HH:MM' (Bogotá). Sin hora → HORA_INICIO_JORNADA la pone quien llama.
+function instanteHM(fecha, hm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || ''));
+  if (!m) return null;
+  return new Date(`${fecha}T${String(m[1]).padStart(2, '0')}:${m[2]}:00${OFFSET}`);
+}
+// 'HH:MM' en Bogotá de un instante.
+function horaBogota(instante) {
+  const d = new Date(instante.getTime() + OFFSET_MS);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
 function diaSemana(fecha) { // 0 domingo … 6 sábado
   return new Date(`${fecha}T12:00:00Z`).getUTCDay();
 }
@@ -55,4 +67,4 @@ function diasEntre(desde, hasta) {
   return Math.round((b - a) / 86400000);
 }
 
-module.exports = { OFFSET, fechaBogota, instante, diaSemana, sumarDias, sumarMeses, aDiaHabil, avanzar, diasEntre, esFinDeSemana };
+module.exports = { OFFSET, fechaBogota, instante, instanteHM, horaBogota, diaSemana, sumarDias, sumarMeses, aDiaHabil, avanzar, diasEntre, esFinDeSemana };

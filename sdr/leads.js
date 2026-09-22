@@ -62,8 +62,8 @@ async function detalleLead(db, id) {
      FROM ${T.leads} l WHERE id = $1`, [id]);
   if (!l.rows.length) throw error(404, 'Lead no encontrado');
   const tareas = await db.query(
-    `SELECT id, paso, canal, estado, ${ms('due_at')} AS due_ms, ${ms('done_at')} AS done_ms
-     FROM ${T.tasks} WHERE lead_id = $1 ORDER BY paso`, [id]);
+    `SELECT id, paso, canal, estado, tipo, titulo, con_hora, usuario, gcal_event_id, gcal_error, ${ms('due_at')} AS due_ms, ${ms('done_at')} AS done_ms
+     FROM ${T.tasks} WHERE lead_id = $1 ORDER BY due_at, paso`, [id]);
   const toques = await db.query(
     `SELECT t.id, t.task_id, t.canal, t.resultado, t.razon_descarte, t.nota, t.detalle, t.call_id, t.usuario,
             ${ms('t.created_at')} AS created_ms, c.duracion_s, c.record_url, c.origen AS call_origen, c.pipeline_status, c.vox_estado, c.vox_codigo, c.vox_intentos
@@ -156,6 +156,11 @@ async function editarLead(db, config, id, campos, usuario = null) {
   const sets = [], params = [id];
   for (const k of Object.keys(cambios)) { params.push(nuevo[k]); sets.push(`${k} = $${params.length}`); }
   await db.query(`UPDATE ${T.leads} SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $1`, params);
+  // El deal del Sandler, si existe y la ejecutiva no lo ha trabajado aún, hereda el nombre nuevo.
+  if (cambios.empresa && actual.deal_id) {
+    try { await db.query(`UPDATE public.deals SET company = $2 WHERE id = $1 AND COALESCE(data->>'transcript', '') = ''`, [actual.deal_id, nuevo.empresa]); }
+    catch (e) { console.error('[sdr] no se actualizó el nombre en el deal:', e.message); }
+  }
   await db.query(
     `INSERT INTO ${T.touches} (lead_id, canal, resultado, nota, detalle, usuario) VALUES ($1, 'ejecutiva', 'editado', $2, $3::jsonb, $4)`,
     [id, Object.keys(cambios).map(k => `${k}: ${cambios[k].antes || '—'} → ${cambios[k].ahora || '—'}`).join('; '), JSON.stringify({ cambios }), usuario]);

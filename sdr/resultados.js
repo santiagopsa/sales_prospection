@@ -32,13 +32,19 @@ async function leerLead(c, id) {
   return r.rows[0];
 }
 
+// Solo los toques de la secuencia: los compromisos (con hora pactada) los maneja compromisos.js.
 async function tareasPendientes(c, leadId) {
   return (await c.query(
-    `SELECT id, paso, canal, due_at FROM ${T.tasks} WHERE lead_id = $1 AND estado = 'pendiente' ORDER BY paso`, [leadId])).rows;
+    `SELECT id, paso, canal, due_at FROM ${T.tasks} WHERE lead_id = $1 AND estado = 'pendiente' AND tipo = 'secuencia' ORDER BY paso`, [leadId])).rows;
 }
 
-async function omitirPendientes(c, leadId) {
-  await c.query(`UPDATE ${T.tasks} SET estado = 'omitida', done_at = NOW() WHERE lead_id = $1 AND estado = 'pendiente'`, [leadId]);
+// Omite la secuencia pendiente. Con `todo` también los compromisos (descartar / pausar) y
+// devuelve sus ids para borrar los eventos del calendario después de la transacción.
+async function omitirPendientes(c, leadId, todo = false) {
+  const r = await c.query(
+    `UPDATE ${T.tasks} SET estado = 'omitida', done_at = NOW() WHERE lead_id = $1 AND estado = 'pendiente' ${todo ? '' : "AND tipo = 'secuencia'"} RETURNING id, tipo`,
+    [leadId]);
+  return r.rows.filter(t => t.tipo !== 'secuencia').map(t => t.id);
 }
 
 // Nueva tarea al final de la secuencia del lead, `dias` días (hábiles según config) después de hoy.
@@ -57,6 +63,12 @@ async function cambiarEtapa(c, leadId, etapa, extra = {}) {
   const params = [leadId, etapa];
   for (const [k, v] of Object.entries(extra)) { params.push(v); sets.push(`${k} = $${params.length}`); }
   await c.query(`UPDATE ${T.leads} SET ${sets.join(', ')} WHERE id = $1`, params);
+}
+
+// Cierra el compromiso "reunión" del lead (realizada → hecha, no-show → omitida) y devuelve los ids.
+async function cerrarReunion(c, leadId, estado) {
+  const r = await c.query(`UPDATE ${T.tasks} SET estado = $2, done_at = NOW() WHERE lead_id = $1 AND tipo = 'reunion' AND estado = 'pendiente' RETURNING id`, [leadId, estado]);
+  return r.rows.map(x => x.id);
 }
 
 // Etapa resultante según config, solo hacia adelante. Devuelve null si no cambia.
@@ -99,20 +111,20 @@ async function programarReintento(c, config, leadId, fecha) {
 // "conversación" (ya hablaron) para que Angie pueda registrarle toques.
 // "Pidió que no lo contacten" además mete el teléfono y el correo a la lista negra.
 async function sacarDeCola(c, config, lead, { razon, meses, nota, usuario, ahora }) {
-  await omitirPendientes(c, lead.id);
+  const compromisosOmitidos = await omitirPendientes(c, lead.id, true);
   if (!meses) {
     await cambiarEtapa(c, lead.id, 'descartado', { razon_descarte: razon, pausado_hasta: null });
     if (razon === 'no_contactar' && (lead.telefono || lead.email)) {
       await require('./listanegra').agregar(c, config, { telefono: lead.telefono, email: lead.email, empresa: lead.empresa, razon, nota, leadId: lead.id, usuario });
     }
-    return { resultado: 'descartado', proxima: null, pausado_hasta: null, avisos: razon === 'no_contactar' ? ['Teléfono y correo quedaron en la lista negra.'] : [] };
+    return { resultado: 'descartado', proxima: null, pausado_hasta: null, compromisosOmitidos, avisos: razon === 'no_contactar' ? ['Teléfono y correo quedaron en la lista negra.'] : [] };
   }
   const fecha = tiempo.sumarMeses(tiempo.fechaBogota(ahora), meses);
   const proxima = await programarReintento(c, config, lead.id, fecha);
   const hasta = new Date(proxima.due_at);
   const extra = { razon_descarte: razon, pausado_hasta: hasta.toISOString(), reunion_at: null };
   await cambiarEtapa(c, lead.id, D.ETAPAS_DE_ANGIE.includes(lead.etapa) ? lead.etapa : 'conversacion', extra);
-  return { resultado: 'pausado', proxima, pausado_hasta: hasta.toISOString(), avisos: [`En pausa hasta el ${fecha}: ese día vuelve a la cola con ${proxima.canal}.`] };
+  return { resultado: 'pausado', proxima, pausado_hasta: hasta.toISOString(), compromisosOmitidos, avisos: [`En pausa hasta el ${fecha}: ese día vuelve a la cola con ${proxima.canal}.`] };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -127,7 +139,7 @@ function usuarioValido(config, u) {
 const usuariosSdr = config => (config.USUARIOS || []).filter(u => u.rol === 'sdr').map(u => u.nombre);
 
 async function registrarToque(db, config, {
-  leadId, canal, resultado, razon, nota, detalle, taskId, callUuid, usuario, reintentoMeses, ahora = new Date(),
+  leadId, canal, resultado, razon, nota, detalle, taskId, callUuid, usuario, reintentoMeses, ahora = new Date(), env = process.env,
 }) {
   usuario = usuarioValido(config, usuario);
   leadId = Number(leadId);
@@ -148,7 +160,7 @@ async function registrarToque(db, config, {
     if (isNaN(reunionAt)) throw error(400, 'La fecha de la reunión no es válida');
   }
 
-  return enTransaccion(db, async c => {
+  const r = await enTransaccion(db, async c => {
     const lead = await leerLead(c, leadId);
     if (!D.ETAPAS_DE_ANGIE.includes(lead.etapa) && resultado !== 'descartado') {
       throw error(409, `El lead está en "${D.ETAPA_LABEL[lead.etapa]}"; desde ahí los toques los registra la ejecutiva.`);
@@ -187,13 +199,13 @@ async function registrarToque(db, config, {
 
     // 4 · Etapa y reprogramación.
     const nueva = siguienteEtapa(config, lead.etapa, resultado);
-    let proxima = null, dealId = null, avisos = [], pausadoHasta = null;
+    let proxima = null, dealId = null, avisos = [], pausadoHasta = null, compromisoId = null, compromisosOmitidos = [];
     // Cualquier toque real le quita la pausa (llegó la fecha, o Angie lo retomó antes).
     if (resultado !== 'descartado' && lead.pausado_hasta) await c.query(`UPDATE ${T.leads} SET pausado_hasta = NULL, razon_descarte = NULL WHERE id = $1`, [leadId]);
 
     if (resultado === 'descartado') {
       const s = await sacarDeCola(c, config, lead, { razon, meses, nota, usuario, ahora });
-      proxima = s.proxima; pausadoHasta = s.pausado_hasta; avisos.push(...s.avisos);
+      proxima = s.proxima; pausadoHasta = s.pausado_hasta; avisos.push(...s.avisos); compromisosOmitidos = s.compromisosOmitidos || [];
       if (s.resultado === 'pausado') await c.query(`UPDATE ${T.touches} SET detalle = COALESCE(detalle, '{}'::jsonb) || $2::jsonb WHERE id = $1`, [toque.id, JSON.stringify({ pausado_hasta: pausadoHasta, meses })]);
     } else if (resultado === 'conversacion') {
       await omitirPendientes(c, leadId);
@@ -217,6 +229,22 @@ async function registrarToque(db, config, {
         avisos.push('La reunión quedó registrada, pero no se pudo crear el deal en el Sandler: ' + e.message);
       }
       await cambiarEtapa(c, leadId, 'reunion_agendada', { reunion_at: reunionAt ? reunionAt.toISOString() : null, ...(dealId ? { deal_id: dealId } : {}) });
+      // La reunión, como compromiso de la ejecutiva (con Angie invitada), para que caiga en su calendario.
+      if (reunionAt && config.REUNION_CREA_COMPROMISO) {
+        const C = require('./compromisos');
+        const eje = C.ejecutivaPara(config, detalle && detalle.ejecutiva);
+        if (eje) {
+          const emailAngie = require('./calendario').emailDe(config, usuario);
+          const t = await C.insertar(c, config, {
+            leadId, tipo: 'reunion', titulo: `Reunión con ${lead.empresa}`, canal: 'llamada',
+            fecha: tiempo.fechaBogota(reunionAt), hora: tiempo.horaBogota(reunionAt),
+            nota: [detalle && detalle.ficha_cargos && `Cargos: ${detalle.ficha_cargos}`, detalle && detalle.actitud && `Actitud: ${detalle.actitud}`, detalle && detalle.urgencia && `Urgencia: ${detalle.urgencia}`, nota].filter(Boolean).join('\n'),
+            usuario: eje.nombre, creadoPor: usuario, invitados: emailAngie ? [emailAngie] : [],
+          });
+          compromisoId = t.id; proxima = proxima || null;
+          avisos.push(`Reunión anotada como compromiso de ${eje.nombre}${emailAngie ? ' (te llega la invitación al calendario)' : ''}.`);
+        }
+      }
     } else {
       // no contestó, buzón, gatekeeper y toques por otros canales: la secuencia sigue.
       if (nueva) await cambiarEtapa(c, leadId, nueva);
@@ -230,27 +258,40 @@ async function registrarToque(db, config, {
     }
 
     const final = (await c.query(`SELECT etapa, deal_id, reunion_at FROM ${T.leads} WHERE id = $1`, [leadId])).rows[0];
-    return { toque_id: toque.id, call_id: callId, etapa: final.etapa, etapa_anterior: lead.etapa, deal_id: final.deal_id, proxima, pausado_hasta: pausadoHasta, avisos };
+    return { toque_id: toque.id, call_id: callId, etapa: final.etapa, etapa_anterior: lead.etapa, deal_id: final.deal_id, proxima, pausado_hasta: pausadoHasta, avisos, compromiso_id: compromisoId, compromisosOmitidos };
   });
+  // Calendario fuera de la transacción (red): mejor esfuerzo.
+  await sincronizarCompromisos(db, config, env, r, usuario);
+  return r;
+}
+
+async function sincronizarCompromisos(db, config, env, r, usuario) {
+  const C = require('./compromisos');
+  if (r.compromiso_id) {
+    const emailAngie = require('./calendario').emailDe(config, usuario);
+    r.calendario = await C.sincronizar(db, config, env, r.compromiso_id, 'crear', { invitados: emailAngie ? [emailAngie] : [] });
+  }
+  for (const id of r.compromisosOmitidos || []) await C.sincronizar(db, config, env, id, 'borrar');
+  delete r.compromisosOmitidos;
 }
 
 // Acciones de la ejecutiva comercial sobre un lead con reunión: realizada, no-show, calificado.
 // 'descartado' también entra por aquí: es una decisión sobre el lead, no un toque, y sirve
 // tanto para Angie (descartar sin llamar) como para la ejecutiva.
 // 'reactivar' devuelve a la cola un lead descartado o en pausa, con la secuencia de reintento desde hoy.
-async function registrarEjecutiva(db, config, { leadId, accion, razon, nota, usuario, reintentoMeses, ahora = new Date() }) {
+async function registrarEjecutiva(db, config, { leadId, accion, razon, nota, usuario, reintentoMeses, ahora = new Date(), env = process.env }) {
   leadId = Number(leadId);
   usuario = usuarioValido(config, usuario);
   if (!['reunion_realizada', 'no_show', 'calificado', 'descartado', 'reactivar'].includes(accion)) throw error(400, 'Acción desconocida');
   if (accion === 'descartado' && !D.RAZONES_DESCARTE.includes(razon)) throw error(400, 'Elige la razón del descarte');
   const meses = accion === 'descartado' ? mesesReintento(config, razon, reintentoMeses) : null;
-  return enTransaccion(db, async c => {
+  const r = await enTransaccion(db, async c => {
     const lead = await leerLead(c, leadId);
-    let proxima = null, resultado = accion, detalle = null, avisos = [], pausadoHasta = null;
+    let proxima = null, resultado = accion, detalle = null, avisos = [], pausadoHasta = null, compromisosOmitidos = [];
     if (accion === 'descartado') {
       if (lead.etapa === 'descartado') throw error(409, 'El lead ya está descartado');
       const s = await sacarDeCola(c, config, lead, { razon, meses, nota, usuario, ahora });
-      proxima = s.proxima; resultado = s.resultado; pausadoHasta = s.pausado_hasta; avisos = s.avisos;
+      proxima = s.proxima; resultado = s.resultado; pausadoHasta = s.pausado_hasta; avisos = s.avisos; compromisosOmitidos = s.compromisosOmitidos || [];
       if (resultado === 'pausado') detalle = { pausado_hasta: pausadoHasta, meses };
     } else if (accion === 'reactivar') {
       if (lead.etapa !== 'descartado' && !lead.pausado_hasta) throw error(409, 'El lead no está descartado ni en pausa');
@@ -266,10 +307,12 @@ async function registrarEjecutiva(db, config, { leadId, accion, razon, nota, usu
     } else if (accion === 'reunion_realizada') {
       if (lead.etapa !== 'reunion_agendada') throw error(409, 'Solo aplica a un lead con reunión agendada');
       await omitirPendientes(c, leadId);
+      compromisosOmitidos = await cerrarReunion(c, leadId, 'hecha');
       await cambiarEtapa(c, leadId, 'reunion_realizada');
     } else if (accion === 'no_show') {
       if (lead.etapa !== 'reunion_agendada') throw error(409, 'Solo aplica a un lead con reunión agendada');
       await omitirPendientes(c, leadId);
+      compromisosOmitidos = await cerrarReunion(c, leadId, 'omitida');
       const t = config.TRAS_NO_SHOW;
       proxima = await programar(c, config, leadId, t.canal, t.dias, ahora);
       await cambiarEtapa(c, leadId, 'conversacion', { reunion_at: null });
@@ -281,8 +324,10 @@ async function registrarEjecutiva(db, config, { leadId, accion, razon, nota, usu
     await c.query(
       `INSERT INTO ${T.touches} (lead_id, canal, resultado, razon_descarte, nota, detalle, usuario, created_at) VALUES ($1, 'ejecutiva', $2, $3, $4, $5, $6, $7)`,
       [leadId, resultado, accion === 'descartado' ? razon : null, nota || null, detalle ? JSON.stringify(detalle) : null, usuario, ahora.toISOString()]);
-    return { etapa: (await c.query(`SELECT etapa FROM ${T.leads} WHERE id = $1`, [leadId])).rows[0].etapa, proxima, pausado_hasta: pausadoHasta, avisos };
+    return { etapa: (await c.query(`SELECT etapa FROM ${T.leads} WHERE id = $1`, [leadId])).rows[0].etapa, proxima, pausado_hasta: pausadoHasta, avisos, compromisosOmitidos };
   });
+  await sincronizarCompromisos(db, config, env, r, usuario);
+  return r;
 }
 
 // Deal en public.deals con la ficha de Angie prellenada, para que la ejecutiva abra el demo en el
@@ -298,8 +343,9 @@ async function crearDeal(c, lead, detalle, reunionAt) {
     detalle.ficha_adicional,
     `Lead SDR #${lead.id}`,
   ].filter(Boolean).join('\n');
+  const empresa = (!lead.empresa || lead.empresa === 'Sin empresa') && lead.contacto ? lead.contacto : lead.empresa;
   const data = {
-    company: lead.empresa,
+    company: empresa,
     executive: detalle.ejecutiva || '',
     lineaNegocio: detalle.linea_negocio || '',
     canalAdquisicion: 'sdr_interno',
@@ -316,7 +362,7 @@ async function crearDeal(c, lead, detalle, reunionAt) {
   const r = await c.query(
     `INSERT INTO public.deals (executive, company, data, linea_negocio, canal_adquisicion, freelancer_nombre, outcome)
      VALUES ($1, $2, $3::jsonb, $4, 'sdr_interno', 'Angie (SDR)', 'open') RETURNING id`,
-    [data.executive || null, lead.empresa, JSON.stringify(data), data.lineaNegocio || null]);
+    [data.executive || null, empresa, JSON.stringify(data), data.lineaNegocio || null]);
   return r.rows[0].id;
 }
 
