@@ -23,6 +23,7 @@
 //                                                               recalcula las métricas (PALABRAS_PITCH, MONOLOGO_LARGO_S…) y las guarda
 //
 // Ejemplos:
+//   node sdr/cli.js comision [--mes 2026-09] [--usuario Angie]  reuniones del mes, calificadas y comisión; con --set COMISION.modo='"tramos"'
 //   node sdr/cli.js secuencia --set SALTAR_FINES_DE_SEMANA=false
 //   node sdr/cli.js cola --set PRIORIDAD.porCanal.llamada=25 --set PRIORIDAD.porDiaVencido=0
 const fs = require('fs');
@@ -120,6 +121,14 @@ async function main() {
         const d = t.desglose;
         console.log(`  ${pad(n + 1, 4)}${pad(t.puntaje, 5)}${pad(`${d.etapa}+${d.canal}+${d.atraso}${t.diasVencida ? ` (${t.diasVencida}d)` : ''}`, 20)}${pad(CANAL_LABEL[t.canal], 10)}${pad(ETAPA_LABEL[t.etapa], 14)}${t.empresa}`);
       });
+    } else if (cmd === 'comision') {
+      const r = await require('./comision').resumenMes(db, config, { mes: args.mes, usuario: args.usuario || null });
+      const m = r.reglas.moneda, k = r.comision;
+      console.log(`Comisión ${r.mes}${r.usuario ? ' · ' + r.usuario : ''} · modo ${r.reglas.modo} · califica con ${r.reglas.califica_con.join('/')} · mes por ${r.reglas.mes_por}`);
+      console.log(`  ${r.conteo.reuniones} reuniones: ${r.conteo.calificadas} calificadas, ${r.conteo.por_calificar} por calificar, ${r.conteo.programadas} programadas, ${r.conteo.no_califica} no calificaron, ${r.conteo.no_asistio} no asistieron`);
+      console.log(`  Comisión: ${m} ${k.total} (${k.tramo.nombre}, ${m} ${k.tramo.valor} c/u)` + (k.siguiente ? ` · faltan ${k.siguiente.faltan} para ${m} ${k.siguiente.valor} (serían ${m} ${k.siguiente.total_al_llegar})` : ''));
+      console.log(`  Si todas las pendientes califican: ${m} ${r.potencial.total}`);
+      for (const x of r.reuniones) console.log(`  ${pad(x.estado, 14)} ${pad(x.empresa, 32)} ${pad(x.calificacion || '—', 12)} ${x.reunion_ms ? new Date(x.reunion_ms).toISOString().slice(0, 16) : ''}`);
     } else if (cmd === 'semana') {
       const { resumenSemana } = require('./ritmo');
       const r = await resumenSemana(db, config, { fecha: args.fecha, usuario: args.usuario || null });

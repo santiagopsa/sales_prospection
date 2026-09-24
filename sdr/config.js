@@ -70,6 +70,31 @@ module.exports = {
   META_REUNIONES_DIA: 3,
 
   // ---------------------------------------------------------------------------
+  // Comisión de la SDR por reuniones calificadas (tabla de escalones)
+  // ---------------------------------------------------------------------------
+  // Qué mueve: el panel "Comisión del mes" de la cola y la vista #/comision. No guarda nada: se
+  // recalcula cada vez con lo que Luisa calificó en el Sandler Coach. Ver el efecto de moverlo:
+  //   node sdr/cli.js comision --mes 2026-09 --set COMISION.modo='"tramos"'
+  COMISION: {
+    moneda: 'US$',
+    // Valor por reunión calificada según cuántas lleva en el mes. `desde` = a partir de esa
+    // reunión (inclusive). Primer tramo siempre desde 0.
+    tramos: [
+      { desde: 0,  valor: 23, nombre: 'Tramo bajo',  nota: 'Aplica bajo el umbral medio' },
+      { desde: 20, valor: 30, nombre: 'Meta',        nota: 'Meta promedio' },
+      { desde: 30, valor: 40, nombre: 'Sobre meta',  nota: 'Excedió la meta' },
+    ],
+    // 'escalon': al alcanzar un tramo, TODAS las del mes se pagan a ese valor (25 → 25 × 30).
+    // 'tramos':  cada reunión se paga al valor de su tramo (25 → 19 × 23 + 6 × 30).
+    modo: 'escalon',
+    // Qué calificación del Sandler Coach (deals.calificacion_sandler) cuenta como calificada.
+    // Valores posibles: 'Completa', 'Parcial', 'No califica'.
+    califica_con: ['Completa'],
+    // En qué mes cuenta: 'reunion' = fecha de la reunión; 'agendada' = día en que la SDR la agendó.
+    mes_por: 'reunion',
+  },
+
+  // ---------------------------------------------------------------------------
   // Qué pasa después de cada resultado (motor de etapas)
   // ---------------------------------------------------------------------------
   // Qué mueve: a qué etapa pasa el lead al registrar un resultado. null = no cambia de etapa

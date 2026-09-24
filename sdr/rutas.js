@@ -103,6 +103,7 @@ function rutas({ db, config }) {
     // Prueba de la delegación: crea y borra un evento en el calendario del usuario dado.
     ['post', '/api/calendario/reintentar', async () => { sinDb(); return C.reintentarPendientes(db, config, process.env); }],
     ['post', '/api/calendario/probar', async ({ body }) => cal.probar(process.env, config, (body || {}).usuario || 'Angie')],
+    ['get', '/api/comision', async ({ query }) => { sinDb(); return require('./comision').resumenMes(db, config, { mes: query.mes, usuario: query.usuario || null }); }],
     ['get', '/api/historial', async ({ query }) => { sinDb(); return ritmo.historialDia(db, config, { fecha: query.fecha, usuario: query.usuario || null }); }],
     ['get', '/api/semana', async ({ query }) => { sinDb(); return ritmo.resumenSemana(db, config, { fecha: /^\d{4}-\d{2}-\d{2}$/.test(query.fecha || '') ? query.fecha : undefined, usuario: query.usuario || null }); }],
     ['get', '/api/pipeline', async () => { sinDb(); return L.pipeline(db); }],

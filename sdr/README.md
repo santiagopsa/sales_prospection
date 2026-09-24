@@ -179,6 +179,27 @@ por ese canal de una vez. La secuencia del lead no se consume (el compromiso es 
 está con la ejecutiva o el compromiso no tiene lead, *Hecha* solo cierra la tarea. Antes esto no contaba, por eso
 las llamadas de seguimiento no aparecían en los indicadores.
 
+## Comisión por reuniones calificadas
+Arriba de la cola, un panel verde con la **comisión del mes**: plata acumulada, cuántas calificadas lleva, la
+escalera de tramos (se llena con las calificadas y, rayado, con las pendientes) y cuánto le falta para el
+siguiente tramo. Clic → **Comisión** (también en la barra): los tres escalones con "Estás aquí", conteo del mes
+(calificadas, por calificar, programadas, no cuentan), cuánto cerraría si califican las pendientes y la lista de
+reuniones con su estado. Flechas para ver meses anteriores.
+
+De dónde sale: cada reunión que la SDR agendó (toque *Reunión agendada*) y el deal que se creó en el Sandler
+Coach. **Calificada** = la ejecutiva la tomó en el Sandler y quedó con calificación en
+`COMISION.califica_con` (`Completa`). *Por calificar* = ya pasó y el deal no tiene calificación todavía.
+*No calificó* = quedó Parcial o No califica. *No asistió* = la ejecutiva marcó no-show. Si la ejecutiva crea un
+deal nuevo en vez de **Tomar este deal**, no queda enlazado y no cuenta: siempre tomar el del SDR.
+
+Huecos en `COMISION` (`config.js`): `tramos` (desde / valor: 0 → 23, 20 → 30, 30 → 40), `modo` (`escalon`:
+al llegar a un tramo todas las del mes pasan a ese valor; `tramos`: cada una a su tramo), `califica_con`,
+`mes_por` (`reunion` o `agendada`). Una SDR ve lo suyo; la ejecutiva y el admin ven al equipo SDR.
+```
+node sdr/cli.js comision --mes 2026-09 --usuario Angie
+node sdr/cli.js comision --mes 2026-09 --set COMISION.modo='"tramos"'
+```
+
 ## Meta del día: marcaciones o reuniones
 El día queda **cumplido** al llegar a `META_MARCACIONES_DIA` (o a conversaciones / cualquiera, según
 `RACHA_CUMPLE_CON`), **o** al agendar `META_REUNIONES_DIA` reuniones (3) ese día, aunque falten marcaciones:

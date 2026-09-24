@@ -101,9 +101,112 @@
     document.addEventListener('keydown', e => { if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); $q.focus(); $q.select(); } });
   }
 
+
+  // ---------------------------------------------------------------- comisión (escalones)
+  const MES_LARGO = mes => new Date(mes + '-15T12:00:00-05:00').toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
+  const MES_CORTO = mes => new Date(mes + '-15T12:00:00-05:00').toLocaleDateString('es-CO', { month: 'long' });
+  const plata = (m, v) => `${esc(m)} ${Number(v).toLocaleString('es-CO')}`;
+  const ESTADO_REUNION = {
+    calificada: { label: 'Calificada', clase: 'whatsapp' },
+    por_calificar: { label: 'Por calificar', clase: 'hoy' },
+    programada: { label: 'Programada', clase: 'llamada' },
+    no_califica: { label: 'No calificó', clase: 'vencida' },
+    no_asistio: { label: 'No asistió', clase: 'vencida' },
+  };
+  // Escalera: una franja por tramo, cada una más alta que la anterior; se llena hasta las calificadas
+  // y, rayado, hasta lo que podría llegar si califican las pendientes.
+  function pintarEscalera(r, grande = false) {
+    const k = r.comision, ts = k.tramos, m = r.reglas.moneda, n = k.n;
+    const pot = r.potencial.n;
+    const ultimo = ts[ts.length - 1].desde;
+    const fin = Math.max(ultimo + Math.max(10, Math.round(ultimo / 3)), n + 3, pot + 1);
+    const alto = i => (grande ? 18 : 10) + i * (grande ? 14 : 8);
+    const zonas = ts.map((t, i) => {
+      const desde = t.desde, hasta = i + 1 < ts.length ? ts[i + 1].desde : fin;
+      const ancho = hasta - desde;
+      const lleno = Math.max(0, Math.min(n, hasta) - desde) / ancho * 100;
+      const potencial = Math.max(0, Math.min(pot, hasta) - Math.max(n, desde)) / ancho * 100;
+      return `<div class="esc-zona t${Math.min(i, 3)} ${i === k.tramo.indice ? 'actual' : ''}" style="flex:${ancho} 1 0;height:${alto(i)}px" title="${esc(t.nombre)}: ${plata(m, t.valor)} por reunión desde la ${t.desde}">
+        <i class="lleno" style="width:${lleno}%"></i><i class="pot" style="left:${lleno}%;width:${potencial}%"></i></div>`;
+    }).join('');
+    const marcas = ts.map((t, i) => `<span class="esc-marca" style="left:${t.desde / fin * 100}%"><b>${t.desde || ''}</b>${plata(m, t.valor)}${grande ? '<span class="cu"> c/u</span>' : ''}</span>`).join('');
+    return `<div class="escalera ${grande ? 'grande' : ''}">
+        <div class="esc-pista">${zonas}<span class="esc-yo" style="left:${n / fin * 100}%"><b>${n}</b></span></div>
+        <div class="esc-marcas">${marcas}</div>
+      </div>`;
+  }
+  function textoSiguiente(r) {
+    const k = r.comision, m = r.reglas.moneda;
+    if (!k.siguiente) return `Tramo más alto: cada calificada vale ${plata(m, k.tramo.valor)}.`;
+    const s = k.siguiente;
+    return `Faltan <b>${s.faltan}</b> ${s.faltan === 1 ? 'calificada' : 'calificadas'} para <b>${plata(m, s.valor)}</b> por reunión → ${plata(m, s.total_al_llegar)}${r.reglas.modo === 'escalon' && k.n ? ` (todas las del mes suben)` : ''}`;
+  }
+  function pintarComisionCorta(r) {
+    if (!r) return '';
+    const k = r.comision, m = r.reglas.moneda, c = r.conteo;
+    return `<a class="panel comision" href="#/comision" title="Ver el detalle de la comisión">
+      <div class="com-top">
+        <div class="com-plata"><span class="suave">Comisión de ${esc(MES_CORTO(r.mes))}${r.usuario ? '' : ' · equipo SDR'}</span>
+          <b>${plata(m, k.total)}</b>
+          <span class="suave">${k.n} ${k.n === 1 ? 'calificada' : 'calificadas'} × ${plata(m, k.tramo.valor)}${r.reglas.modo === 'tramos' ? ' (por tramos)' : ''}</span></div>
+        <div class="com-sig">${textoSiguiente(r)}</div>
+      </div>
+      ${pintarEscalera(r)}
+      <div class="com-conteo suave">${plural(c.reuniones, 'reunión', 'reuniones')} del mes · <b>${c.calificadas}</b> calificadas${c.por_calificar ? ` · <b>${c.por_calificar}</b> por calificar` : ''}${c.programadas ? ` · ${c.programadas} programadas` : ''}${c.no_califica ? ` · ${c.no_califica} no calificaron` : ''}${c.no_asistio ? ` · ${c.no_asistio} no asistieron` : ''}${r.potencial.total > k.total ? ` · si califican las pendientes: ${plata(m, r.potencial.total)}` : ''}</div>
+    </a>`;
+  }
+  async function vistaComision(params) {
+    const qs = new URLSearchParams(); if (params.get('mes')) qs.set('mes', params.get('mes')); if (usuarioActual()) qs.set('usuario', usuarioActual());
+    const r = await api('comision' + (qs.toString() ? '?' + qs : ''));
+    const k = r.comision, m = r.reglas.moneda, c = r.conteo;
+    const orden = ['calificada', 'por_calificar', 'programada', 'no_califica', 'no_asistio'];
+    const reuniones = r.reuniones.slice().sort((a, b) => orden.indexOf(a.estado) - orden.indexOf(b.estado) || (a.reunion_ms || a.agendada_ms) - (b.reunion_ms || b.agendada_ms));
+    const escalones = k.tramos.map((t, i) => {
+      const hasta = k.tramos[i + 1] ? k.tramos[i + 1].desde - 1 : null;
+      const actual = i === k.tramo.indice, pasado = i < k.tramo.indice;
+      return `<div class="escalon t${Math.min(i, 3)} ${actual ? 'actual' : ''} ${pasado ? 'pasado' : ''}" style="margin-top:${(k.tramos.length - 1 - i) * 18}px">
+        <b>${plata(m, t.valor)}</b><span>por reunión</span>
+        <small>${hasta != null ? `${t.desde || 1} a ${hasta}` : `${t.desde} o más`} calificadas</small>
+        <small class="suave">${esc(t.nota || t.nombre)}</small>
+        ${actual ? '<em>Estás aquí</em>' : ''}</div>`;
+    }).join('');
+    $app.innerHTML = `
+      <div class="cabeza">
+        <div><h1>Comisión de ${esc(MES_LARGO(r.mes))}</h1>
+          <div class="suave">${r.usuario ? `de <b>${esc(r.usuario)}</b> · ` : 'equipo SDR · '}<a href="#/comision?mes=${r.anterior}">← mes anterior</a>${r.posterior <= r.hoy.slice(0, 7) ? ` · <a href="#/comision?mes=${r.posterior}">mes siguiente →</a>` : ''}</div></div>
+        <a class="btn" href="#/cola">Cola del día</a>
+      </div>
+      <div class="panel comision grande">
+        <div class="com-top">
+          <div class="com-plata"><span class="suave">Llevas</span><b>${plata(m, k.total)}</b><span class="suave">${k.n} ${k.n === 1 ? 'reunión calificada' : 'reuniones calificadas'} × ${plata(m, k.tramo.valor)}</span></div>
+          <div class="com-sig">${textoSiguiente(r)}${k.n ? `<div class="suave" style="font-size:12px;margin-top:4px">La próxima calificada suma ${plata(m, k.proxima_vale)}.</div>` : ''}</div>
+        </div>
+        ${pintarEscalera(r, true)}
+        <div class="escalones">${escalones}</div>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><b>${c.reuniones}</b><span>Reuniones del mes</span></div>
+        <div class="kpi"><b>${c.calificadas}</b><span>Calificadas</span><small>cuentan para la comisión</small></div>
+        <div class="kpi"><b>${c.por_calificar}</b><span>Por calificar</span><small>ya pasaron; falta que ${esc(((meta.usuarios || []).find(u => u.rol === 'ejecutiva') || { nombre: 'la ejecutiva' }).nombre)} las califique en el Sandler</small></div>
+        <div class="kpi"><b>${c.programadas}</b><span>Programadas</span><small>todavía no son</small></div>
+        <div class="kpi"><b>${c.no_califica + c.no_asistio}</b><span>No cuentan</span><small>${c.no_califica} no calificaron · ${c.no_asistio} no asistieron</small></div>
+      </div>
+      ${r.potencial.total > k.total ? `<p class="suave" style="margin:-4px 0 14px">Si califican todas las pendientes (${c.por_calificar + c.programadas}), el mes cerraría en <b>${plata(m, r.potencial.total)}</b>.</p>` : ''}
+      <div class="panel">
+        <h2>Reuniones de ${esc(MES_CORTO(r.mes))}</h2>
+        ${reuniones.length ? `<ul class="pasos historial">${reuniones.map(x => `<li>
+          <span class="chip ${ESTADO_REUNION[x.estado].clase}">${ESTADO_REUNION[x.estado].label}</span>
+          <div style="flex:1;min-width:0"><a href="#/lead/${x.lead_id}"><b>${esc(x.empresa || 'Sin empresa')}</b></a>${x.contacto ? ' · ' + esc(x.contacto) : ''}
+            <div class="suave" style="font-size:12px">${x.reunion_ms ? 'Reunión ' + fechaHora(x.reunion_ms) : 'Sin fecha de reunión'} · agendada ${fecha(x.agendada_ms)}${x.agendo && !r.usuario ? ' por ' + esc(x.agendo) : ''}${x.calificacion ? ' · Sandler: ' + esc(x.calificacion) : ''}${x.ejecutiva ? ' · ' + esc(x.ejecutiva) : ''}</div></div>
+        </li>`).join('')}</ul>` : '<p class="vacio">Todavía no hay reuniones en este mes.</p>'}
+      </div>
+      <p class="suave" style="font-size:12px;margin-top:14px">Cuenta como calificada la reunión que ${esc('la ejecutiva')} califica <b>${esc(r.reglas.califica_con.join(' o '))}</b> en el Sandler Coach. ${r.reglas.modo === 'escalon' ? 'Al alcanzar un tramo, todas las calificadas del mes se pagan a ese valor.' : 'Cada reunión se paga al valor de su tramo.'} Cuenta en el mes ${r.reglas.mes_por === 'reunion' ? 'de la fecha de la reunión' : 'en que se agendó'}. Reglas en <code>COMISION</code> de <code>config.js</code>.</p>`;
+  }
+
   // ---------------------------------------------------------------- cola
   async function vistaCola(params = new URLSearchParams()) {
-    const c = await api('cola' + (usuarioActual() ? '?usuario=' + encodeURIComponent(usuarioActual()) : ''));
+    const qU = usuarioActual() ? '?usuario=' + encodeURIComponent(usuarioActual()) : '';
+    const [c, com] = await Promise.all([api('cola' + qU), api('comision' + qU).catch(() => null)]);
     const i = c.indicadores;
     const ver = params.get('ver') || 'todas';   // todas | vencidas | hoy
     const lista = ver === 'vencidas' ? c.tareas.filter(t => t.vencida) : ver === 'hoy' ? c.tareas.filter(t => !t.vencida) : c.tareas;
@@ -122,6 +225,7 @@
           <button class="btn" id="nuevo-compromiso" title="Una tarea con fecha (y hora) que no es de la secuencia">+ Compromiso</button>
         </div>
       </div>
+      ${pintarComisionCorta(com)}
       <div class="ritmo">
         <div class="ritmo-principal">
           ${b ? `
@@ -139,7 +243,7 @@
         </div>
         <div class="ritmo-lado">
           <div class="racha ${c.racha.hoyCumple ? 'hoy' : ''}"><b>${c.racha.dias}</b><span>${c.racha.dias === 1 ? 'día seguido' : 'días seguidos'} cumpliendo la meta${c.racha.hoyCumple ? ' · hoy ✓' : ''}</span></div>
-          <a href="#/historial" class="suave" style="font-size:12px">Ver lo de hoy →</a> · <a href="#/semana" class="suave" style="font-size:12px">Ver la semana →</a>
+          <div class="ritmo-links"><a href="#/historial" class="suave">Ver lo de hoy →</a><a href="#/semana" class="suave">Ver la semana →</a></div>
         </div>
       </div>
       <div class="alertas">
@@ -1223,6 +1327,7 @@
       else if (partes[0] === 'marcar') vistaMarcar();
       else if (partes[0] === 'semana') await vistaSemana(new URLSearchParams(query));
       else if (partes[0] === 'historial') await vistaHistorial(partes[1]);
+      else if (partes[0] === 'comision') await vistaComision(new URLSearchParams(query));
       else if (partes[0] === 'lead' && partes[1]) {
         await vistaLead(partes[1]);
         if (new URLSearchParams(query).get('llamar') === '1') {
