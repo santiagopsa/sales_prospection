@@ -253,7 +253,13 @@ async function registrarToque(db, config, {
             usuario: eje.nombre, creadoPor: usuario, invitados: emailAngie ? [emailAngie] : [],
           });
           compromisoCreado = t.id; proxima = proxima || null;
-          avisos.push(`Reunión anotada como compromiso de ${eje.nombre}${emailAngie ? ' (te llega la invitación al calendario)' : ''}.`);
+          // Si vino de Calendly, el evento ya está en el calendario de la ejecutiva (con el invitado).
+          if (detalle && detalle.calendly && !(config.CALENDLY || {}).duplicar_en_google) {
+            await c.query(`UPDATE ${T.tasks} SET gcal_event_id = $2 WHERE id = $1`, [t.id, C.EN_CALENDLY]);
+          }
+          avisos.push(detalle && detalle.calendly && !(config.CALENDLY || {}).duplicar_en_google
+            ? `Reunión anotada como compromiso de ${eje.nombre}; el evento y la invitación los manda Calendly.`
+            : `Reunión anotada como compromiso de ${eje.nombre}${emailAngie ? ' (te llega la invitación al calendario)' : ''}.`);
         }
       }
     } else {

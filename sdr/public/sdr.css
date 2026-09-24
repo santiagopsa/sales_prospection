@@ -298,3 +298,8 @@ a.panel.comision:hover { text-decoration: none; border-color: #86efac; }
 .calendly-marco { flex: 1; width: 100%; border: 1px solid var(--linea); border-radius: 8px; min-height: 0; background: #fff; }
 .calendly-listo { border-top: 1px solid var(--linea); padding-top: 10px; margin-top: 8px; }
 .calendly-listo input { font: inherit; padding: 8px 10px; border: 1px solid var(--linea); border-radius: 8px; }
+
+/* Agendar en Calendly durante la llamada */
+div.llamada .btn.agendar { background: #fff; border-color: #bfdbfe; color: var(--azul-osc); padding: 7px 12px; font-size: 13px; }
+div.llamada .agendada { font-size: 13px; font-weight: 600; color: #15803d; }
+div.llamada .txt b { white-space: nowrap; }

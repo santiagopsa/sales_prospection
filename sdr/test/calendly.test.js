@@ -89,6 +89,14 @@ test('calendly contra la base: reservas desde el link, sin lead, reagendadas y c
   assert.strictEqual(la.etapa, 'reunion_agendada');
   assert.strictEqual(new Date(la.reunion_at).toISOString(), '2026-09-29T15:00:00.000Z');
   assert.ok(la.deal_id);
+  // El compromiso de reunión de Luisa queda en la app, sin segundo evento en Google (lo creó Calendly).
+  const reu = (await db.query(`SELECT id, gcal_event_id FROM sdr.tasks WHERE lead_id = $1 AND tipo = 'reunion'`, [a])).rows[0];
+  assert.strictEqual(reu.gcal_event_id, 'calendly');
+  let llamoGoogle = false;
+  const C = require('../compromisos');
+  const g = await C.sincronizar(db, base, { GOOGLE_CALENDAR_KEY: '{}' }, reu.id, 'mover', { fetchFn: async () => { llamoGoogle = true; return { ok: true, json: async () => ({}) }; } });
+  assert.deepStrictEqual([g.ok, g.omitido, llamoGoogle], [true, 'el evento lo creó Calendly', false]);
+  assert.strictEqual((await C.reintentarPendientes(db, base, {})).omitido, 'sin llave');
   // Segunda pasada: nada nuevo (ya están en la tabla).
   const r2 = await CAL.sincronizar(db, base, ENV, { ahora, fetchFn: k.fetchFn, log });
   assert.deepStrictEqual([r2.nuevas, r2.sin_lead, r2.canceladas], [0, 0, 0]);

@@ -342,6 +342,9 @@ module.exports = {
     tras_cancelacion: { canal: 'llamada', dias: 1 },
     // Canal con el que queda una reserva que llegó por la API sin utm_medium (link sin marcar).
     canal_por_defecto: 'whatsapp',
+    // Calendly ya pone la reunión en el calendario de la ejecutiva y le manda la invitación al
+    // prospecto. false = el compromiso de reunión queda solo en la app (sin segundo evento en Google).
+    duplicar_en_google: false,
     // Mensaje con el link para mandar por WhatsApp / correo / LinkedIn. {nombre} {ejecutiva} {link}.
     mensaje: 'Hola {nombre}, te comparto la agenda de {ejecutiva} para que escojas el espacio que mejor te quede: {link}',
   },

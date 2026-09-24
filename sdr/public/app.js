@@ -319,7 +319,7 @@
     if (!cs || (!cs.hoy.length && !cs.proximos.length)) return '';
     const item = t => `<div class="compromiso ${t.vencido ? 'vencido' : ''}" data-cid="${t.id}">
         <div class="hora">${t.hora ? esc(t.hora) : (t.fecha ? fecha(t.due_ms) : 'hoy')}</div>
-        <div class="que"><b>${esc(t.titulo || TIPO_LABEL(t.tipo))}</b> <span class="chip ${t.canal}">${esc(TIPO_LABEL(t.tipo))}</span>${t.gcal_event_id ? ' <span class="suave" title="En Google Calendar">📅</span>' : t.gcal_error ? ` <span class="suave" title="${esc(t.gcal_error)}" style="color:var(--mal)">📅!</span>` : ''}
+        <div class="que"><b>${esc(t.titulo || TIPO_LABEL(t.tipo))}</b> <span class="chip ${t.canal}">${esc(TIPO_LABEL(t.tipo))}</span>${t.gcal_event_id ? ` <span class="suave" title="${t.gcal_event_id === 'calendly' ? 'En el calendario (lo creó Calendly)' : 'En Google Calendar'}">📅</span>` : t.gcal_error ? ` <span class="suave" title="${esc(t.gcal_error)}" style="color:var(--mal)">📅!</span>` : ''}
           ${t.lead_id ? `<div><a href="#/lead/${t.lead_id}">${esc(t.empresa || 'lead')}</a>${t.contacto ? ' · ' + esc(t.contacto) : ''}${t.telefono ? ' · <span class="num">' + esc(telVisible(t.telefono)) + '</span>' : ''}</div>` : ''}
           ${t.nota ? `<div class="suave" style="font-size:12px;white-space:pre-wrap">${esc(t.nota)}</div>` : ''}
           ${t.usuario && t.usuario !== usuarioActual() ? `<div class="suave" style="font-size:12px">de ${esc(t.usuario)}</div>` : ''}</div>
@@ -979,16 +979,35 @@
     function iniciarLlamada(numero) {
       const $estado = document.getElementById('llamada-estado');
       const uuid = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
-      let enCurso = true, inicio = null, reloj = null;
+      let enCurso = true, inicio = null, reloj = null, ultimo = ['conectando', ''];
+      delete reservasEnLlamada[l.id];
       const mmss = ms => { const t = Math.floor(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
       const pintar = (fase, texto) => {
         // fase: conectando | timbrando | activa
+        ultimo = [fase, texto];
+        const reserva = reservasEnLlamada[l.id];
+        const agendar = fase === 'activa' && meta.calendly
+          ? (reserva ? `<span class="agendada">✅ Reunión agendada${reserva.reunion_at ? ' · ' + esc(fechaHora(new Date(reserva.reunion_at).getTime())) : ''}</span>`
+            : `<button class="btn agendar" type="button" id="agendar-llamada" title="Abre el Calendly de ${esc(meta.calendly.ejecutiva)} sin colgar">📅 Agendar</button>`)
+          : '';
         $estado.innerHTML = `<div class="llamada ${fase}">
           <span class="punto"></span>
           <div class="txt"><b>${esc(texto)}</b><span class="num" id="reloj">${inicio ? mmss(Date.now() - inicio) : ''}</span></div>
+          ${agendar}
           <button class="btn colgar" type="button" id="colgar">Colgar</button></div>
           ${fase === 'activa' && meta.recordatorioGrabacion ? `<div class="recordatorio">🎙 ${esc(meta.recordatorioGrabacion)}</div>` : ''}`;
         document.getElementById('colgar').addEventListener('click', () => { if (enCurso) tel.colgar(); });
+        const $ag = document.getElementById('agendar-llamada');
+        if ($ag) $ag.addEventListener('click', async () => {
+          $ag.disabled = true;
+          const r = await reservarEnCalendly(l, 'llamada').catch(e => { avisar(e.message, 'error'); return null; });
+          if (r) {
+            reservasEnLlamada[l.id] = r;
+            avisar('Reunión agendada en Calendly. Al colgar, el resultado ya viene listo.');
+            aplicarReservaAlDialogo(l);
+          }
+          if (enCurso) pintar(...ultimo); else if ($ag.isConnected) $ag.disabled = false;
+        });
       };
       $llamar.disabled = true;
       pintar('conectando', 'Preparando la llamada…');
@@ -1039,6 +1058,17 @@
         document.getElementById('fallo-otro').addEventListener('click', () => abrirResultado(l, { callUuid: uuid }));
       }
     }
+  }
+
+  // Reuniones agendadas en Calendly durante la llamada, por lead: el diálogo de resultado las usa
+  // en vez de volver a abrir Calendly.
+  const reservasEnLlamada = {};
+  // Si el diálogo de resultado ya está abierto cuando Calendly confirma (colgó antes), lo actualiza.
+  function aplicarReservaAlDialogo(l) {
+    const $frm = document.getElementById('frm');
+    if (!$frm || Number($frm.dataset.lead) !== Number(l.id)) return;
+    const rb = $frm.querySelector('input[name=resultado][value=reunion_agendada]');
+    if (rb) { rb.checked = true; rb.dispatchEvent(new Event('change', { bubbles: true })); }
   }
 
   // Diálogo de resultado de la llamada (obligatorio al colgar) o de descarte.
@@ -1129,8 +1159,9 @@
     const canalesRespuesta = (meta.canales || []).filter(c => c.id !== 'llamada');
     const enUnaHora = new Date(Date.now() + 3600 * 1000);
     $modal.innerHTML = `
-      <div class="velo"><form class="dialogo" id="frm">
+      <div class="velo"><form class="dialogo" id="frm" data-lead="${l.id}">
         <h2>${soloDescarte ? 'Descartar lead' : respuesta ? 'El prospecto respondió' : 'Resultado de la llamada'}</h2>
+        <div id="aviso-reserva" class="calendly-aviso" hidden></div>
         ${respuesta ? `<p class="suave" style="margin:0 0 10px">${esc(l.empresa || '')}${l.contacto ? ' · ' + esc(l.contacto) : ''} te escribió. Queda como toque por ese canal con el resultado que elijas: cuenta como conversación y mueve la etapa igual que una llamada.</p>
         <div class="opciones fila" style="margin-bottom:8px">${canalesRespuesta.map((c, i) => `<label class="opcion"><input type="radio" name="canal" value="${c.id}" ${i === 0 ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')}</div>` : ''}
         ${compromisoId ? `<p class="suave" style="margin:0 0 10px">Seguimiento con <b>${esc(l.empresa || '')}</b>${l.contacto ? ' · ' + esc(l.contacto) : ''}. Al guardar, el compromiso queda hecho y la llamada cuenta en tus indicadores.</p>` : ''}
@@ -1181,9 +1212,21 @@
       document.getElementById('campos-descarte').hidden = v !== 'descartado';
       document.getElementById('campos-reunion').hidden = v !== 'reunion_agendada';
       const $manual = $frm.querySelector('input[name=manual]');
-      $frm.querySelector('button[type=submit]').textContent = v === 'reunion_agendada' && meta.calendly && !($manual && $manual.checked) ? 'Guardar y abrir Calendly' : 'Guardar';
+      const reserva = !soloDescarte && reservasEnLlamada[l.id];
+      $frm.querySelector('button[type=submit]').textContent = v === 'reunion_agendada' && meta.calendly && !reserva && !($manual && $manual.checked) ? 'Guardar y abrir Calendly' : 'Guardar';
+      // Reunión ya agendada en Calendly durante la llamada: no se vuelve a abrir Calendly.
+      const $av = document.getElementById('aviso-reserva');
+      const $calAv = $frm.querySelector('#campos-reunion .calendly-aviso');
+      if (reserva) {
+        $av.hidden = false;
+        $av.innerHTML = v === 'reunion_agendada'
+          ? `✅ <b>Ya quedó agendada en Calendly</b> durante la llamada${reserva.reunion_at ? ' para el ' + esc(fechaHora(new Date(reserva.reunion_at).getTime())).replace(/\.$/, '') : ''}. <span class="suave">Completa la ficha y guarda.</span>`
+          : `⚠️ Hay una reunión agendada en Calendly en esta llamada. Si no va, cancélala en Calendly; aquí queda registrado el resultado que elijas.`;
+        if ($calAv) $calAv.hidden = true;
+      } else { $av.hidden = true; if ($calAv) $calAv.hidden = false; }
     };
     $frm.querySelectorAll('input[name=resultado]').forEach(r => r.addEventListener('change', mostrar));
+    if (!soloDescarte && reservasEnLlamada[l.id]) { const rb = $frm.querySelector('input[name=resultado][value=reunion_agendada]'); if (rb) rb.checked = true; }
     mostrar();
     enlazarReintento($frm);
     const $manualCal = $frm.querySelector('input[name=manual]');
@@ -1215,8 +1258,8 @@
         }
       }
       // Reunión con Calendly: no se registra hasta que Calendly confirme la reserva.
-      if (!soloDescarte && resultado === 'reunion_agendada' && meta.calendly && !f.get('manual')) {
-        const reserva = await reservarEnCalendly(l, body.canal).catch(err => { document.getElementById('frm-error').innerHTML = pintarError(err); return null; });
+      if (!soloDescarte && resultado === 'reunion_agendada' && meta.calendly && (reservasEnLlamada[l.id] || !f.get('manual'))) {
+        const reserva = reservasEnLlamada[l.id] || await reservarEnCalendly(l, body.canal).catch(err => { document.getElementById('frm-error').innerHTML = pintarError(err); return null; });
         if (!reserva) return;             // cerró sin agendar: nada queda registrado
         body.detalle.calendly = { event_uri: reserva.event_uri, invitee_uri: reserva.invitee_uri };
         body.detalle.reunion_at = reserva.reunion_at || null;
@@ -1224,6 +1267,7 @@
       $frm.querySelector('button[type=submit]').disabled = true;
       try {
         const r = await api(ruta, { method: 'POST', body });
+        delete reservasEnLlamada[l.id];
         // El compromiso que quedó pactado en la llamada, si lo llenó.
         if (f.get('c_titulo') && f.get('c_fecha') && resultado !== 'descartado') {
           try { const rc = await api('tareas', { method: 'POST', body: { lead_id: l.id, tipo: f.get('c_tipo') || 'seguimiento', titulo: f.get('c_titulo'), fecha: f.get('c_fecha'), hora: f.get('c_hora') || null } }); (r.avisos = r.avisos || []).push(rc.calendario && rc.calendario.ok ? 'Compromiso anotado y en el calendario.' : 'Compromiso anotado.'); }

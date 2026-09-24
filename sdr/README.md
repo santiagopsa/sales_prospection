@@ -190,6 +190,14 @@ Con `CALENDLY.url` (hoy `https://calendly.com/luisa-ztw/45min`), el resultado **
    del embebido). Entrar y hacer clic no cuenta; *Cerrar sin agendar* no deja nada registrado.
 4. Sin token, la app pregunta el día y la hora que quedó; con `CALENDLY_TOKEN` la toma de Calendly.
 
+**Durante la llamada** aparece **📅 Agendar** en la barra de la llamada: abre el Calendly sin colgar, para cerrar la
+hora con el prospecto en la línea. Al colgar, el resultado ya viene en *Reunión agendada* con la reserva hecha
+(no se vuelve a abrir Calendly); solo falta la ficha. Si cuelga antes de que Calendly confirme, el diálogo se
+marca solo cuando llega la confirmación.
+
+Calendly ya pone la reunión en el calendario de Luisa y le manda la invitación al prospecto, así que el
+compromiso de reunión queda solo en la app, sin un segundo evento en Google (`CALENDLY.duplicar_en_google`).
+
 Si la reunión se cuadró por otro lado, *Ya quedó agendada por fuera de Calendly* deja poner la fecha a mano
 (`CALENDLY.permitir_manual`). En la ficha, **📅 Link de Calendly** manda el link marcado por WhatsApp (abre el
 chat con el mensaje `CALENDLY.mensaje` y registra el toque) o lo copia para correo o LinkedIn.

@@ -61,11 +61,16 @@ async function leer(db, id) {
   return r.rows[0];
 }
 
+// Marca en gcal_event_id de un compromiso cuyo evento ya existe porque lo creó Calendly.
+const EN_CALENDLY = 'calendly';
+
 // Sincroniza con Google Calendar. accion: 'crear' | 'mover' | 'borrar'. Nunca lanza: devuelve
 // { ok, error } y deja el resultado en la fila.
 async function sincronizar(db, config, env, taskId, accion, { fetchFn, invitados } = {}) {
   let t;
   try { t = await leer(db, taskId); } catch (e) { return { ok: false, error: e.message }; }
+  // La reunión la creó Calendly en el calendario de la ejecutiva: no se duplica en Google.
+  if (t.gcal_event_id === EN_CALENDLY) return { ok: true, omitido: 'el evento lo creó Calendly' };
   if (!cal.activo(env)) return { ok: false, error: null, omitido: 'sin llave' };
   if (!(config.CALENDARIO_TIPOS || []).includes(t.tipo)) return { ok: false, error: null, omitido: 'tipo no sincronizado' };
   const usuario = t.gcal_usuario ? (config.USUARIOS || []).find(u => u.email === t.gcal_usuario) : null;
@@ -179,4 +184,4 @@ function ejecutivaPara(config, nombre) {
   return (pedida && pedida.rol === 'ejecutiva' ? pedida : us.find(u => u.rol === 'ejecutiva')) || null;
 }
 
-module.exports = { insertar, crear, hecha, eliminar, mover, listar, leer, sincronizar, reintentarPendientes, ejecutivaPara, vencimiento };
+module.exports = { insertar, crear, hecha, eliminar, mover, listar, leer, sincronizar, reintentarPendientes, ejecutivaPara, vencimiento, EN_CALENDLY };
