@@ -138,7 +138,7 @@
         </div>
         <div class="ritmo-lado">
           <div class="racha ${c.racha.hoyCumple ? 'hoy' : ''}"><b>${c.racha.dias}</b><span>${c.racha.dias === 1 ? 'día seguido' : 'días seguidos'} cumpliendo la meta${c.racha.hoyCumple ? ' · hoy ✓' : ''}</span></div>
-          <a href="#/semana" class="suave" style="font-size:12px">Ver la semana →</a>
+          <a href="#/historial" class="suave" style="font-size:12px">Ver lo de hoy →</a> · <a href="#/semana" class="suave" style="font-size:12px">Ver la semana →</a>
         </div>
       </div>
       <div class="alertas">
@@ -1106,7 +1106,7 @@
       <div class="panel tabla-env">
         <table><thead><tr><th>Día</th><th class="num">Marcaciones</th><th class="num">Conversaciones</th><th class="num">Reuniones</th><th class="num">WhatsApp</th><th class="num">Correo</th><th class="num">LinkedIn</th><th>Meta</th></tr></thead>
         <tbody>${w.dias.map(d => `<tr class="${d.fecha === w.hoy ? 'hoy' : ''} ${d.habil ? '' : 'suave'}">
-          <td>${dia(d.fecha)}</td><td class="num">${d.marcaciones}</td><td class="num">${d.conversaciones}</td><td class="num">${d.reuniones}</td><td class="num">${d.whatsapp}</td><td class="num">${d.correo}</td><td class="num">${d.linkedin}</td>
+          <td><a href="#/historial/${d.fecha}" title="Ver qué se hizo ese día">${dia(d.fecha)}</a></td><td class="num">${d.marcaciones}</td><td class="num">${d.conversaciones}</td><td class="num">${d.reuniones}</td><td class="num">${d.whatsapp}</td><td class="num">${d.correo}</td><td class="num">${d.linkedin}</td>
           <td>${!d.habil ? '' : d.cumplida ? '<span class="chip whatsapp">cumplida</span>' : (d.fecha < w.hoy ? '<span class="chip vencida">no</span>' : (d.fecha === w.hoy ? '<span class="chip hoy">en curso</span>' : ''))}</td>
         </tr>`).join('')}</tbody></table>
       </div>
@@ -1160,6 +1160,54 @@
       </div>`;
   }
 
+  // ---------------------------------------------------------------- historial de un día
+  // "¿Qué hice ayer?": cada toque en orden con su lead, resultado y nota, y los compromisos cumplidos.
+  async function vistaHistorial(fechaPedida) {
+    const qs = new URLSearchParams(); if (fechaPedida) qs.set('fecha', fechaPedida); if (usuarioActual()) qs.set('usuario', usuarioActual());
+    const h = await api('historial' + (qs.toString() ? '?' + qs : ''));
+    const largo = x => new Date(x + 'T12:00:00-05:00').toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'long' });
+    const hora = ms => new Date(ms).toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit' });
+    const nombre = h.fecha === h.hoy ? 'Hoy' : h.fecha === h.ayerDeHoy ? 'Ayer' : '';
+    const r = h.resumen;
+    const fila = t => {
+      const que = meta.resultadoLabel[t.resultado] || t.resultado;
+      const extra = [
+        t.razon_descarte && (meta.razonLabel[t.razon_descarte] || t.razon_descarte),
+        t.duracion_s != null && `${Math.floor(t.duracion_s / 60)}:${String(t.duracion_s % 60).padStart(2, '0')} min`,
+        t.call_origen === 'manual' && t.canal === 'llamada' && 'por fuera de la app',
+        t.tarea_tipo && `compromiso: ${esc(t.tarea_titulo || TIPO_LABEL(t.tarea_tipo))}`,
+        t.detalle && t.detalle.reunion_at && 'reunión ' + fechaHora(new Date(t.detalle.reunion_at).getTime()),
+      ].filter(Boolean).join(' · ');
+      const conv = (meta.respuestasOtroCanal || []).includes(t.resultado) || t.resultado === 'conversacion' || t.resultado === 'reunion_agendada';
+      return `<li class="${conv ? 'conv' : ''}">
+        <span class="suave hora-h">${hora(t.created_ms)}</span>
+        <span class="chip ${t.canal}">${esc(etiqueta(meta.canales, t.canal))}</span>
+        <div style="flex:1;min-width:0"><a href="#/lead/${t.lead_id}"><b>${esc(t.empresa || 'Sin empresa')}</b></a>${t.contacto ? ' · ' + esc(t.contacto) : ''}${t.telefono ? ' · <span class="num">' + esc(telVisible(t.telefono)) + '</span>' : ''}
+          <div>${esc(que)}${extra ? ` <span class="suave">· ${extra}</span>` : ''}</div>
+          ${t.nota ? `<div class="suave" style="white-space:pre-wrap">${esc(t.nota)}</div>` : ''}</div>
+      </li>`;
+    };
+    $app.innerHTML = `
+      <div class="cabeza">
+        <div><h1>${nombre ? nombre + ' · ' : ''}${esc(largo(h.fecha))}</h1>
+          <div class="suave">${h.usuario ? `gestión de <b>${esc(h.usuario)}</b> · ` : ''}<a href="#/historial/${h.ayer}">← día anterior</a>${h.fecha < h.hoy ? ` · <a href="#/historial/${h.manana}">día siguiente →</a>` : ''} · <a href="#/semana?fecha=${h.fecha}">ver la semana</a></div></div>
+        <a class="btn" href="#/cola">Cola del día</a>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><b>${r.marcaciones}</b><span>Marcaciones</span></div>
+        <div class="kpi"><b>${r.conversaciones}</b><span>Conversaciones</span></div>
+        <div class="kpi"><b>${r.reuniones}</b><span>Reuniones agendadas</span></div>
+        <div class="kpi"><b>${r.whatsapp + r.correo + r.linkedin}</b><span>WhatsApp / correo / LinkedIn</span><small>${r.whatsapp} · ${r.correo} · ${r.linkedin}</small></div>
+        <div class="kpi"><b>${r.leads}</b><span>Leads tocados</span><small>${plural(r.toques, 'toque', 'toques')} en total</small></div>
+      </div>
+      ${h.compromisosHechos.length ? `<div class="panel" style="margin-bottom:14px"><h2>Compromisos cumplidos sin toque <span class="suave" style="font-weight:400;font-size:12px">se marcaron hechos pero no quedó registrado qué pasó</span></h2>
+        <ul class="pasos historial">${h.compromisosHechos.map(c => `<li><span class="suave hora-h">${hora(c.done_ms)}</span><span class="chip ${c.canal}">${esc(TIPO_LABEL(c.tipo))}</span><div style="flex:1"><b>${esc(c.titulo || TIPO_LABEL(c.tipo))}</b>${c.lead_id ? ` · <a href="#/lead/${c.lead_id}">${esc(c.empresa || 'lead')}</a>${c.contacto ? ' · ' + esc(c.contacto) : ''}` : ''}</div></li>`).join('')}</ul></div>` : ''}
+      <div class="panel">
+        <h2>Toques del día <span class="suave" style="font-weight:400;font-size:12px">en orden · clic en la empresa abre la ficha</span></h2>
+        ${h.toques.length ? `<ul class="pasos historial dia">${h.toques.map(fila).join('')}</ul>` : `<p class="vacio">Sin toques registrados ese día${h.usuario ? ` para ${esc(h.usuario)}` : ''}.</p>`}
+      </div>`;
+  }
+
   // ---------------------------------------------------------------- router
   async function render() {
     const [ruta, query] = (location.hash.replace(/^#\/?/, '') || 'cola').split('?');
@@ -1173,6 +1221,7 @@
       else if (partes[0] === 'llamada' && partes[1]) await vistaLlamada(partes[1]);
       else if (partes[0] === 'marcar') vistaMarcar();
       else if (partes[0] === 'semana') await vistaSemana(new URLSearchParams(query));
+      else if (partes[0] === 'historial') await vistaHistorial(partes[1]);
       else if (partes[0] === 'lead' && partes[1]) {
         await vistaLead(partes[1]);
         if (new URLSearchParams(query).get('llamar') === '1') {

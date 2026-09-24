@@ -133,4 +133,47 @@ async function resumenSemana(db, config, { fecha, usuario = null, ahora = new Da
   };
 }
 
-module.exports = { actividadPorDia, racha, bloqueActual, ratios, resumenSemana, semanaDe, diaCumplido };
+// Historial de un día (Bogotá): cada toque con su lead, en orden, más los compromisos que se cumplieron
+// ese día (aunque no dejaran toque, como pasaba antes con "Hecha"). Es lo que Angie abre para ver
+// "qué hice ayer". Sin usuario: los de rol sdr, como el resto de indicadores.
+async function historialDia(db, config, { fecha, usuario = null } = {}) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha || '')) fecha = tiempo.fechaBogota(new Date());
+  const desde = tiempo.instante(fecha, 0).toISOString();
+  const hasta = tiempo.instante(tiempo.sumarDias(fecha, 1), 0).toISOString();
+  const ms = col => `(EXTRACT(EPOCH FROM ${col}) * 1000)::float8`;
+  const t = await db.query(
+    `SELECT x.id, x.lead_id, x.canal, x.resultado, x.razon_descarte, x.nota, x.usuario, x.detalle, ${ms('x.created_at')} AS created_ms,
+            l.empresa, l.contacto, l.telefono, l.etapa, c.duracion_s, c.vox_estado, c.origen AS call_origen,
+            tk.tipo AS tarea_tipo, tk.titulo AS tarea_titulo
+     FROM ${T.touches} x
+     JOIN ${T.leads} l ON l.id = x.lead_id
+     LEFT JOIN ${T.calls} c ON c.id = x.call_id
+     LEFT JOIN ${T.tasks} tk ON tk.id = x.task_id AND tk.tipo <> 'secuencia'
+     WHERE x.created_at >= $1 AND x.created_at < $2 AND x.canal <> 'ejecutiva' ${filtroUsuario(config, 4, usuario).replace(/\busuario\b/g, 'x.usuario')}
+     ORDER BY x.created_at`,
+    [desde, hasta, conv, paramUsuario(config, usuario)]);
+  // Compromisos cumplidos ese día que no dejaron toque (los de antes del arreglo, o de leads ya con la ejecutiva).
+  const k = await db.query(
+    `SELECT t.id, t.lead_id, t.tipo, t.titulo, t.canal, t.usuario, ${ms('t.done_at')} AS done_ms, l.empresa, l.contacto
+     FROM ${T.tasks} t LEFT JOIN ${T.leads} l ON l.id = t.lead_id
+     WHERE t.tipo <> 'secuencia' AND t.estado = 'hecha' AND t.done_at >= $1 AND t.done_at < $2
+       AND NOT EXISTS (SELECT 1 FROM ${T.touches} x WHERE x.task_id = t.id)
+       AND ($3::text IS NULL OR LOWER(t.usuario) = LOWER($3))
+     ORDER BY t.done_at`,
+    [desde, hasta, usuario]);
+  const toques = t.rows;
+  const resumen = {
+    marcaciones: toques.filter(x => x.canal === 'llamada').length,
+    conversaciones: toques.filter(x => D.RESULTADOS_CON_CONVERSACION.includes(x.resultado)).length,
+    reuniones: toques.filter(x => x.resultado === 'reunion_agendada').length,
+    whatsapp: toques.filter(x => x.canal === 'whatsapp').length,
+    correo: toques.filter(x => x.canal === 'correo').length,
+    linkedin: toques.filter(x => x.canal === 'linkedin').length,
+    toques: toques.length,
+    leads: new Set(toques.map(x => x.lead_id)).size,
+    compromisosSinToque: k.rows.length,
+  };
+  return { fecha, usuario, resumen, toques, compromisosHechos: k.rows, ayer: tiempo.sumarDias(fecha, -1), manana: tiempo.sumarDias(fecha, 1), hoy: tiempo.fechaBogota(new Date()), ayerDeHoy: tiempo.sumarDias(tiempo.fechaBogota(new Date()), -1) };
+}
+
+module.exports = { actividadPorDia, racha, bloqueActual, ratios, resumenSemana, semanaDe, diaCumplido, historialDia };

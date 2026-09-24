@@ -52,6 +52,25 @@ test('ritmo: bloques, racha y semana', { skip: !url && 'sin SDR_TEST_DATABASE_UR
     assert.strictEqual((await ritmo.racha(db, { ...config, RACHA_CUMPLE_CON: 'cualquiera' }, martes930)).dias, 4);
   });
 
+  await t.test('historial de un día: toques con lead, resumen y compromisos hechos sin toque', async () => {
+    // Un compromiso marcado hecho el 22 sin toque (como pasaba antes) y uno que sí dejó toque.
+    const c1 = (await db.query(`INSERT INTO sdr.tasks (lead_id, paso, canal, due_at, tipo, titulo, estado, done_at, usuario) VALUES ($1, 1, 'llamada', $2, 'seguimiento', 'Llamar a Ana', 'hecha', $2, 'Angie') RETURNING id`, [lead.id, tiempo.instante('2026-09-22', 10).toISOString()])).rows[0];
+    const c2 = (await db.query(`INSERT INTO sdr.tasks (lead_id, paso, canal, due_at, tipo, titulo, estado, done_at, usuario) VALUES ($1, 2, 'correo', $2, 'enviar', 'Propuesta', 'hecha', $2, 'Angie') RETURNING id`, [lead.id, tiempo.instante('2026-09-22', 11).toISOString()])).rows[0];
+    await db.query(`INSERT INTO sdr.touches (lead_id, task_id, canal, resultado, nota, created_at) VALUES ($1, $2, 'correo', 'correo', 'enviada la propuesta', $3)`, [lead.id, c2.id, tiempo.instante('2026-09-22', 11).toISOString()]);
+    const h = await ritmo.historialDia(db, config, { fecha: '2026-09-22' });
+    assert.strictEqual(h.fecha, '2026-09-22');
+    assert.deepStrictEqual(h.toques.map(x => [x.canal, x.resultado]), [['llamada', 'no_contesto'], ['llamada', 'conversacion'], ['whatsapp', 'whatsapp'], ['llamada', 'no_contesto'], ['correo', 'correo']]); // el 4.º lo metió el test de racha
+    assert.strictEqual(h.toques[0].empresa, 'ACME');
+    assert.strictEqual(h.toques[4].tarea_titulo, 'Propuesta');
+    assert.deepStrictEqual({ ...h.resumen }, { marcaciones: 3, conversaciones: 1, reuniones: 0, whatsapp: 1, correo: 1, linkedin: 0, toques: 5, leads: 1, compromisosSinToque: 1 });
+    assert.strictEqual(h.compromisosHechos[0].id, c1.id);
+    assert.strictEqual(h.ayer, '2026-09-21'); assert.strictEqual(h.manana, '2026-09-23');
+    // Fecha inválida → hoy; usuario que no tocó nada → vacío.
+    assert.strictEqual((await ritmo.historialDia(db, config, { fecha: 'ayer' })).fecha, tiempo.fechaBogota(new Date()));
+    assert.strictEqual((await ritmo.historialDia(db, config, { fecha: '2026-09-22', usuario: 'Luisa' })).toques.length, 0);
+    await db.query(`DELETE FROM sdr.touches WHERE task_id = $1`, [c2.id]);
+  });
+
   await t.test('resumen semanal', async () => {
     const s = await ritmo.resumenSemana(db, config, { fecha: '2026-09-22', ahora: martes930 });
     assert.strictEqual(s.lunes, '2026-09-21');

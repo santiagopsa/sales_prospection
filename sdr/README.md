@@ -179,6 +179,14 @@ por ese canal de una vez. La secuencia del lead no se consume (el compromiso es 
 está con la ejecutiva o el compromiso no tiene lead, *Hecha* solo cierra la tarea. Antes esto no contaba, por eso
 las llamadas de seguimiento no aparecían en los indicadores.
 
+## Historial por día
+**Historial** en la barra (también *Ver lo de hoy →* en la cola y el nombre de cada día en la tabla de la Semana)
+abre un día: resumen (marcaciones, conversaciones, reuniones, WhatsApp/correo/LinkedIn, leads tocados) y cada
+toque en orden con su lead, resultado, duración y nota; las conversaciones van resaltadas. Flechas para ir al día
+anterior o siguiente. Los compromisos que se marcaron hechos ese día sin dejar toque (como pasaba antes del
+arreglo de *Hecha*) salen en su propio bloque, para que la gestión no se pierda aunque no tenga resultado.
+`GET /api/historial?fecha=YYYY-MM-DD&usuario=Angie`.
+
 ## Buscador y respuestas por otros canales
 En la barra hay un buscador (atajo: tecla `/`): empresa, contacto, cargo, correo o teléfono, sin acentos ni
 mayúsculas ("exito" encuentra "Grupo Éxito"; "313 470" encuentra +57 313 470 5454, también en el segundo
