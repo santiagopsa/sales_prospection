@@ -287,3 +287,14 @@ a.panel.comision:hover { text-decoration: none; border-color: #86efac; }
 .escalon em { position: absolute; top: -10px; right: 10px; font-style: normal; font-size: 11px; font-weight: 700; background: #15803d; color: #fff; padding: 1px 8px; border-radius: 99px; }
 @media (max-width: 620px) { .com-sig { text-align: left; } .escalones { flex-direction: column; align-items: stretch; } .escalon { margin-top: 0 !important; } .esc-marca .cu { display: none; } }
 .ritmo-links { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; }
+
+/* Calendly embebido */
+.calendly-aviso { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 12px; font-size: 13px; margin: 6px 0 10px; }
+.dialogo .calendly-aviso label.check { display: flex; gap: 8px; align-items: center; margin: 8px 0 0; font-weight: 500; font-size: 12px; color: var(--suave); text-transform: none; letter-spacing: 0; }
+.dialogo .calendly-aviso label.check input { width: auto; flex: none; margin: 0; padding: 0; }
+.calendly-capa { z-index: 60; }
+.calendly-dialogo { max-width: 1000px; width: calc(100% - 24px); height: calc(100vh - 40px); display: flex; flex-direction: column; padding: 12px; }
+.calendly-cabeza { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+.calendly-marco { flex: 1; width: 100%; border: 1px solid var(--linea); border-radius: 8px; min-height: 0; background: #fff; }
+.calendly-listo { border-top: 1px solid var(--linea); padding-top: 10px; margin-top: 8px; }
+.calendly-listo input { font: inherit; padding: 8px 10px; border: 1px solid var(--linea); border-radius: 8px; }

@@ -21,6 +21,7 @@ const T = {
   evaluations: `${SCHEMA}.evaluations`,
   focos: `${SCHEMA}.focos`,
   informes: `${SCHEMA}.informes_semana`,
+  calendly: `${SCHEMA}.calendly_eventos`,
 };
 
 const lista = xs => xs.map(x => `'${x}'`).join(',');
@@ -270,6 +271,22 @@ const MIGRACIONES = [
   `ALTER TABLE ${T.lista_negra} ADD CONSTRAINT sdr_lista_negra_alguno CHECK (telefono IS NOT NULL OR email IS NOT NULL OR empresa_norm IS NOT NULL OR dominio IS NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS sdr_lista_negra_empresa ON ${T.lista_negra}(empresa_norm) WHERE empresa_norm IS NOT NULL`,
   `CREATE UNIQUE INDEX IF NOT EXISTS sdr_lista_negra_dominio ON ${T.lista_negra}(dominio) WHERE dominio IS NOT NULL`,
+  // ---- M7 · Reuniones agendadas en Calendly ---------------------------------------------
+  // Cada reserva que se ve (desde la app embebida o por la sincronización con la API), una vez.
+  // estado: registrado (quedó como reunión de un lead) | sin_lead (nadie la reconoce) | cancelado.
+  `CREATE TABLE IF NOT EXISTS ${T.calendly} (
+     uri TEXT PRIMARY KEY,
+     invitee_uri TEXT,
+     lead_id INT REFERENCES ${T.leads}(id) ON DELETE SET NULL,
+     inicio TIMESTAMPTZ,
+     email TEXT,
+     nombre TEXT,
+     tracking JSONB,
+     origen TEXT NOT NULL CHECK (origen IN ('app','sincronizacion')),
+     estado TEXT NOT NULL DEFAULT 'registrado' CHECK (estado IN ('registrado','sin_lead','cancelado')),
+     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+   )`,
 ];
 
 async function initSchema(db, log = console) {

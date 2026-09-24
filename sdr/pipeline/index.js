@@ -177,9 +177,9 @@ async function transcripcionDeLlamada(db, callId, config = require('../config'))
 // Trabajador en el servidor: revisa cada PIPELINE_INTERVALO_S si hay pendientes. Sin
 // DEEPGRAM_API_KEY no arranca (y lo dice una vez). Devuelve el temporizador para poder pararlo.
 function iniciar(db, config, env = process.env, log = console) {
-  if (!env.DEEPGRAM_API_KEY && !env.GOOGLE_CALENDAR_KEY_FILE && !env.GOOGLE_CALENDAR_KEY && !env.ANTHROPIC_API_KEY) { log.log('[sdr/pipeline] sin DEEPGRAM_API_KEY ni llave de calendario: nada que hacer en segundo plano'); return null; }
+  if (!env.DEEPGRAM_API_KEY && !env.GOOGLE_CALENDAR_KEY_FILE && !env.GOOGLE_CALENDAR_KEY && !env.ANTHROPIC_API_KEY && !env.CALENDLY_TOKEN) { log.log('[sdr/pipeline] sin DEEPGRAM_API_KEY ni llave de calendario: nada que hacer en segundo plano'); return null; }
   if (!env.DEEPGRAM_API_KEY) log.log('[sdr/pipeline] sin DEEPGRAM_API_KEY: las llamadas quedan en "pendiente" hasta que la pongas');
-  let enCurso = false;
+  let enCurso = false, ultimaCalendly = 0;
   const tick = async () => {
     if (enCurso) return;
     enCurso = true;
@@ -193,6 +193,13 @@ function iniciar(db, config, env = process.env, log = console) {
       // Compromisos que se quedaron sin evento en el calendario (Google falló): se reintentan aquí.
       const c = await require('../compromisos').reintentarPendientes(db, config, env, { limite: 10 });
       if (c.ok) log.log(`[sdr/calendario] ${c.ok} compromisos subidos al calendario en el reintento`);
+      // Calendly: reservas hechas desde el link y cancelaciones (con CALENDLY_TOKEN).
+      const cadaCal = Math.max(1, Number((config.CALENDLY || {}).sincronizar_min) || 10) * 60000;
+      if (env.CALENDLY_TOKEN && Date.now() - ultimaCalendly >= cadaCal) {
+        ultimaCalendly = Date.now();
+        const k = await require('../calendly').sincronizar(db, config, env, { log });
+        if (k.nuevas || k.canceladas || k.movidas || k.sin_lead) log.log(`[sdr/calendly] ${k.nuevas} nuevas, ${k.movidas} movidas, ${k.canceladas} canceladas, ${k.sin_lead} sin lead`);
+      }
     } catch (e) { log.error('[sdr/pipeline]', e.message); }
     finally { enCurso = false; }
   };

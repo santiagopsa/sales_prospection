@@ -81,11 +81,11 @@ module.exports = {
     // reunión (inclusive). Primer tramo siempre desde 0.
     tramos: [
       { desde: 0,  valor: 23, nombre: 'Tramo bajo',  nota: 'Aplica bajo el umbral medio' },
-      { desde: 20, valor: 30, nombre: 'Meta',        nota: 'Meta promedio' },
+      { desde: 15, valor: 30, nombre: 'Meta',        nota: 'Meta promedio' },
       { desde: 30, valor: 40, nombre: 'Sobre meta',  nota: 'Excedió la meta' },
     ],
-    // 'escalon': al alcanzar un tramo, TODAS las del mes se pagan a ese valor (25 → 25 × 30).
-    // 'tramos':  cada reunión se paga al valor de su tramo (25 → 19 × 23 + 6 × 30).
+    // 'escalon': al alcanzar un tramo, TODAS las del mes se pagan a ese valor (20 → 20 × 30).
+    // 'tramos':  cada reunión se paga al valor de su tramo (20 → 14 × 23 + 6 × 30).
     modo: 'escalon',
     // Qué calificación del Sandler Coach (deals.calificacion_sandler) cuenta como calificada.
     // Valores posibles: 'Completa', 'Parcial', 'No califica'.
@@ -318,6 +318,32 @@ module.exports = {
   // Qué mueve: al agendar una reunión con fecha, se crea un compromiso "reunión" para la ejecutiva
   // (la del diálogo, o la primera con rol ejecutiva) y Angie queda invitada. null = no crear.
   REUNION_CREA_COMPROMISO: true,
+
+  // ---------------------------------------------------------------------------
+  // Calendly de la ejecutiva: la SDR agenda desde la app
+  // ---------------------------------------------------------------------------
+  // Qué mueve: con `url`, el resultado "Reunión agendada" abre el Calendly de la ejecutiva dentro de
+  // la app (con nombre, correo y el lead prellenados) y la reunión solo se registra cuando Calendly
+  // confirma la reserva (evento calendly.event_scheduled), no cuando se hace clic. null = como antes,
+  // fecha y hora a mano.
+  // Con la variable CALENDLY_TOKEN (token personal de la cuenta de Calendly de la ejecutiva) además:
+  // la hora de la reunión se toma de Calendly, se detectan las reservas que el prospecto hace solo
+  // desde el link que le mandaron (WhatsApp/correo) y las cancelaciones.
+  CALENDLY: {
+    url: 'https://calendly.com/luisa-ztw/45min',
+    ejecutiva: 'Luisa',
+    // true: si Calendly falla o la reunión se cuadró por otro lado, la SDR puede poner fecha a mano.
+    permitir_manual: true,
+    // Cada cuánto se revisa la API de Calendly (reservas desde el link y cancelaciones). Con token.
+    sincronizar_min: 10,
+    // Qué hacer con una reunión cancelada en Calendly: el lead vuelve a "conversación" con un toque
+    // por este canal a los `dias` hábiles. null = solo marcarla como cancelada.
+    tras_cancelacion: { canal: 'llamada', dias: 1 },
+    // Canal con el que queda una reserva que llegó por la API sin utm_medium (link sin marcar).
+    canal_por_defecto: 'whatsapp',
+    // Mensaje con el link para mandar por WhatsApp / correo / LinkedIn. {nombre} {ejecutiva} {link}.
+    mensaje: 'Hola {nombre}, te comparto la agenda de {ejecutiva} para que escojas el espacio que mejor te quede: {link}',
+  },
   // Qué mueve: duración (minutos) del evento en el calendario según el tipo. Un compromiso sin
   // hora es un evento de todo el día.
   CALENDARIO_DURACION_MIN: { seguimiento: 15, enviar: 30, reunion: 45, otro: 30 },

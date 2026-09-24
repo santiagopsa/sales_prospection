@@ -33,16 +33,39 @@ function rutas({ db, config }) {
       verTranscripcion: config.VER_TRANSCRIPCION || [],
       tiposCompromiso: Object.entries(config.TIPOS_COMPROMISO || {}).map(([id, t]) => ({ id, label: t.label, canal: t.canal, descripcion: t.descripcion })),
       calendarioActivo: cal.activo(process.env),
+      calendly: require('./calendly').activo(config) ? { url: config.CALENDLY.url, origen: new URL(config.CALENDLY.url).origin, ejecutiva: config.CALENDLY.ejecutiva, permitirManual: !!config.CALENDLY.permitir_manual, horaDeCalendly: !!require('./calendly').token(process.env), mensaje: config.CALENDLY.mensaje || '' } : null,
     })],
     // Toque de Angie: llamada (con resultado obligatorio) o WhatsApp / correo / LinkedIn de un clic.
     ['post', '/api/leads/:id/toques', async ({ params, body }) => {
       sinDb();
       const b = body || {};
-      return registrarToque(db, config, {
+      // Reunión agendada en el Calendly embebido: la hora sale de Calendly (con token) y la reserva queda anotada.
+      const CAL = require('./calendly');
+      const { detalle, evento } = b.resultado === 'reunion_agendada' ? await CAL.prepararDetalle(process.env, b.detalle) : { detalle: b.detalle, evento: null };
+      const r = await registrarToque(db, config, {
         leadId: params.id, canal: b.canal, resultado: b.resultado, razon: b.razon, nota: b.nota,
-        detalle: b.detalle, taskId: b.task_id, compromisoId: b.compromiso_id, callUuid: b.call_uuid, usuario: b.usuario, reintentoMeses: b.reintento_meses,
+        detalle, taskId: b.task_id, compromisoId: b.compromiso_id, callUuid: b.call_uuid, usuario: b.usuario, reintentoMeses: b.reintento_meses,
       });
+      if (evento) {
+        await CAL.registrarEvento(db, { ...evento, lead_id: Number(params.id), origen: 'app', estado: 'registrado' });
+        r.calendly = { inicio: detalle.reunion_at, desde_calendly: !!CAL.token(process.env) };
+      }
+      return r;
     }],
+    // Link de Calendly para mandar por WhatsApp / correo / LinkedIn, marcado con el lead y el canal.
+    ['get', '/api/leads/:id/calendly', async ({ params, query }) => {
+      sinDb();
+      const CAL = require('./calendly');
+      if (!CAL.activo(config)) throw Object.assign(new Error('Calendly no está configurado (CALENDLY.url)'), { status: 400 });
+      const lead = (await db.query(`SELECT id, empresa, contacto, email FROM sdr.leads WHERE id = $1`, [Number(params.id)])).rows[0];
+      if (!lead) throw Object.assign(new Error('Lead no encontrado'), { status: 404 });
+      return {
+        enlace: CAL.enlace(config, { lead, canal: query.canal || null, usuario: query.usuario || null }),
+        embebido: CAL.enlace(config, { lead, canal: query.canal || 'llamada', usuario: query.usuario || null, embebido: true, dominio: query.dominio || null }),
+      };
+    }],
+    ['get', '/api/calendly/estado', async () => { sinDb(); return require('./calendly').estado(db, config, process.env); }],
+    ['post', '/api/calendly/sincronizar', async () => { sinDb(); return require('./calendly').sincronizar(db, config, process.env); }],
     // Acciones de la ejecutiva comercial.
     ['post', '/api/leads/:id/ejecutiva', async ({ params, body }) => {
       sinDb();

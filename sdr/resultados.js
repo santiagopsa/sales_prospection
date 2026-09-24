@@ -294,7 +294,7 @@ async function sincronizarCompromisos(db, config, env, r, usuario) {
 async function registrarEjecutiva(db, config, { leadId, accion, razon, nota, usuario, reintentoMeses, ahora = new Date(), env = process.env }) {
   leadId = Number(leadId);
   usuario = usuarioValido(config, usuario);
-  if (!['reunion_realizada', 'no_show', 'calificado', 'descartado', 'reactivar'].includes(accion)) throw error(400, 'Acción desconocida');
+  if (!['reunion_realizada', 'no_show', 'reunion_cancelada', 'calificado', 'descartado', 'reactivar'].includes(accion)) throw error(400, 'Acción desconocida');
   if (accion === 'descartado' && !D.RAZONES_DESCARTE.includes(razon)) throw error(400, 'Elige la razón del descarte');
   const meses = accion === 'descartado' ? mesesReintento(config, razon, reintentoMeses) : null;
   const r = await enTransaccion(db, async c => {
@@ -329,6 +329,15 @@ async function registrarEjecutiva(db, config, { leadId, accion, razon, nota, usu
       const t = config.TRAS_NO_SHOW;
       proxima = await programar(c, config, leadId, t.canal, t.dias, ahora);
       await cambiarEtapa(c, leadId, 'conversacion', { reunion_at: null });
+    } else if (accion === 'reunion_cancelada') {
+      // El prospecto canceló (Calendly lo avisa): vuelve a la SDR para recuperarla.
+      if (lead.etapa !== 'reunion_agendada') throw error(409, 'Solo aplica a un lead con reunión agendada');
+      await omitirPendientes(c, leadId);
+      compromisosOmitidos = await cerrarReunion(c, leadId, 'omitida');
+      const t = (config.CALENDLY || {}).tras_cancelacion;
+      if (t) proxima = await programar(c, config, leadId, t.canal, t.dias, ahora);
+      await cambiarEtapa(c, leadId, 'conversacion', { reunion_at: null });
+      if (!t) avisos.push('Sin próximo toque programado (CALENDLY.tras_cancelacion es null).');
     } else if (accion === 'calificado') {
       if (!['reunion_agendada', 'reunion_realizada'].includes(lead.etapa)) throw error(409, 'Solo aplica después de una reunión');
       await omitirPendientes(c, leadId);

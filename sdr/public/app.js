@@ -112,6 +112,7 @@
     programada: { label: 'Programada', clase: 'llamada' },
     no_califica: { label: 'No calificó', clase: 'vencida' },
     no_asistio: { label: 'No asistió', clase: 'vencida' },
+    cancelada: { label: 'Cancelada', clase: 'vencida' },
   };
   // Escalera: una franja por tramo, cada una más alta que la anterior; se llena hasta las calificadas
   // y, rayado, hasta lo que podría llegar si califican las pendientes.
@@ -159,7 +160,7 @@
     const qs = new URLSearchParams(); if (params.get('mes')) qs.set('mes', params.get('mes')); if (usuarioActual()) qs.set('usuario', usuarioActual());
     const r = await api('comision' + (qs.toString() ? '?' + qs : ''));
     const k = r.comision, m = r.reglas.moneda, c = r.conteo;
-    const orden = ['calificada', 'por_calificar', 'programada', 'no_califica', 'no_asistio'];
+    const orden = ['calificada', 'por_calificar', 'programada', 'no_califica', 'no_asistio', 'cancelada'];
     const reuniones = r.reuniones.slice().sort((a, b) => orden.indexOf(a.estado) - orden.indexOf(b.estado) || (a.reunion_ms || a.agendada_ms) - (b.reunion_ms || b.agendada_ms));
     const escalones = k.tramos.map((t, i) => {
       const hasta = k.tramos[i + 1] ? k.tramos[i + 1].desde - 1 : null;
@@ -189,7 +190,7 @@
         <div class="kpi"><b>${c.calificadas}</b><span>Calificadas</span><small>cuentan para la comisión</small></div>
         <div class="kpi"><b>${c.por_calificar}</b><span>Por calificar</span><small>ya pasaron; falta que ${esc(((meta.usuarios || []).find(u => u.rol === 'ejecutiva') || { nombre: 'la ejecutiva' }).nombre)} las califique en el Sandler</small></div>
         <div class="kpi"><b>${c.programadas}</b><span>Programadas</span><small>todavía no son</small></div>
-        <div class="kpi"><b>${c.no_califica + c.no_asistio}</b><span>No cuentan</span><small>${c.no_califica} no calificaron · ${c.no_asistio} no asistieron</small></div>
+        <div class="kpi"><b>${c.no_califica + c.no_asistio + (c.canceladas || 0)}</b><span>No cuentan</span><small>${c.no_califica} no calificaron · ${c.no_asistio} no asistieron${c.canceladas ? ` · ${c.canceladas} canceladas` : ''}</small></div>
       </div>
       ${r.potencial.total > k.total ? `<p class="suave" style="margin:-4px 0 14px">Si califican todas las pendientes (${c.por_calificar + c.programadas}), el mes cerraría en <b>${plata(m, r.potencial.total)}</b>.</p>` : ''}
       <div class="panel">
@@ -856,6 +857,7 @@
                 <button class="btn" data-toque="whatsapp" ${l.telefono ? '' : 'disabled'}>WhatsApp enviado</button>
                 <button class="btn" data-toque="correo" ${l.email ? '' : 'disabled'}>Correo enviado</button>
                 <button class="btn" data-toque="linkedin">LinkedIn enviado</button>
+                ${meta.calendly ? '<button class="btn" id="link-calendly" title="Mandar el Calendly de la ejecutiva por WhatsApp, correo o LinkedIn">📅 Link de Calendly</button>' : ''}
                 <button class="btn" id="respondio" title="Te escribió por WhatsApp, correo o LinkedIn: registra qué pasó (cuenta como conversación)">Me respondió</button>
                 <button class="btn" id="compromiso" title="Algo que quedaste con el prospecto, con fecha y hora">Compromiso</button>
                 <button class="btn peligro" id="descartar" title="Descartar o pausar">Sacar de la cola</button>
@@ -939,6 +941,8 @@
 
     const $manual = document.getElementById('llamada-manual');
     if ($manual) $manual.addEventListener('click', () => abrirResultado(l, {}));
+    const $linkCal = document.getElementById('link-calendly');
+    if ($linkCal) $linkCal.addEventListener('click', () => enviarLinkCalendly(l, () => render()));
     const $respondio = document.getElementById('respondio');
     if ($respondio) $respondio.addEventListener('click', () => abrirResultado(l, { respuesta: true }));
 
@@ -1037,6 +1041,84 @@
   }
 
   // Diálogo de resultado de la llamada (obligatorio al colgar) o de descarte.
+  // Calendly embebido encima del diálogo. Resuelve con { event_uri, invitee_uri, reunion_at } cuando
+  // Calendly avisa que la reserva quedó (calendly.event_scheduled), o null si se cierra sin agendar.
+  function reservarEnCalendly(l, canal) {
+    return new Promise(async (resolver, rechazar) => {
+      let datos;
+      try { datos = await api(`leads/${l.id}/calendly?canal=${encodeURIComponent(canal || 'llamada')}&dominio=${encodeURIComponent(location.hostname)}${usuarioActual() ? '&usuario=' + encodeURIComponent(usuarioActual()) : ''}`); }
+      catch (e) { return rechazar(e); }
+      const capa = document.createElement('div');
+      capa.className = 'velo calendly-capa';
+      capa.innerHTML = `<div class="dialogo calendly-dialogo">
+          <div class="calendly-cabeza"><div><b>Agenda con ${esc(meta.calendly.ejecutiva)}</b> <span class="suave">· ${esc(l.empresa || '')}${l.contacto ? ' · ' + esc(l.contacto) : ''}</span>
+            <div class="suave" style="font-size:12px">Elige día y hora con el prospecto y confirma en Calendly. Aquí se registra sola cuando Calendly confirme.</div></div>
+            <button class="btn" type="button" data-cerrar>Cerrar sin agendar</button></div>
+          <iframe class="calendly-marco" src="${esc(datos.embebido)}" title="Calendly" allow="payment"></iframe>
+          <div class="calendly-listo" hidden></div>
+        </div>`;
+      document.body.appendChild(capa);
+      const fin = v => { window.removeEventListener('message', oir); capa.remove(); resolver(v); };
+      capa.querySelector('[data-cerrar]').addEventListener('click', () => fin(null));
+      const oir = e => {
+        if (e.origin !== meta.calendly.origen || !e.data || e.data.event !== 'calendly.event_scheduled') return;
+        const p = e.data.payload || {};
+        const reserva = { event_uri: p.event && p.event.uri, invitee_uri: p.invitee && p.invitee.uri };
+        if (!reserva.event_uri) return;
+        if (meta.calendly.horaDeCalendly) return fin(reserva);   // el servidor trae la hora de Calendly
+        // Sin token no sabemos la hora: se pide (la que acaba de elegir en Calendly).
+        const $listo = capa.querySelector('.calendly-listo');
+        $listo.hidden = false;
+        $listo.innerHTML = `<form id="frm-hora" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+            <div><b>✅ Quedó agendada en Calendly.</b><div class="suave" style="font-size:12px">¿Qué día y a qué hora quedó?</div></div>
+            <input type="datetime-local" name="hora" required value="${fechaLocal(new Date(Date.now() + 86400000))}" />
+            <button class="btn primario" type="submit">Registrar reunión</button></form>`;
+        capa.querySelector('#frm-hora').addEventListener('submit', ev => {
+          ev.preventDefault();
+          const v = new FormData(ev.target).get('hora');
+          fin({ ...reserva, reunion_at: new Date(v + ':00-05:00').toISOString() });
+        });
+      };
+      window.addEventListener('message', oir);
+    });
+  }
+
+  // Link de Calendly para mandar: WhatsApp (abre el chat con el mensaje y registra el toque) o copiar.
+  async function enviarLinkCalendly(l, despues) {
+    const $modal = document.getElementById('modal');
+    const armar = async canal => {
+      const d = await api(`leads/${l.id}/calendly?canal=${canal}${usuarioActual() ? '&usuario=' + encodeURIComponent(usuarioActual()) : ''}`);
+      const nombre = (l.contacto || '').split(' ')[0] || '';
+      return (meta.calendly.mensaje || '{link}').replace('{nombre}', nombre).replace(/\s+,/, ',').replace('{ejecutiva}', meta.calendly.ejecutiva).replace('{link}', d.enlace);
+    };
+    $modal.innerHTML = `<div class="velo"><div class="dialogo" style="max-width:460px">
+      <h2>Mandar el link de Calendly</h2>
+      <p class="suave" style="margin:0 0 12px">El link lleva marcado el lead y el canal: si reserva desde ahí, la reunión queda a tu nombre y por ese canal${meta.calendly.horaDeCalendly ? ' (se detecta sola)' : ' (se detecta cuando esté el token de Calendly; si no, regístrala tú)'}.</p>
+      <div class="acciones" style="margin:0;flex-wrap:wrap">
+        <button class="btn primario" data-link="whatsapp" ${l.telefono ? '' : 'disabled'}>💬 Por WhatsApp</button>
+        <button class="btn" data-link="correo">✉️ Copiar para correo</button>
+        <button class="btn" data-link="linkedin">💼 Copiar para LinkedIn</button>
+        <button class="btn" data-cerrar>Cerrar</button>
+      </div><div id="link-msg" class="suave" style="margin-top:10px;font-size:12px;word-break:break-all"></div></div></div>`;
+    $modal.querySelector('[data-cerrar]').addEventListener('click', () => { $modal.innerHTML = ''; });
+    $modal.querySelectorAll('[data-link]').forEach(b => b.addEventListener('click', async () => {
+      const canal = b.dataset.link;
+      try {
+        const texto = await armar(canal);
+        if (canal === 'whatsapp') {
+          window.open(`${waLink(l.telefono)}?text=${encodeURIComponent(texto)}`, '_blank', 'noopener');
+          const r = await api(`leads/${l.id}/toques`, { method: 'POST', body: { canal: 'whatsapp', nota: 'Envió el link de Calendly' } });
+          $modal.innerHTML = '';
+          avisar('WhatsApp con el link registrado.');
+          if (despues) despues(r);
+        } else {
+          try { await navigator.clipboard.writeText(texto); document.getElementById('link-msg').textContent = 'Copiado: ' + texto; }
+          catch (_) { document.getElementById('link-msg').textContent = texto; }
+        }
+      } catch (e) { document.getElementById('link-msg').innerHTML = pintarError(e); }
+    }));
+  }
+
   function abrirResultado(l, { callUuid = null, obligatorio = false, soloDescarte = false, compromisoId = null, alTerminar = null, respuesta = false } = {}) {
     const $modal = document.getElementById('modal');
     const resultados = soloDescarte ? meta.resultados.filter(r => r.id === 'descartado')
@@ -1057,10 +1139,14 @@
           ${camposReintento()}
         </div>
         <div id="campos-reunion" hidden>
-          <label>Fecha y hora de la reunión</label>
-          <input type="datetime-local" name="reunion_at" value="${fechaLocal(enUnaHora)}" />
+          ${meta.calendly ? `<div class="calendly-aviso">📅 Llena la ficha y al guardar se abre el <b>Calendly de ${esc(meta.calendly.ejecutiva)}</b>. La reunión queda registrada solo cuando Calendly confirme la reserva.
+            ${meta.calendly.permitirManual ? `<label class="check"><input type="checkbox" name="manual" value="1"> Ya quedó agendada por fuera de Calendly (pongo la fecha a mano)</label>` : ''}</div>` : ''}
+          <div id="fecha-manual" ${meta.calendly ? 'hidden' : ''}>
+            <label>Fecha y hora de la reunión</label>
+            <input type="datetime-local" name="reunion_at" value="${fechaLocal(enUnaHora)}" />
+          </div>
           <div class="dos">
-            <div><label>Ejecutiva que atiende</label><input name="ejecutiva" placeholder="Luisa" value="${esc((meta.usuarios || []).find(u => u.rol === 'ejecutiva') ? (meta.usuarios || []).find(u => u.rol === 'ejecutiva').nombre : '')}" /></div>
+            <div><label>Ejecutiva que atiende</label><input name="ejecutiva" placeholder="Luisa" value="${esc(meta.calendly ? meta.calendly.ejecutiva : (meta.usuarios || []).find(u => u.rol === 'ejecutiva') ? (meta.usuarios || []).find(u => u.rol === 'ejecutiva').nombre : '')}" /></div>
             <div><label>Línea de negocio</label><select name="linea_negocio"><option value="">—</option><option>Headhunting</option><option>EOR</option><option>SaaS</option></select></div>
           </div>
           <label>Cargos que necesita</label><input name="ficha_cargos" placeholder="Ej. 2 devs backend senior, 1 QA" />
@@ -1091,10 +1177,14 @@
       const v = ($frm.querySelector('input[name=resultado]:checked') || {}).value;
       document.getElementById('campos-descarte').hidden = v !== 'descartado';
       document.getElementById('campos-reunion').hidden = v !== 'reunion_agendada';
+      const $manual = $frm.querySelector('input[name=manual]');
+      $frm.querySelector('button[type=submit]').textContent = v === 'reunion_agendada' && meta.calendly && !($manual && $manual.checked) ? 'Guardar y abrir Calendly' : 'Guardar';
     };
     $frm.querySelectorAll('input[name=resultado]').forEach(r => r.addEventListener('change', mostrar));
     mostrar();
     enlazarReintento($frm);
+    const $manualCal = $frm.querySelector('input[name=manual]');
+    if ($manualCal) $manualCal.addEventListener('change', () => { document.getElementById('fecha-manual').hidden = !$manualCal.checked; mostrar(); });
     const $cancelar = document.getElementById('cancelar');
     if ($cancelar) $cancelar.addEventListener('click', () => { $modal.innerHTML = ''; });
     $frm.addEventListener('submit', async e => {
@@ -1120,6 +1210,13 @@
             actitud: f.get('actitud'), urgencia: f.get('urgencia'),
           };
         }
+      }
+      // Reunión con Calendly: no se registra hasta que Calendly confirme la reserva.
+      if (!soloDescarte && resultado === 'reunion_agendada' && meta.calendly && !f.get('manual')) {
+        const reserva = await reservarEnCalendly(l, body.canal).catch(err => { document.getElementById('frm-error').innerHTML = pintarError(err); return null; });
+        if (!reserva) return;             // cerró sin agendar: nada queda registrado
+        body.detalle.calendly = { event_uri: reserva.event_uri, invitee_uri: reserva.invitee_uri };
+        body.detalle.reunion_at = reserva.reunion_at || null;
       }
       $frm.querySelector('button[type=submit]').disabled = true;
       try {

@@ -24,6 +24,7 @@ puntuadas a mano (fase 6).
 | `VOX_NODE` | Nodo de la cuenta (1–13); sin él el SDK no conecta | Dashboard de Voximplant → "Credentials for working with API, SDK, SIP" |
 | `DEEPGRAM_API_KEY` | Transcripción de las llamadas con conversación | console.deepgram.com → API Keys |
 | `ANTHROPIC_API_KEY` | Evaluación de las llamadas con la rúbrica (ya existe para el Sandler) | Render |
+| `CALENDLY_TOKEN` | Opcional: hora de la reunión desde Calendly, reservas hechas desde el link y cancelaciones | Calendly de Luisa → Integraciones → API y webhooks → Personal access token |
 | `GOOGLE_CALENDAR_KEY_FILE` | Ruta al JSON de la cuenta de servicio (Secret File de Render: `/etc/secrets/google-calendar-key.json`) | Google Cloud → cuenta de servicio → clave JSON; delegación de dominio en el Admin de Workspace |
 
 Sin las `VOX_*` todo funciona menos el botón **Llamar**, que aparece apagado con el motivo. Angie puede registrar
@@ -179,6 +180,30 @@ por ese canal de una vez. La secuencia del lead no se consume (el compromiso es 
 está con la ejecutiva o el compromiso no tiene lead, *Hecha* solo cierra la tarea. Antes esto no contaba, por eso
 las llamadas de seguimiento no aparecían en los indicadores.
 
+## Agendar en el Calendly de la ejecutiva
+Con `CALENDLY.url` (hoy `https://calendly.com/luisa-ztw/45min`), el resultado **Reunión agendada** funciona así:
+1. La SDR llena la ficha de la reunión (cargos, costo, herramientas, actitud, urgencia, nota) y da **Guardar y
+   abrir Calendly**.
+2. Se abre el Calendly de Luisa dentro de la app, con el nombre y el correo del contacto ya puestos y el link
+   marcado con el lead, el canal y la SDR (`utm_content=lead-<id>`, `utm_medium`, `utm_term`).
+3. La reunión **solo se registra cuando Calendly confirma la reserva** (el aviso `calendly.event_scheduled`
+   del embebido). Entrar y hacer clic no cuenta; *Cerrar sin agendar* no deja nada registrado.
+4. Sin token, la app pregunta el día y la hora que quedó; con `CALENDLY_TOKEN` la toma de Calendly.
+
+Si la reunión se cuadró por otro lado, *Ya quedó agendada por fuera de Calendly* deja poner la fecha a mano
+(`CALENDLY.permitir_manual`). En la ficha, **📅 Link de Calendly** manda el link marcado por WhatsApp (abre el
+chat con el mensaje `CALENDLY.mensaje` y registra el toque) o lo copia para correo o LinkedIn.
+
+**Con `CALENDLY_TOKEN`** (token personal de la cuenta de Calendly de Luisa: Calendly → Integraciones → API y
+webhooks → Personal access tokens; en Render como variable de entorno), cada `CALENDLY.sincronizar_min`:
+- Las reservas que el prospecto hace **solo, desde el link** que le mandaron quedan como *Reunión agendada* del
+  lead (por `utm_content`, o por el correo si el link no venía marcado), con el canal del link y a nombre de la
+  SDR que lo mandó. Crean el deal en el Sandler y el compromiso de Luisa igual que desde la app.
+- Si reagenda, se mueve la hora. Si **cancela**, el lead vuelve a la SDR en *Conversación* con una llamada al día
+  siguiente (`CALENDLY.tras_cancelacion`), y en la comisión aparece como *Cancelada*.
+- Las reservas que no son de ningún lead quedan en `sdr.calendly_eventos` con estado `sin_lead`
+  (`GET /api/calendly/estado`). `POST /api/calendly/sincronizar` fuerza una pasada.
+
 ## Comisión por reuniones calificadas
 Arriba de la cola, un panel verde con la **comisión del mes**: plata acumulada, cuántas calificadas lleva, la
 escalera de tramos (se llena con las calificadas y, rayado, con las pendientes) y cuánto le falta para el
@@ -189,10 +214,10 @@ reuniones con su estado. Flechas para ver meses anteriores.
 De dónde sale: cada reunión que la SDR agendó (toque *Reunión agendada*) y el deal que se creó en el Sandler
 Coach. **Calificada** = la ejecutiva la tomó en el Sandler y quedó con calificación en
 `COMISION.califica_con` (`Completa`). *Por calificar* = ya pasó y el deal no tiene calificación todavía.
-*No calificó* = quedó Parcial o No califica. *No asistió* = la ejecutiva marcó no-show. Si la ejecutiva crea un
+*No calificó* = quedó Parcial o No califica. *No asistió* = la ejecutiva marcó no-show. *Cancelada* = la canceló en Calendly. Si la ejecutiva crea un
 deal nuevo en vez de **Tomar este deal**, no queda enlazado y no cuenta: siempre tomar el del SDR.
 
-Huecos en `COMISION` (`config.js`): `tramos` (desde / valor: 0 → 23, 20 → 30, 30 → 40), `modo` (`escalon`:
+Huecos en `COMISION` (`config.js`): `tramos` (desde / valor: 0 → 23, 15 → 30, 30 → 40), `modo` (`escalon`:
 al llegar a un tramo todas las del mes pasan a ese valor; `tramos`: cada una a su tramo), `califica_con`,
 `mes_por` (`reunion` o `agendada`). Una SDR ve lo suyo; la ejecutiva y el admin ven al equipo SDR.
 ```

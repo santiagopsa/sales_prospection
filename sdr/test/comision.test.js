@@ -8,15 +8,16 @@ const url = process.env.SDR_TEST_DATABASE_URL;
 
 test('comisión: escalón (todo el mes al tramo alcanzado) y por tramos', () => {
   const tramos = { ...base, COMISION: { ...base.COMISION, modo: 'tramos' } };
-  const casos = [[0, 0, 0], [7, 161, 161], [19, 437, 437], [20, 600, 467], [25, 750, 617], [30, 1200, 777], [35, 1400, 977]];
+  // 0-14 a 23, 15-29 a 30, 30+ a 40
+  const casos = [[0, 0, 0], [7, 161, 161], [14, 322, 322], [15, 450, 352], [20, 600, 502], [29, 870, 772], [30, 1200, 812], [35, 1400, 1012]];
   for (const [n, esc, tr] of casos) {
     assert.strictEqual(C.calcular(base, n).total, esc, `escalón con ${n}`);
     assert.strictEqual(C.calcular(tramos, n).total, tr, `tramos con ${n}`);
   }
-  const k = C.calcular(base, 19);
+  const k = C.calcular(base, 14);
   assert.strictEqual(k.tramo.valor, 23);
-  assert.deepStrictEqual([k.siguiente.valor, k.siguiente.faltan, k.siguiente.total_al_llegar], [30, 1, 600]);
-  assert.strictEqual(k.proxima_vale, 163);               // la 20.ª sube las 19 anteriores
+  assert.deepStrictEqual([k.siguiente.valor, k.siguiente.faltan, k.siguiente.total_al_llegar], [30, 1, 450]);
+  assert.strictEqual(k.proxima_vale, 128);               // la 15.ª sube las 14 anteriores
   assert.strictEqual(C.calcular(base, 30).siguiente, null);
   assert.throws(() => C.calcular({ ...base, COMISION: { tramos: [{ desde: 5, valor: 1 }] } }, 1), /desde 0/);
   assert.deepStrictEqual(C.limitesMes('2026-12'), { mes: '2026-12', inicio: '2026-12-01', siguiente: '2027-01-01', anterior: '2026-11', posterior: '2027-01' });
@@ -59,7 +60,7 @@ test('comisión del mes contra la base', { skip: !url && 'sin SDR_TEST_DATABASE_
   assert.strictEqual(estado('Pasada sin calificar'), 'por_calificar');
   assert.strictEqual(estado('Futura'), 'programada');
   assert.strictEqual(estado('No vino'), 'no_asistio');           // sin fecha: cuenta por el día en que se agendó
-  assert.deepStrictEqual(r.conteo, { reuniones: 6, calificadas: 2, no_califica: 1, no_asistio: 1, programadas: 1, por_calificar: 1 });
+  assert.deepStrictEqual(r.conteo, { reuniones: 6, calificadas: 2, no_califica: 1, no_asistio: 1, canceladas: 0, programadas: 1, por_calificar: 1 });
   assert.strictEqual(r.comision.total, 46);
   assert.strictEqual(r.potencial.total, 92);                    // + la futura y la pendiente
   // Con Parcial también: 3 calificadas.

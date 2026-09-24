@@ -42,6 +42,7 @@ const RESULTADO_LABEL = {
   // decisiones sobre el lead (sacar de la cola / volver)
   pausado: 'En pausa',
   reactivado: 'Reactivado',
+  reunion_cancelada: 'Canceló la reunión',
   editado: 'Datos editados',
 };
 

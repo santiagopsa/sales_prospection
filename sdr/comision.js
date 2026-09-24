@@ -54,6 +54,7 @@ function limitesMes(mes) {
 //   calificada   la ejecutiva la calificó con un valor de COMISION.califica_con en el Sandler
 //   no_califica  calificada con otro valor (Parcial, No califica…)
 //   no_asistio   la ejecutiva marcó no-show
+//   cancelada    el prospecto la canceló (Calendly)
 //   programada   la reunión todavía no ha pasado
 //   por_calificar ya pasó y no hay calificación en el Sandler
 async function resumenMes(db, config, { mes, usuario = null, ahora = new Date() } = {}) {
@@ -69,7 +70,8 @@ async function resumenMes(db, config, { mes, usuario = null, ahora = new Date() 
     `SELECT l.id AS lead_id, l.empresa, l.contacto, l.etapa, l.deal_id,
             (EXTRACT(EPOCH FROM l.reunion_at) * 1000)::float8 AS reunion_ms,
             (EXTRACT(EPOCH FROM a.created_at) * 1000)::float8 AS agendada_ms, a.usuario AS agendo,
-            EXISTS (SELECT 1 FROM ${T.touches} x WHERE x.lead_id = l.id AND x.resultado = 'no_show' AND x.created_at > a.created_at) AS no_show
+            EXISTS (SELECT 1 FROM ${T.touches} x WHERE x.lead_id = l.id AND x.resultado = 'no_show' AND x.created_at >= a.created_at) AS no_show,
+            EXISTS (SELECT 1 FROM ${T.touches} x WHERE x.lead_id = l.id AND x.resultado = 'reunion_cancelada' AND x.created_at >= a.created_at) AS cancelada
      FROM ${T.leads} l
      JOIN LATERAL (
        SELECT usuario, created_at FROM ${T.touches}
@@ -98,6 +100,7 @@ async function resumenMes(db, config, { mes, usuario = null, ahora = new Date() 
     let estado;
     if (cal && califica.includes(cal.toLowerCase())) estado = 'calificada';
     else if (x.no_show) estado = 'no_asistio';
+    else if (x.cancelada) estado = 'cancelada';
     else if (cal) estado = 'no_califica';                        // la ejecutiva ya llenó el demo y no llegó
     else if (x.reunion_ms && x.reunion_ms > ahora.getTime()) estado = 'programada';
     else estado = 'por_calificar';
@@ -110,7 +113,7 @@ async function resumenMes(db, config, { mes, usuario = null, ahora = new Date() 
     usuario: esSdr ? usuario : null,
     reglas: { modo: cfg.modo === 'tramos' ? 'tramos' : 'escalon', califica_con: cfg.califica_con || ['Completa'], mes_por: porAgendada ? 'agendada' : 'reunion', moneda: cfg.moneda || 'US$' },
     conteo: {
-      reuniones: reuniones.length, calificadas: n, no_califica: cuenta('no_califica'), no_asistio: cuenta('no_asistio'),
+      reuniones: reuniones.length, calificadas: n, no_califica: cuenta('no_califica'), no_asistio: cuenta('no_asistio'), canceladas: cuenta('cancelada'),
       programadas: cuenta('programada'), por_calificar: cuenta('por_calificar'),
     },
     comision: calcular(config, n),
