@@ -388,6 +388,7 @@ async function actividadDelDia(db, fecha, config = {}, usuario = null) {
   const r = await db.query(
     `SELECT COUNT(*) FILTER (WHERE canal = 'llamada')::int AS marcaciones,
             COUNT(*) FILTER (WHERE resultado IN (SELECT jsonb_array_elements_text($3::jsonb)))::int AS conversaciones,
+            COUNT(*) FILTER (WHERE resultado = 'reunion_agendada')::int AS reuniones,
             COUNT(*)::int AS toques
      FROM ${T.touches} WHERE created_at >= $1 AND created_at < $2 ${filtroUsuario(config, 4, usuario)}`,
     [desde, hasta, JSON.stringify(D.RESULTADOS_CON_CONVERSACION), paramUsuario(config, usuario)]);

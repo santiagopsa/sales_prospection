@@ -52,6 +52,24 @@ test('ritmo: bloques, racha y semana', { skip: !url && 'sin SDR_TEST_DATABASE_UR
     assert.strictEqual((await ritmo.racha(db, { ...config, RACHA_CUMPLE_CON: 'cualquiera' }, martes930)).dias, 4);
   });
 
+  await t.test('meta cumplida por reuniones: META_REUNIONES_DIA agendadas cumplen el día aunque falten marcaciones', async () => {
+    // Viernes 18 solo tuvo 1 llamada (no cumple por marcaciones). Con 2 reuniones agendadas ese día, cumple.
+    await toque('2026-09-18', 10, 'llamada', 'reunion_agendada');
+    await toque('2026-09-18', 11, 'llamada', 'reunion_agendada');
+    const cfg = { ...config, META_REUNIONES_DIA: 2 };
+    assert.strictEqual(ritmo.motivoCumplido(cfg, { marcaciones: 1, conversaciones: 0, reuniones: 2 }), 'reuniones');
+    assert.strictEqual(ritmo.motivoCumplido(cfg, { marcaciones: 3, reuniones: 0 }), 'marcaciones');
+    assert.strictEqual(ritmo.motivoCumplido(cfg, { marcaciones: 1, reuniones: 1 }), null);
+    assert.strictEqual(ritmo.motivoCumplido({ ...cfg, META_REUNIONES_DIA: null }, { marcaciones: 1, reuniones: 5 }), null);
+    // La racha del martes ahora pasa por el viernes: jue, vie, lun, mar = 4
+    assert.strictEqual((await ritmo.racha(db, cfg, martes930)).dias, 4);
+    const s = await ritmo.resumenSemana(db, cfg, { fecha: '2026-09-18', ahora: martes930 });
+    const vie = s.dias.find(d => d.fecha === '2026-09-18');
+    assert.strictEqual(vie.cumplida, true); assert.strictEqual(vie.cumplida_por, 'reuniones'); assert.strictEqual(vie.reuniones, 2);
+    assert.strictEqual(s.metas.reunionesDia, 2);
+    await db.query(`DELETE FROM sdr.touches WHERE resultado = 'reunion_agendada' AND created_at >= $1 AND created_at < $2`, [tiempo.instante('2026-09-18', 0).toISOString(), tiempo.instante('2026-09-19', 0).toISOString()]);
+  });
+
   await t.test('historial de un día: toques con lead, resumen y compromisos hechos sin toque', async () => {
     // Un compromiso marcado hecho el 22 sin toque (como pasaba antes) y uno que sí dejó toque.
     const c1 = (await db.query(`INSERT INTO sdr.tasks (lead_id, paso, canal, due_at, tipo, titulo, estado, done_at, usuario) VALUES ($1, 1, 'llamada', $2, 'seguimiento', 'Llamar a Ana', 'hecha', $2, 'Angie') RETURNING id`, [lead.id, tiempo.instante('2026-09-22', 10).toISOString()])).rows[0];

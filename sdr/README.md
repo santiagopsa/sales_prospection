@@ -179,6 +179,13 @@ por ese canal de una vez. La secuencia del lead no se consume (el compromiso es 
 está con la ejecutiva o el compromiso no tiene lead, *Hecha* solo cierra la tarea. Antes esto no contaba, por eso
 las llamadas de seguimiento no aparecían en los indicadores.
 
+## Meta del día: marcaciones o reuniones
+El día queda **cumplido** al llegar a `META_MARCACIONES_DIA` (o a conversaciones / cualquiera, según
+`RACHA_CUMPLE_CON`), **o** al agendar `META_REUNIONES_DIA` reuniones (3) ese día, aunque falten marcaciones:
+lo que importa al final son las reuniones. En la Semana el chip dice por qué ("cumplida · 3 reuniones"), en la
+cola el panel *Hoy* muestra las reuniones del día contra esa meta, y la racha cuenta esos días igual.
+`META_REUNIONES_DIA: null` apaga el criterio.
+
 ## Historial por día
 **Historial** en la barra (también *Ver lo de hoy →* en la cola y el nombre de cada día en la tabla de la Semana)
 abre un día: resumen (marcaciones, conversaciones, reuniones, WhatsApp/correo/LinkedIn, leads tocados) y cada

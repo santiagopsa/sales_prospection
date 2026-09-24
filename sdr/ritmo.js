@@ -30,10 +30,17 @@ async function actividadPorDia(db, desde, hasta, config = {}, usuario = null) {
   return dias;
 }
 
-function diaCumplido(config, d) {
-  const m = d.marcaciones >= config.META_MARCACIONES_DIA, c = d.conversaciones >= config.META_CONVERSACIONES_DIA;
-  return config.RACHA_CUMPLE_CON === 'conversaciones' ? c : config.RACHA_CUMPLE_CON === 'cualquiera' ? (m || c) : m;
+// Por qué cumplió el día: 'reuniones' (META_REUNIONES_DIA agendadas, pesa más que todo lo demás),
+// 'marcaciones' o 'conversaciones' según RACHA_CUMPLE_CON; null si no cumplió.
+function motivoCumplido(config, d = {}) {
+  const r = config.META_REUNIONES_DIA != null && (d.reuniones || 0) >= config.META_REUNIONES_DIA;
+  if (r) return 'reuniones';
+  const m = (d.marcaciones || 0) >= config.META_MARCACIONES_DIA, c = (d.conversaciones || 0) >= config.META_CONVERSACIONES_DIA;
+  if (config.RACHA_CUMPLE_CON === 'conversaciones') return c ? 'conversaciones' : null;
+  if (config.RACHA_CUMPLE_CON === 'cualquiera') return m ? 'marcaciones' : c ? 'conversaciones' : null;
+  return m ? 'marcaciones' : null;
 }
+function diaCumplido(config, d) { return motivoCumplido(config, d) !== null; }
 
 // Días hábiles seguidos cumpliendo la meta, contando hacia atrás desde ayer (hoy suma si ya cumplió).
 async function racha(db, config, ahora = new Date(), usuario = null) {
@@ -116,11 +123,12 @@ async function resumenSemana(db, config, { fecha, usuario = null, ahora = new Da
   const totales = { marcaciones: suma('marcaciones'), conversaciones: suma('conversaciones'), reuniones: suma('reuniones'), whatsapp: suma('whatsapp'), correo: suma('correo'), linkedin: suma('linkedin'), toques: suma('toques') };
   return {
     lunes, domingo, hoy,
-    dias: dias.map(d => ({ ...d, habil: !tiempo.esFinDeSemana(d.fecha), cumplida: diaCumplido(config, d) })),
+    dias: dias.map(d => ({ ...d, habil: !tiempo.esFinDeSemana(d.fecha), cumplida: diaCumplido(config, d), cumplida_por: motivoCumplido(config, d) })),
     totales,
     metas: {
       marcaciones: config.META_MARCACIONES_DIA * Math.max(habiles.length, 1),
       conversaciones: config.META_CONVERSACIONES_DIA * Math.max(habiles.length, 1),
+      reunionesDia: config.META_REUNIONES_DIA,
       diasHabilesTranscurridos: habiles.length,
       diasCumplidos: habiles.filter(d => diaCumplido(config, d)).length,
     },
@@ -176,4 +184,4 @@ async function historialDia(db, config, { fecha, usuario = null } = {}) {
   return { fecha, usuario, resumen, toques, compromisosHechos: k.rows, ayer: tiempo.sumarDias(fecha, -1), manana: tiempo.sumarDias(fecha, 1), hoy: tiempo.fechaBogota(new Date()), ayerDeHoy: tiempo.sumarDias(tiempo.fechaBogota(new Date()), -1) };
 }
 
-module.exports = { actividadPorDia, racha, bloqueActual, ratios, resumenSemana, semanaDe, diaCumplido, historialDia };
+module.exports = { actividadPorDia, racha, bloqueActual, ratios, resumenSemana, semanaDe, diaCumplido, motivoCumplido, historialDia };

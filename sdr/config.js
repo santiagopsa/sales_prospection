@@ -64,6 +64,10 @@ module.exports = {
   // Conversación = resultado "conversación" o "reunión agendada".
   META_MARCACIONES_DIA: 60,
   META_CONVERSACIONES_DIA: 8,
+  // Qué mueve: un día con esta cantidad de reuniones agendadas (o más) queda como "meta cumplida"
+  // aunque no haya llegado a las marcaciones: lo que importa al final son las reuniones. Se ve en
+  // la Semana ("cumplida · 3 reuniones") y en la racha. null = las reuniones no cumplen por sí solas.
+  META_REUNIONES_DIA: 3,
 
   // ---------------------------------------------------------------------------
   // Qué pasa después de cada resultado (motor de etapas)
@@ -312,7 +316,8 @@ module.exports = {
   ],
 
   // Qué mueve: qué cuenta como "día cumplido" para la racha: llegar a la meta de marcaciones,
-  // a la de conversaciones, o a cualquiera de las dos. Solo cuentan días hábiles.
+  // a la de conversaciones, o a cualquiera de las dos. Solo cuentan días hábiles. Aparte de esto,
+  // META_REUNIONES_DIA reuniones agendadas en el día siempre cumplen.
   RACHA_CUMPLE_CON: 'marcaciones',   // 'marcaciones' | 'conversaciones' | 'cualquiera'
 
   // ---------------------------------------------------------------------------

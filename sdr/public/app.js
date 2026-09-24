@@ -128,13 +128,14 @@
             <div class="ritmo-titulo"><b>${esc(b.nombre)}</b> <span class="suave">${b.inicio}–${b.fin} · quedan ${b.minutosRestantes} min</span></div>
             <div class="ritmo-num"><b>${b.marcaciones}</b><span class="suave"> / ${b.metaMarcaciones} marcaciones en este bloque</span></div>
             ${barra(b.marcaciones, b.metaMarcaciones)}
-            <div class="suave" style="font-size:12px;margin-top:6px">Hoy: ${i.marcaciones} / ${i.metaMarcaciones} marcaciones · ${i.conversaciones} / ${i.metaConversaciones} conversaciones</div>`
+            <div class="suave" style="font-size:12px;margin-top:6px">Hoy: ${i.marcaciones} / ${i.metaMarcaciones} marcaciones · ${i.conversaciones} / ${i.metaConversaciones} conversaciones${i.metaReuniones != null ? ` · ${i.reuniones || 0} / ${i.metaReuniones} reuniones` : ''}</div>`
           : `
             <div class="ritmo-titulo"><b>Hoy</b> <span class="suave">${c.bloque && c.bloque.siguiente ? `próximo bloque: ${esc(c.bloque.siguiente.nombre)} a las ${c.bloque.siguiente.inicio}` : 'fuera de bloque de prospección'}</span></div>
             <div class="ritmo-doble">
               <div><div class="ritmo-num"><b>${i.marcaciones}</b><span class="suave"> / ${i.metaMarcaciones} marcaciones</span></div>${barra(i.marcaciones, i.metaMarcaciones)}</div>
               <div><div class="ritmo-num"><b>${i.conversaciones}</b><span class="suave"> / ${i.metaConversaciones} conversaciones</span></div>${barra(i.conversaciones, i.metaConversaciones)}</div>
-            </div>`}
+            </div>
+            ${i.metaReuniones != null ? `<div class="suave" style="font-size:12px;margin-top:6px"><b style="color:var(--texto)">${i.reuniones || 0}</b> / ${i.metaReuniones} reuniones agendadas hoy · con ${i.metaReuniones} el día queda cumplido así no llegues a las marcaciones</div>` : ''}`}
         </div>
         <div class="ritmo-lado">
           <div class="racha ${c.racha.hoyCumple ? 'hoy' : ''}"><b>${c.racha.dias}</b><span>${c.racha.dias === 1 ? 'día seguido' : 'días seguidos'} cumpliendo la meta${c.racha.hoyCumple ? ' · hoy ✓' : ''}</span></div>
@@ -1100,14 +1101,14 @@
       <div class="kpis">
         <div class="kpi"><b>${w.totales.marcaciones}<span class="suave" style="font-size:14px"> / ${w.metas.marcaciones}</span></b><span>Marcaciones</span><div class="meta"><i style="width:${pct(w.totales.marcaciones, w.metas.marcaciones)}%"></i></div></div>
         <div class="kpi"><b>${w.totales.conversaciones}<span class="suave" style="font-size:14px"> / ${w.metas.conversaciones}</span></b><span>Conversaciones</span><div class="meta"><i style="width:${pct(w.totales.conversaciones, w.metas.conversaciones)}%"></i></div></div>
-        <div class="kpi"><b>${w.totales.reuniones}</b><span>Reuniones agendadas</span></div>
+        <div class="kpi"><b>${w.totales.reuniones}</b><span>Reuniones agendadas</span>${w.metas.reunionesDia != null ? `<small>${w.metas.reunionesDia} en un día = meta cumplida</small>` : ''}</div>
         <div class="kpi"><b>${w.metas.diasCumplidos}<span class="suave" style="font-size:14px"> / ${w.metas.diasHabilesTranscurridos}</span></b><span>Días con meta cumplida</span></div>
       </div>
       <div class="panel tabla-env">
         <table><thead><tr><th>Día</th><th class="num">Marcaciones</th><th class="num">Conversaciones</th><th class="num">Reuniones</th><th class="num">WhatsApp</th><th class="num">Correo</th><th class="num">LinkedIn</th><th>Meta</th></tr></thead>
         <tbody>${w.dias.map(d => `<tr class="${d.fecha === w.hoy ? 'hoy' : ''} ${d.habil ? '' : 'suave'}">
           <td><a href="#/historial/${d.fecha}" title="Ver qué se hizo ese día">${dia(d.fecha)}</a></td><td class="num">${d.marcaciones}</td><td class="num">${d.conversaciones}</td><td class="num">${d.reuniones}</td><td class="num">${d.whatsapp}</td><td class="num">${d.correo}</td><td class="num">${d.linkedin}</td>
-          <td>${!d.habil ? '' : d.cumplida ? '<span class="chip whatsapp">cumplida</span>' : (d.fecha < w.hoy ? '<span class="chip vencida">no</span>' : (d.fecha === w.hoy ? '<span class="chip hoy">en curso</span>' : ''))}</td>
+          <td>${!d.habil ? '' : d.cumplida ? `<span class="chip whatsapp" title="${d.cumplida_por === 'reuniones' ? `${d.reuniones} reuniones agendadas (meta: ${w.metas.reunionesDia})` : 'por ' + d.cumplida_por}">cumplida${d.cumplida_por === 'reuniones' ? ` · ${d.reuniones} reuniones` : ''}</span>` : (d.fecha < w.hoy ? '<span class="chip vencida">no</span>' : (d.fecha === w.hoy ? '<span class="chip hoy">en curso</span>' : ''))}</td>
         </tr>`).join('')}</tbody></table>
       </div>
       ${pintarMejora(w.mejora)}

@@ -80,9 +80,11 @@ async function consultarCola(db, config, { ahora = new Date(), usuario = null } 
       huerfanos,
       marcaciones: act.marcaciones,
       conversaciones: act.conversaciones,
+      reuniones: act.reuniones,
       toques: act.toques,
       metaMarcaciones: config.META_MARCACIONES_DIA,
       metaConversaciones: config.META_CONVERSACIONES_DIA,
+      metaReuniones: config.META_REUNIONES_DIA,
     },
   };
 }
