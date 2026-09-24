@@ -47,6 +47,9 @@ const RESULTADO_LABEL = {
 
 // Solo estos resultados pasan por el pipeline de audio (fase 4).
 const RESULTADOS_CON_CONVERSACION = ['conversacion', 'reunion_agendada'];
+// Cuando el prospecto RESPONDE por WhatsApp, correo o LinkedIn, ese toque puede llevar uno de estos
+// resultados (como una llamada). Sin resultado, el toque es el envío normal (resultado = canal).
+const RESPUESTAS_OTRO_CANAL = ['conversacion', 'reunion_agendada', 'descartado'];
 
 // Razones para sacar un lead de la cola. Con una razón "no ahora" (sin presupuesto, ya tiene
 // proveedor…) el lead se puede PAUSAR en vez de descartar: vuelve solo a la cola meses después
@@ -69,5 +72,5 @@ const RAZON_LABEL = {
 
 module.exports = {
   ETAPAS, ETAPA_LABEL, ETAPAS_DE_ANGIE, CANALES, CANAL_LABEL,
-  RESULTADOS_LLAMADA, RESULTADO_LABEL, RESULTADOS_CON_CONVERSACION, RAZONES_DESCARTE, RAZONES_DEFINITIVAS, RAZON_LABEL,
+  RESULTADOS_LLAMADA, RESULTADO_LABEL, RESULTADOS_CON_CONVERSACION, RESPUESTAS_OTRO_CANAL, RAZONES_DESCARTE, RAZONES_DEFINITIVAS, RAZON_LABEL,
 };

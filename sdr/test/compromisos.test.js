@@ -167,6 +167,32 @@ test('compromisos contra la base', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }
     assert.ok((await C.leer(db, x.id)).gcal_event_id);
   });
 
+  await t.test('hecha con toque: el seguimiento cumplido cuenta como llamada y no consume la secuencia', async () => {
+    await db.query(`INSERT INTO sdr.leads (empresa, contacto, telefono) VALUES ('Gama', 'Gus', '+573003333333')`);
+    const gama = await id('Gama');
+    const ritmo = require('../ritmo');
+    // Secuencia pendiente del lead (como si viniera de una carga) y un seguimiento pactado con hora.
+    await db.query(`INSERT INTO sdr.tasks (lead_id, paso, canal, due_at, tipo) VALUES ($1, 1, 'llamada', $2, 'secuencia')`, [gama, lunes.toISOString()]);
+    const seg = await C.crear(db, base, {}, { leadId: gama, tipo: 'seguimiento', titulo: 'Volver a llamar', fecha: '2026-09-21', hora: '10:00', usuario: 'Angie' });
+    const antes = (await ritmo.actividadPorDia(db, '2026-09-21', '2026-09-21', base, 'Angie'))[0];
+    const r = await registrarToque(db, base, { leadId: gama, canal: 'llamada', resultado: 'no_contesto', compromisoId: seg.id, usuario: 'Angie', ahora: lunes, env: {} });
+    const despues = (await ritmo.actividadPorDia(db, '2026-09-21', '2026-09-21', base, 'Angie'))[0];
+    assert.strictEqual(despues.marcaciones, antes.marcaciones + 1);
+    assert.strictEqual(r.compromiso_hecho, seg.id);
+    const tareas = (await db.query(`SELECT id, tipo, estado FROM sdr.tasks WHERE lead_id=$1 ORDER BY id`, [gama])).rows;
+    assert.strictEqual(tareas.find(x => x.id === seg.id).estado, 'hecha');
+    assert.strictEqual(tareas.find(x => x.tipo === 'secuencia').estado, 'pendiente'); // la secuencia sigue
+    assert.ok(r.proxima && r.proxima.canal === 'llamada');
+    const toque = (await db.query(`SELECT task_id, canal, call_id FROM sdr.touches WHERE lead_id=$1 ORDER BY id DESC LIMIT 1`, [gama])).rows[0];
+    assert.strictEqual(toque.task_id, seg.id); assert.ok(toque.call_id);
+    // Por WhatsApp: toque de un clic que cierra el compromiso. Repetirlo ya no está pendiente.
+    const wa = await C.crear(db, base, {}, { leadId: gama, tipo: 'enviar', canal: 'whatsapp', titulo: 'Mandar brochure', fecha: '2026-09-21', usuario: 'Angie' });
+    const w = await registrarToque(db, base, { leadId: gama, canal: 'whatsapp', compromisoId: wa.id, usuario: 'Angie', ahora: lunes, env: {} });
+    assert.strictEqual(w.compromiso_hecho, wa.id);
+    assert.strictEqual((await ritmo.actividadPorDia(db, '2026-09-21', '2026-09-21', base, 'Angie'))[0].whatsapp, despues.whatsapp + 1);
+    await assert.rejects(registrarToque(db, base, { leadId: gama, canal: 'whatsapp', compromisoId: wa.id, usuario: 'Angie', ahora: lunes, env: {} }), /ya no está pendiente/);
+  });
+
   await t.test('descartar omite también los compromisos del lead', async () => {
     const x = await C.crear(db, base, {}, { leadId: await id('ACME'), tipo: 'enviar', titulo: 'Propuesta', fecha: '2026-09-23', usuario: 'Angie' });
     await registrarEjecutiva(db, base, { leadId: await id('ACME'), accion: 'descartado', razon: 'no_interesa', reintentoMeses: 0, usuario: 'Angie', env: {} });

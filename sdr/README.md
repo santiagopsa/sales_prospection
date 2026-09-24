@@ -172,6 +172,24 @@ En la cola aparecen arriba, en **Compromisos de hoy**, por hora, con *Hecha*, *M
 desplegable con los próximos días. Cada compromiso tiene dueño (`USUARIOS`); solo ve los suyos quien esté elegido
 en la barra. Al descartar o pausar un lead se quitan también sus compromisos.
 
+**Hecha registra el toque.** Si el compromiso es de un lead que sigue en manos de Angie, *Hecha* no solo cierra la
+tarea: por **llamada** abre el mismo diálogo de resultado de cualquier llamada (cuenta en marcaciones y
+conversaciones, mueve la etapa, queda en el historial); por **WhatsApp / correo / LinkedIn** registra el toque
+por ese canal de una vez. La secuencia del lead no se consume (el compromiso es un extra pactado); si el lead ya
+está con la ejecutiva o el compromiso no tiene lead, *Hecha* solo cierra la tarea. Antes esto no contaba, por eso
+las llamadas de seguimiento no aparecían en los indicadores.
+
+## Buscador y respuestas por otros canales
+En la barra hay un buscador (atajo: tecla `/`): empresa, contacto, cargo, correo o teléfono, sin acentos ni
+mayúsculas ("exito" encuentra "Grupo Éxito"; "313 470" encuentra +57 313 470 5454, también en el segundo
+teléfono). Muestra etapa y último toque; *Enter* abre la primera ficha, flechas para moverse, *Esc* cierra.
+Es para cuando alguien escribe por WhatsApp o correo y hay que llegar a su ficha en dos segundos.
+
+En la ficha, **Me respondió** registra esa respuesta: se elige el canal (WhatsApp, correo, LinkedIn) y el
+resultado (**conversación**, **reunión agendada** o **descartado**), con nota. Cuenta como conversación y mueve
+la etapa igual que una llamada; los botones *WhatsApp enviado* / *Correo enviado* siguen siendo el envío normal.
+Los resultados permitidos para una respuesta están en `RESPUESTAS_OTRO_CANAL` (`dominio.js`).
+
 Con `GOOGLE_CALENDAR_KEY_FILE` y correo en `USUARIOS`, cada compromiso es un evento en el calendario del dueño
 (se crea, se mueve y se borra con la tarea; aviso `CALENDARIO_AVISO_MIN` minutos antes; duración por tipo en
 `CALENDARIO_DURACION_MIN`; tipos que se sincronizan en `CALENDARIO_TIPOS`). Los toques de secuencia no van al

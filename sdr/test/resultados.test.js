@@ -247,6 +247,36 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
     await assert.rejects(LN.quitar(db, m.id), /No está/);
   });
 
+  await t.test('buscador: sin acentos, por dígitos del teléfono, varias palabras, con último toque', async () => {
+    await db.query(`INSERT INTO sdr.leads (empresa, contacto, cargo, telefono, telefono_alt, email) VALUES
+      ('Éxito Digital S.A.S.', 'María Pérez', 'Gerente TH', '+573134705454', '+573001112233', 'maria@exitodigital.co'),
+      ('Bancolombia', 'Juan Rojas', 'CTO', '+573209998877', NULL, 'juan.rojas@bancolombia.com.co')`);
+    const ids = l => l.map(x => x.empresa);
+    assert.deepStrictEqual(ids(await L.buscarLeads(db, 'exito')), ['Éxito Digital S.A.S.']);
+    assert.deepStrictEqual(ids(await L.buscarLeads(db, 'MARIA perez')), ['Éxito Digital S.A.S.']);   // dos palabras, sin acentos
+    assert.deepStrictEqual(ids(await L.buscarLeads(db, '313 470 5454')), ['Éxito Digital S.A.S.']);  // teléfono con espacios
+    assert.deepStrictEqual(ids(await L.buscarLeads(db, '3001112233')), ['Éxito Digital S.A.S.']);    // el alterno
+    assert.deepStrictEqual(ids(await L.buscarLeads(db, 'rojas@banco')), ['Bancolombia']);
+    assert.deepStrictEqual(ids(await L.buscarLeads(db, 'cto')), ['Bancolombia']);
+    assert.deepStrictEqual(await L.buscarLeads(db, 'x'), []);           // muy corto
+    assert.deepStrictEqual(await L.buscarLeads(db, 'zzzz nada'), []);
+    const banco = (await L.buscarLeads(db, 'bancolombia'))[0];
+    assert.strictEqual(banco.ultimo_ms, null); assert.strictEqual(banco.etapa, 'nuevo');
+    // Respondió por WhatsApp: toque por ese canal con resultado de conversación → cuenta y mueve la etapa.
+    const r = await registrarToque(db, base, { leadId: banco.id, canal: 'whatsapp', resultado: 'conversacion', nota: 'me escribió pidiendo propuesta', usuario: 'Angie', ahora: lunes });
+    assert.strictEqual(r.etapa, 'conversacion');
+    const despues = (await L.buscarLeads(db, 'bancolombia'))[0];
+    assert.strictEqual(despues.ultimo_canal, 'whatsapp'); assert.strictEqual(despues.ultimo_resultado, 'conversacion');
+    const act = await require('../ritmo').actividadPorDia(db, '2026-09-21', '2026-09-21', base, 'Angie');
+    assert.ok(act[0].conversaciones >= 1 && act[0].whatsapp >= 1);
+    // Sin resultado (o con uno que no es de respuesta) sigue siendo el envío normal.
+    const env = await registrarToque(db, base, { leadId: banco.id, canal: 'correo', resultado: 'no_contesto', usuario: 'Angie', ahora: lunes });
+    assert.strictEqual((await db.query(`SELECT resultado FROM sdr.touches WHERE lead_id=$1 ORDER BY id DESC LIMIT 1`, [banco.id])).rows[0].resultado, 'correo');
+    assert.ok(env.toque_id);
+    // Que no ensucien los conteos de huérfanos de los tests que siguen.
+    for (const e of ['Éxito Digital S.A.S.', 'Bancolombia']) await registrarEjecutiva(db, base, { leadId: await id(e), accion: 'descartado', razon: 'otro', reintentoMeses: 0, usuario: 'Angie' });
+  });
+
   await t.test('lista negra por empresa y dominio: carga masiva, bloquea cargas y reactivación', async () => {
     const LN = require('../listanegra');
     assert.strictEqual(LN.normalizarEmpresa('Grupo Éxito S.A.S.'), 'grupo exito');

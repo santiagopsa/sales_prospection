@@ -25,7 +25,20 @@ h2 { font-size: 15px; margin: 0 0 10px; }
 .barra nav a { padding: 7px 12px; border-radius: 8px; color: var(--suave); font-weight: 600; }
 .barra nav a:hover { background: var(--panel-2); text-decoration: none; }
 .barra nav a.activo { background: #e6f9ff; color: var(--azul-osc); }
-.barra .usuario { margin-left: auto; font: inherit; font-weight: 600; font-size: 13px; padding: 6px 10px; border: 1px solid var(--linea); border-radius: 8px; background: var(--panel); color: var(--texto); }
+/* Buscador de la barra: escribe y aparecen las fichas; Enter abre la primera. */
+.buscador { position: relative; margin-left: auto; flex: 1 1 240px; max-width: 380px; }
+.buscador input[type=search] { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 7px 12px 7px 32px; border: 1px solid var(--linea); border-radius: 8px; background: var(--panel-2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23667' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 10px center; color: var(--texto); }
+.buscador input[type=search]:focus { outline: none; border-color: var(--azul-osc); background-color: var(--panel); }
+.buscar-resultados { position: absolute; top: calc(100% + 6px); left: 0; right: 0; min-width: 320px; background: var(--panel); border: 1px solid var(--linea); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12); max-height: 70vh; overflow: auto; z-index: 20; }
+.buscar-resultados[hidden] { display: none; }
+.buscar-resultados a.res { display: block; padding: 9px 12px; border-bottom: 1px solid var(--linea); color: var(--texto); }
+.buscar-resultados a.res:last-child { border-bottom: 0; }
+.buscar-resultados a.res:hover, .buscar-resultados a.res.activo { background: #e6f9ff; text-decoration: none; }
+.buscar-resultados a.res b { display: block; }
+.buscar-resultados a.res .suave { font-size: 12px; }
+.buscar-resultados .nada { padding: 12px; color: var(--suave); font-size: 13px; }
+@media (max-width: 760px) { .buscador { order: 5; flex-basis: 100%; max-width: none; } }
+.barra .usuario { margin-left: 0; font: inherit; font-weight: 600; font-size: 13px; padding: 6px 10px; border: 1px solid var(--linea); border-radius: 8px; background: var(--panel); color: var(--texto); }
 .barra .usuario.sin-usuario { border-color: var(--alerta); color: var(--alerta); }
 
 main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 60px; }

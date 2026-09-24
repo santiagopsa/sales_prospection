@@ -139,7 +139,7 @@ function usuarioValido(config, u) {
 const usuariosSdr = config => (config.USUARIOS || []).filter(u => u.rol === 'sdr').map(u => u.nombre);
 
 async function registrarToque(db, config, {
-  leadId, canal, resultado, razon, nota, detalle, taskId, callUuid, usuario, reintentoMeses, ahora = new Date(), env = process.env,
+  leadId, canal, resultado, razon, nota, detalle, taskId, compromisoId, callUuid, usuario, reintentoMeses, ahora = new Date(), env = process.env,
 }) {
   usuario = usuarioValido(config, usuario);
   leadId = Number(leadId);
@@ -147,7 +147,7 @@ async function registrarToque(db, config, {
   if (!D.CANALES.includes(canal)) throw error(400, `canal inválido: ${canal}`);
   if (canal === 'llamada') {
     if (!D.RESULTADOS_LLAMADA.includes(resultado)) throw error(400, 'El resultado de la llamada es obligatorio');
-  } else resultado = canal;
+  } else if (!D.RESPUESTAS_OTRO_CANAL.includes(resultado)) resultado = canal; // envío normal; solo una respuesta lleva resultado
   let meses = null;
   if (resultado === 'descartado') {
     if (!D.RAZONES_DESCARTE.includes(razon)) throw error(400, 'Elige la razón del descarte');
@@ -167,11 +167,22 @@ async function registrarToque(db, config, {
     }
 
     // 1 · La tarea que este toque cumple: la indicada, o la primera pendiente del mismo canal.
+    //     Con `compromisoId` el toque cumple un compromiso (seguimiento, enviar algo…) y no
+    //     consume la secuencia: el compromiso es un extra que Angie pactó, la secuencia sigue igual.
     let pendientes = await tareasPendientes(c, leadId);
-    let tarea = taskId ? pendientes.find(t => t.id === Number(taskId)) : pendientes.find(t => t.canal === canal);
-    if (tarea) {
-      await c.query(`UPDATE ${T.tasks} SET estado = 'hecha', done_at = $2 WHERE id = $1`, [tarea.id, ahora.toISOString()]);
-      pendientes = pendientes.filter(t => t.id !== tarea.id);
+    let tarea = null, compromisoHecho = null;
+    if (compromisoId) {
+      compromisoHecho = (await c.query(
+        `SELECT id, canal FROM ${T.tasks} WHERE id = $1 AND lead_id = $2 AND tipo <> 'secuencia' AND estado = 'pendiente'`, [Number(compromisoId), leadId])).rows[0];
+      if (!compromisoHecho) throw error(404, 'Ese compromiso ya no está pendiente');
+      await c.query(`UPDATE ${T.tasks} SET estado = 'hecha', done_at = $2 WHERE id = $1`, [compromisoHecho.id, ahora.toISOString()]);
+      tarea = compromisoHecho;
+    } else {
+      tarea = taskId ? pendientes.find(t => t.id === Number(taskId)) : pendientes.find(t => t.canal === canal);
+      if (tarea) {
+        await c.query(`UPDATE ${T.tasks} SET estado = 'hecha', done_at = $2 WHERE id = $1`, [tarea.id, ahora.toISOString()]);
+        pendientes = pendientes.filter(t => t.id !== tarea.id);
+      }
     }
 
     // 2 · Llamada: fila en calls (la del navegador ya puede existir por el webhook).
@@ -199,7 +210,7 @@ async function registrarToque(db, config, {
 
     // 4 · Etapa y reprogramación.
     const nueva = siguienteEtapa(config, lead.etapa, resultado);
-    let proxima = null, dealId = null, avisos = [], pausadoHasta = null, compromisoId = null, compromisosOmitidos = [];
+    let proxima = null, dealId = null, avisos = [], pausadoHasta = null, compromisoCreado = null, compromisosOmitidos = [];
     // Cualquier toque real le quita la pausa (llegó la fecha, o Angie lo retomó antes).
     if (resultado !== 'descartado' && lead.pausado_hasta) await c.query(`UPDATE ${T.leads} SET pausado_hasta = NULL, razon_descarte = NULL WHERE id = $1`, [leadId]);
 
@@ -241,7 +252,7 @@ async function registrarToque(db, config, {
             nota: [detalle && detalle.ficha_cargos && `Cargos: ${detalle.ficha_cargos}`, detalle && detalle.actitud && `Actitud: ${detalle.actitud}`, detalle && detalle.urgencia && `Urgencia: ${detalle.urgencia}`, nota].filter(Boolean).join('\n'),
             usuario: eje.nombre, creadoPor: usuario, invitados: emailAngie ? [emailAngie] : [],
           });
-          compromisoId = t.id; proxima = proxima || null;
+          compromisoCreado = t.id; proxima = proxima || null;
           avisos.push(`Reunión anotada como compromiso de ${eje.nombre}${emailAngie ? ' (te llega la invitación al calendario)' : ''}.`);
         }
       }
@@ -258,7 +269,7 @@ async function registrarToque(db, config, {
     }
 
     const final = (await c.query(`SELECT etapa, deal_id, reunion_at FROM ${T.leads} WHERE id = $1`, [leadId])).rows[0];
-    return { toque_id: toque.id, call_id: callId, etapa: final.etapa, etapa_anterior: lead.etapa, deal_id: final.deal_id, proxima, pausado_hasta: pausadoHasta, avisos, compromiso_id: compromisoId, compromisosOmitidos };
+    return { toque_id: toque.id, call_id: callId, etapa: final.etapa, etapa_anterior: lead.etapa, deal_id: final.deal_id, proxima, pausado_hasta: pausadoHasta, avisos, compromiso_id: compromisoCreado, compromisosOmitidos, compromiso_hecho: compromisoHecho ? compromisoHecho.id : null };
   });
   // Calendario fuera de la transacción (red): mejor esfuerzo.
   await sincronizarCompromisos(db, config, env, r, usuario);
@@ -272,6 +283,7 @@ async function sincronizarCompromisos(db, config, env, r, usuario) {
     r.calendario = await C.sincronizar(db, config, env, r.compromiso_id, 'crear', { invitados: emailAngie ? [emailAngie] : [] });
   }
   for (const id of r.compromisosOmitidos || []) await C.sincronizar(db, config, env, id, 'borrar');
+  if (r.compromiso_hecho) await C.sincronizar(db, config, env, r.compromiso_hecho, 'borrar');
   delete r.compromisosOmitidos;
 }
 

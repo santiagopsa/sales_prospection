@@ -203,3 +203,50 @@ async function revisarFallo(db, id, revisado = true) {
 }
 
 Object.assign(module.exports, { editarLead, fallosDeMarcacion, reportarLlamada, revisarFallo });
+
+// Buscador: empresa, contacto, cargo, correo o teléfono, sin acentos ni mayúsculas. Un teléfono se
+// busca por sus dígitos ("313 470" encuentra +573134705454, también en el segundo teléfono). Con varias
+// palabras, todas tienen que aparecer (en cualquier campo). Trae el último toque para dar contexto.
+// Es para cuando alguien escribe por WhatsApp o correo y hay que encontrar su ficha rápido.
+const SIN_ACENTO = col => `translate(lower(${col}), 'áéíóúüñàèìòùâêîôû', 'aeiouunaeiouaeiou')`;
+function limpiarBusqueda(q) {
+  return String(q || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+async function buscarLeads(db, q, { limite = 20 } = {}) {
+  const texto = limpiarBusqueda(q);
+  if (texto.length < 2) return [];
+  const digitos = texto.replace(/\D/g, '');
+  const cond = [], params = [];
+  if (digitos.length >= 5 && digitos.length >= texto.replace(/[\s+\-().]/g, '').length) {
+    // Parece un teléfono: por dígitos, en el principal y el alterno.
+    params.push(`%${digitos}%`);
+    cond.push(`(regexp_replace(COALESCE(l.telefono, ''), '\\D', '', 'g') LIKE $1 OR regexp_replace(COALESCE(l.telefono_alt, ''), '\\D', '', 'g') LIKE $1)`);
+  } else {
+    for (const palabra of texto.split(/\s+/).filter(Boolean)) {
+      params.push(`%${palabra}%`);
+      const i = params.length;
+      cond.push(`(${SIN_ACENTO('COALESCE(l.empresa, \'\')')} LIKE $${i} OR ${SIN_ACENTO('COALESCE(l.contacto, \'\')')} LIKE $${i}
+                  OR ${SIN_ACENTO('COALESCE(l.cargo, \'\')')} LIKE $${i} OR lower(COALESCE(l.email, '')) LIKE $${i})`);
+    }
+  }
+  params.push(`${texto}%`);
+  const iPrefijo = params.length;
+  params.push(Math.min(Number(limite) || 20, 100));
+  const r = await db.query(
+    `SELECT l.id, l.empresa, l.contacto, l.cargo, l.telefono, l.telefono_alt, l.email, l.ciudad, l.etapa, l.razon_descarte,
+            CASE WHEN l.pausado_hasta > NOW() THEN ${ms('l.pausado_hasta')} END AS pausado_ms,
+            u.canal AS ultimo_canal, u.resultado AS ultimo_resultado, u.created_ms AS ultimo_ms, u.usuario AS ultimo_usuario,
+            (SELECT ${ms('MIN(t.due_at)')} FROM ${T.tasks} t WHERE t.lead_id = l.id AND t.estado = 'pendiente') AS proximo_ms
+     FROM ${T.leads} l
+     LEFT JOIN LATERAL (
+       SELECT canal, resultado, usuario, ${ms('created_at')} AS created_ms FROM ${T.touches} WHERE lead_id = l.id ORDER BY created_at DESC LIMIT 1
+     ) u ON TRUE
+     WHERE ${cond.join(' AND ')}
+     ORDER BY (${SIN_ACENTO('COALESCE(l.empresa, \'\')')} LIKE $${iPrefijo} OR ${SIN_ACENTO('COALESCE(l.contacto, \'\')')} LIKE $${iPrefijo}) DESC,
+              u.created_ms DESC NULLS LAST, l.id DESC
+     LIMIT $${params.length}`,
+    params);
+  return r.rows;
+}
+module.exports.buscarLeads = buscarLeads;
+module.exports.limpiarBusqueda = limpiarBusqueda;

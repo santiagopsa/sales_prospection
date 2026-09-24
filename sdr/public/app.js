@@ -47,6 +47,60 @@
 
   const pintarError = e => `<div class="error">${esc(e.message)}</div>`;
 
+  // ---------------------------------------------------------------- buscador (barra)
+  // Para cuando alguien escribe por WhatsApp o correo: se escribe el nombre de la empresa, la persona,
+  // el número o el correo y aparece la ficha. Enter abre el primero; flechas para moverse; Esc cierra.
+  function enlazarBuscador() {
+    const $q = document.getElementById('buscar-q'), $res = document.getElementById('buscar-resultados'), $frm = document.getElementById('buscador');
+    if (!$q || !$res) return;
+    let temporizador = null, ultimo = '', activo = -1;
+    const cerrar = () => { $res.hidden = true; $res.innerHTML = ''; activo = -1; };
+    const contexto = l => {
+      const partes = [];
+      if (l.contacto) partes.push(esc(l.contacto) + (l.cargo ? ' · ' + esc(l.cargo) : ''));
+      if (l.telefono) partes.push('<span class="num">' + esc(telVisible(l.telefono)) + '</span>');
+      if (l.email) partes.push(esc(l.email));
+      const estado = l.pausado_ms ? `En pausa hasta ${fecha(l.pausado_ms)}` : etiqueta(meta.etapas, l.etapa);
+      const ultimoToque = l.ultimo_ms ? `Último: ${esc(meta.resultadoLabel && meta.resultadoLabel[l.ultimo_resultado] || l.ultimo_resultado)} · ${fecha(l.ultimo_ms)}` : 'Sin toques todavía';
+      return `<div class="suave">${partes.join(' · ')}</div><div class="suave">${esc(estado)} · ${ultimoToque}</div>`;
+    };
+    const pintar = lista => {
+      if (!lista.length) { $res.innerHTML = `<div class="nada">Nada con "${esc(ultimo)}". Si es alguien nuevo, cárgalo en <a href="#/marcar">Marcar</a> o en Cargar leads.</div>`; $res.hidden = false; return; }
+      $res.innerHTML = lista.map((l, i) => `<a class="res ${i === 0 ? 'activo' : ''}" href="#/lead/${l.id}"><b>${esc(l.empresa || 'Sin empresa')}</b>${contexto(l)}</a>`).join('');
+      activo = 0; $res.hidden = false;
+    };
+    const buscar = async () => {
+      const q = $q.value.trim();
+      if (q.length < 2) return cerrar();
+      ultimo = q;
+      try { const lista = await api('leads/buscar?q=' + encodeURIComponent(q)); if (q === ultimo) pintar(lista); }
+      catch (e) { $res.innerHTML = `<div class="nada">${esc(e.message)}</div>`; $res.hidden = false; }
+    };
+    $q.addEventListener('input', () => { clearTimeout(temporizador); temporizador = setTimeout(buscar, 220); });
+    $q.addEventListener('focus', () => { if ($q.value.trim().length >= 2 && $res.innerHTML) $res.hidden = false; });
+    $q.addEventListener('keydown', e => {
+      const items = [...$res.querySelectorAll('a.res')];
+      if (e.key === 'Escape') { cerrar(); $q.blur(); return; }
+      if (!items.length) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        activo = (activo + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        items.forEach((a, i) => a.classList.toggle('activo', i === activo));
+        items[activo].scrollIntoView({ block: 'nearest' });
+      }
+    });
+    $frm.addEventListener('submit', e => {
+      e.preventDefault();
+      const items = [...$res.querySelectorAll('a.res')];
+      if (items.length) { location.hash = items[Math.max(activo, 0)].getAttribute('href'); cerrar(); $q.value = ''; $q.blur(); }
+      else buscar();
+    });
+    $res.addEventListener('click', e => { if (e.target.closest('a.res')) { cerrar(); $q.value = ''; } });
+    document.addEventListener('click', e => { if (!$frm.contains(e.target)) cerrar(); });
+    // Atajo: "/" desde cualquier parte enfoca el buscador.
+    document.addEventListener('keydown', e => { if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); $q.focus(); $q.select(); } });
+  }
+
   // ---------------------------------------------------------------- cola
   async function vistaCola(params = new URLSearchParams()) {
     const c = await api('cola' + (usuarioActual() ? '?usuario=' + encodeURIComponent(usuarioActual()) : ''));
@@ -163,7 +217,7 @@
           ${t.lead_id ? `<div><a href="#/lead/${t.lead_id}">${esc(t.empresa || 'lead')}</a>${t.contacto ? ' · ' + esc(t.contacto) : ''}${t.telefono ? ' · <span class="num">' + esc(telVisible(t.telefono)) + '</span>' : ''}</div>` : ''}
           ${t.nota ? `<div class="suave" style="font-size:12px;white-space:pre-wrap">${esc(t.nota)}</div>` : ''}
           ${t.usuario && t.usuario !== usuarioActual() ? `<div class="suave" style="font-size:12px">de ${esc(t.usuario)}</div>` : ''}</div>
-        <span class="mover"><button class="btn mini" data-checha="${t.id}" title="Marcar como hecha">Hecha</button><button class="btn mini" data-cposponer="1" data-cid2="${t.id}" title="Mover al siguiente día hábil">Mañana</button><button class="btn mini" data-cmover="${t.id}" title="Elegir fecha y hora">Mover</button><button class="btn mini sacar" data-cquitar="${t.id}" title="Quitar (no se hizo ni se hará)">Quitar</button></span>
+        <span class="mover"><button class="btn mini" data-checha="${esc(JSON.stringify({ id: t.id, lead_id: t.lead_id, canal: t.canal, etapa: t.etapa, telefono: t.telefono, empresa: t.empresa, contacto: t.contacto, email: t.email }))}" title="${t.lead_id && t.canal === 'llamada' ? 'Ya llamé: registrar el resultado' : 'Marcar como hecha'}">Hecha</button><button class="btn mini" data-cposponer="1" data-cid2="${t.id}" title="Mover al siguiente día hábil">Mañana</button><button class="btn mini" data-cmover="${t.id}" title="Elegir fecha y hora">Mover</button><button class="btn mini sacar" data-cquitar="${t.id}" title="Quitar (no se hizo ni se hará)">Quitar</button></span>
       </div>`;
     return `<div class="panel compromisos">
       <h2>Compromisos de hoy <span class="suave" style="font-weight:400;font-size:12px">${cs.hoy.filter(t => t.vencido).length ? cs.hoy.filter(t => t.vencido).length + ' con la hora pasada · ' : ''}lo que quedaste con alguien, a su hora</span></h2>
@@ -173,10 +227,21 @@
   }
   function enlazarCompromisos(recargar) {
     const accion = async (b, ruta, body, ok) => { b.disabled = true; try { const r = await api(ruta, { method: 'POST', body: body || {} }); if (ok) ok(r); await recargar(); } catch (e) { avisar(e.message, 'error'); b.disabled = false; } };
-    $app.querySelectorAll('[data-checha]').forEach(b => b.addEventListener('click', () => accion(b, `tareas/${b.dataset.checha}/hecha`, {}, () => avisar('Hecha.'))));
+    $app.querySelectorAll('[data-checha]').forEach(b => b.addEventListener('click', () => hechaConToque(b, JSON.parse(b.dataset.checha), accion, recargar)));
     $app.querySelectorAll('[data-cposponer]').forEach(b => b.addEventListener('click', () => accion(b, `tareas/${b.dataset.cid2}/mover`, { dias: Number(b.dataset.cposponer) }, r => avisar(`Movido al ${fecha(new Date(r.due_at).getTime())}.`))));
     $app.querySelectorAll('[data-cquitar]').forEach(b => b.addEventListener('click', () => { if (window.confirm('¿Quitar este compromiso?')) accion(b, `tareas/${b.dataset.cquitar}/eliminar`, {}, () => avisar('Quitado.')); }));
     $app.querySelectorAll('[data-cmover]').forEach(b => b.addEventListener('click', () => abrirMover(b.dataset.cmover, recargar)));
+  }
+  // "Hecha" en un compromiso con lead registra el toque (así cuenta en los indicadores y queda en el
+  // historial): por llamada pide el resultado como cualquier llamada; por WhatsApp/correo/LinkedIn lo
+  // registra de una vez. Sin lead, o con el lead ya en manos de la ejecutiva, solo cierra el compromiso.
+  function hechaConToque(b, t, accion, recargar) {
+    const deAngie = t.lead_id && (meta.etapasAngie || []).includes(t.etapa);
+    if (!deAngie) return accion(b, `tareas/${t.id}/hecha`, {}, () => avisar('Hecha.'));
+    if (t.canal === 'llamada') {
+      return abrirResultado({ id: t.lead_id, telefono: t.telefono, empresa: t.empresa, contacto: t.contacto, email: t.email }, { compromisoId: t.id, alTerminar: recargar });
+    }
+    return accion(b, `leads/${t.lead_id}/toques`, { canal: t.canal, compromiso_id: t.id }, () => avisar(`Hecha y registrada como toque por ${etiqueta(meta.canales, t.canal)}.`));
   }
   function abrirMover(id, alTerminar) {
     const $modal = document.getElementById('modal');
@@ -686,6 +751,7 @@
                 <button class="btn" data-toque="whatsapp" ${l.telefono ? '' : 'disabled'}>WhatsApp enviado</button>
                 <button class="btn" data-toque="correo" ${l.email ? '' : 'disabled'}>Correo enviado</button>
                 <button class="btn" data-toque="linkedin">LinkedIn enviado</button>
+                <button class="btn" id="respondio" title="Te escribió por WhatsApp, correo o LinkedIn: registra qué pasó (cuenta como conversación)">Me respondió</button>
                 <button class="btn" id="compromiso" title="Algo que quedaste con el prospecto, con fecha y hora">Compromiso</button>
                 <button class="btn peligro" id="descartar" title="Descartar o pausar">Sacar de la cola</button>
                 ${l.pausado_ms ? '<button class="btn" data-ejecutiva="reactivar" title="Quitar la pausa y volver a la cola desde hoy">Retomar ahora</button>' : ''}
@@ -768,6 +834,8 @@
 
     const $manual = document.getElementById('llamada-manual');
     if ($manual) $manual.addEventListener('click', () => abrirResultado(l, {}));
+    const $respondio = document.getElementById('respondio');
+    if ($respondio) $respondio.addEventListener('click', () => abrirResultado(l, { respuesta: true }));
 
     // Editar datos de contacto (los números cambian y las bases traen errores).
     const $editar = document.getElementById('editar');
@@ -864,13 +932,18 @@
   }
 
   // Diálogo de resultado de la llamada (obligatorio al colgar) o de descarte.
-  function abrirResultado(l, { callUuid = null, obligatorio = false, soloDescarte = false } = {}) {
+  function abrirResultado(l, { callUuid = null, obligatorio = false, soloDescarte = false, compromisoId = null, alTerminar = null, respuesta = false } = {}) {
     const $modal = document.getElementById('modal');
-    const resultados = soloDescarte ? meta.resultados.filter(r => r.id === 'descartado') : meta.resultados;
+    const resultados = soloDescarte ? meta.resultados.filter(r => r.id === 'descartado')
+      : respuesta ? meta.resultados.filter(r => (meta.respuestasOtroCanal || []).includes(r.id)) : meta.resultados;
+    const canalesRespuesta = (meta.canales || []).filter(c => c.id !== 'llamada');
     const enUnaHora = new Date(Date.now() + 3600 * 1000);
     $modal.innerHTML = `
       <div class="velo"><form class="dialogo" id="frm">
-        <h2>${soloDescarte ? 'Descartar lead' : 'Resultado de la llamada'}</h2>
+        <h2>${soloDescarte ? 'Descartar lead' : respuesta ? 'El prospecto respondió' : 'Resultado de la llamada'}</h2>
+        ${respuesta ? `<p class="suave" style="margin:0 0 10px">${esc(l.empresa || '')}${l.contacto ? ' · ' + esc(l.contacto) : ''} te escribió. Queda como toque por ese canal con el resultado que elijas: cuenta como conversación y mueve la etapa igual que una llamada.</p>
+        <div class="opciones fila" style="margin-bottom:8px">${canalesRespuesta.map((c, i) => `<label class="opcion"><input type="radio" name="canal" value="${c.id}" ${i === 0 ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')}</div>` : ''}
+        ${compromisoId ? `<p class="suave" style="margin:0 0 10px">Seguimiento con <b>${esc(l.empresa || '')}</b>${l.contacto ? ' · ' + esc(l.contacto) : ''}. Al guardar, el compromiso queda hecho y la llamada cuenta en tus indicadores.</p>` : ''}
         ${obligatorio ? '<p class="suave" style="margin:0 0 10px">Obligatorio: la llamada no queda registrada hasta que elijas un resultado.</p>' : ''}
         <div class="opciones">${resultados.map((r, i) => `<label class="opcion"><input type="radio" name="resultado" value="${r.id}" ${soloDescarte || (i === 0 && false) ? 'checked' : ''} required> ${esc(r.label)}</label>`).join('')}</div>
         <div id="campos-descarte" hidden>
@@ -896,7 +969,7 @@
           </div>
         </div>
         <label>Nota</label>
-        <textarea name="nota" rows="3" placeholder="Lo que valga la pena recordar de esta llamada"></textarea>
+        <textarea name="nota" rows="3" placeholder="${respuesta ? 'Qué te escribió y qué quedó (pega el mensaje si sirve)' : 'Lo que valga la pena recordar de esta llamada'}"></textarea>
         <details id="quede" style="margin-top:10px"><summary style="cursor:pointer;font-weight:600;font-size:13px">¿Quedaste en algo? (seguimiento con hora, enviar algo…)</summary>
           <div class="opciones fila" style="margin-top:8px">${(meta.tiposCompromiso || []).filter(t => ['seguimiento', 'enviar', 'otro'].includes(t.id)).map((t, i) => `<label class="opcion"><input type="radio" name="c_tipo" value="${t.id}" ${i === 0 ? 'checked' : ''}> ${esc(t.label)}</label>`).join('')}</div>
           <label>Qué</label><input name="c_titulo" placeholder="Ej. Llamarlo el jueves con la propuesta" />
@@ -931,7 +1004,7 @@
         Object.assign(body, { accion: 'descartado', razon: f.get('razon') });
       } else {
         ruta = `leads/${l.id}/toques`;
-        Object.assign(body, { canal: 'llamada', resultado, call_uuid: callUuid });
+        Object.assign(body, { canal: respuesta ? (f.get('canal') || 'whatsapp') : 'llamada', resultado, call_uuid: callUuid, compromiso_id: compromisoId });
         if (resultado === 'descartado') { body.razon = f.get('razon'); body.reintento_meses = Number(f.get('reintento') || 0); }
         if (resultado === 'reunion_agendada') {
           const local = f.get('reunion_at');
@@ -971,7 +1044,8 @@
           });
           return;
         }
-        if (location.hash === '#/cola') render(); else location.hash = '#/cola';
+        if (alTerminar) await alTerminar();
+        else if (location.hash === '#/cola') render(); else location.hash = '#/cola';
       } catch (err) {
         document.getElementById('frm-error').innerHTML = pintarError(err);
         $frm.querySelector('button[type=submit]').disabled = false;
@@ -1115,5 +1189,6 @@
   }
 
   window.addEventListener('hashchange', render);
+  enlazarBuscador();
   api('meta').then(m => { meta = m; pintarUsuarios(); }).catch(() => {}).finally(render);
 })();

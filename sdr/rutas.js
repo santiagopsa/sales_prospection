@@ -19,10 +19,12 @@ function rutas({ db, config }) {
   return [
     ['get', '/api/meta', async () => ({
       etapas: ETAPAS.map(e => ({ id: e, label: ETAPA_LABEL[e] })),
+      etapasAngie: D.ETAPAS_DE_ANGIE,
       canales: CANALES.map(c => ({ id: c, label: CANAL_LABEL[c] })),
       metas: { marcaciones: config.META_MARCACIONES_DIA, conversaciones: config.META_CONVERSACIONES_DIA },
       resultados: D.RESULTADOS_LLAMADA.map(r => ({ id: r, label: D.RESULTADO_LABEL[r] })),
       resultadoLabel: D.RESULTADO_LABEL,
+      respuestasOtroCanal: D.RESPUESTAS_OTRO_CANAL,
       razones: D.RAZONES_DESCARTE.filter(r => r !== 'sin_respuesta' && r !== 'lista_negra').map(r => ({ id: r, label: D.RAZON_LABEL[r], definitiva: D.RAZONES_DEFINITIVAS.includes(r), reintento: (config.REINTENTO_POR_RAZON || {})[r] || null })),
       razonLabel: D.RAZON_LABEL,
       reintentoMeses: config.OPCIONES_REINTENTO_MESES || [1, 3, 6],
@@ -38,7 +40,7 @@ function rutas({ db, config }) {
       const b = body || {};
       return registrarToque(db, config, {
         leadId: params.id, canal: b.canal, resultado: b.resultado, razon: b.razon, nota: b.nota,
-        detalle: b.detalle, taskId: b.task_id, callUuid: b.call_uuid, usuario: b.usuario, reintentoMeses: b.reintento_meses,
+        detalle: b.detalle, taskId: b.task_id, compromisoId: b.compromiso_id, callUuid: b.call_uuid, usuario: b.usuario, reintentoMeses: b.reintento_meses,
       });
     }],
     // Acciones de la ejecutiva comercial.
@@ -107,6 +109,7 @@ function rutas({ db, config }) {
       sinDb();
       return L.listarLeads(db, { etapa: query.etapa, huerfanos: query.huerfanos === '1', pausados: query.pausados === '1', q: query.q });
     }],
+    ['get', '/api/leads/buscar', async ({ query }) => { sinDb(); return L.buscarLeads(db, query.q, { limite: query.limite }); }],
     ['get', '/api/leads/:id', async ({ params }) => { sinDb(); return L.detalleLead(db, params.id); }],
     ['post', '/api/leads/:id/editar', async ({ params, body }) => { sinDb(); const b = body || {}; return L.editarLead(db, config, params.id, b, require('./resultados').usuarioValido(config, b.usuario)); }],
     // Fallos de marcación: lo que el operador no cursó, el reporte de Angie y la revisión de Santiago.
