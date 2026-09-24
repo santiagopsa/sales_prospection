@@ -872,6 +872,7 @@
                 <button class="btn" data-ejecutiva="no_show">No se presentó</button>` : ''}
                 ${['reunion_agendada', 'reunion_realizada'].includes(l.etapa) ? `<button class="btn primario" data-ejecutiva="calificado">Calificado</button>` : ''}
                 <button class="btn" id="compromiso" title="Una tarea con fecha y hora sobre este lead">Compromiso</button>
+                ${meta.calendly && ['reunion_agendada', 'reunion_realizada'].includes(l.etapa) ? `<button class="btn" id="link-calendly" title="${l.etapa === 'reunion_agendada' ? 'Para reagendar: si reserva otro horario, la reunión se mueve sola (con el token de Calendly)' : 'Para una segunda reunión'}">📅 Link de Calendly</button>` : ''}
                 ${l.etapa !== 'calificado' ? `<button class="btn peligro" id="descartar">Descartar</button>` : ''}
               </div>`}
           </div>
@@ -1107,8 +1108,10 @@
         const texto = await armar(canal);
         if (canal === 'whatsapp') {
           window.open(`${waLink(l.telefono)}?text=${encodeURIComponent(texto)}`, '_blank', 'noopener');
-          const r = await api(`leads/${l.id}/toques`, { method: 'POST', body: { canal: 'whatsapp', nota: 'Envió el link de Calendly' } });
           $modal.innerHTML = '';
+          // Desde "reunión agendada" los toques son de la ejecutiva: solo se abre el chat.
+          if (!(meta.etapasAngie || []).includes(l.etapa)) { avisar('Chat de WhatsApp abierto con el link.'); return; }
+          const r = await api(`leads/${l.id}/toques`, { method: 'POST', body: { canal: 'whatsapp', nota: 'Envió el link de Calendly' } });
           avisar('WhatsApp con el link registrado.');
           if (despues) despues(r);
         } else {
