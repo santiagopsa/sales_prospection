@@ -147,7 +147,7 @@ async function sincronizar(db, config, env, { ahora = new Date(), fetchFn, log =
     if (!k || k.estado === 'cancelado') continue;
     try {
       // Solo si esa es la reunión vigente del lead (no una vieja que ya se reagendó).
-      const ultima = k.lead_id ? (await db.query(`SELECT uri FROM ${T.calendly} WHERE lead_id = $1 AND estado = 'registrado' ORDER BY COALESCE(inicio, created_at) DESC LIMIT 1`, [k.lead_id])).rows[0] : null;
+      const ultima = k.lead_id ? (await db.query(`SELECT uri FROM ${T.calendly} WHERE lead_id = $1 AND estado = 'registrado' ORDER BY created_at DESC LIMIT 1`, [k.lead_id])).rows[0] : null;
       const lead = k.lead_id ? (await db.query(`SELECT etapa FROM ${T.leads} WHERE id = $1`, [k.lead_id])).rows[0] : null;
       if (lead && lead.etapa === 'reunion_agendada' && ultima && ultima.uri === ev.uri) {
         const motivo = ev.cancellation && ev.cancellation.reason;

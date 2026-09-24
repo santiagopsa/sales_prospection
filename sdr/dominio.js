@@ -43,6 +43,7 @@ const RESULTADO_LABEL = {
   pausado: 'En pausa',
   reactivado: 'Reactivado',
   reunion_cancelada: 'Canceló la reunión',
+  reunion_reagendada: 'Reunión reagendada',
   editado: 'Datos editados',
 };
 

@@ -97,6 +97,15 @@ test('calendly contra la base: reservas desde el link, sin lead, reagendadas y c
   const g = await C.sincronizar(db, base, { GOOGLE_CALENDAR_KEY: '{}' }, reu.id, 'mover', { fetchFn: async () => { llamoGoogle = true; return { ok: true, json: async () => ({}) }; } });
   assert.deepStrictEqual([g.ok, g.omitido, llamoGoogle], [true, 'el evento lo creó Calendly', false]);
   assert.strictEqual((await C.reintentarPendientes(db, base, {})).omitido, 'sin llave');
+  // Reagendar desde la app: se mueven lead y compromiso, queda rastro; no aplica a otra etapa.
+  const { reagendarReunion } = require('../resultados');
+  const rg = await reagendarReunion(db, base, { leadId: a, reunionAt: '2026-09-29T20:00:00.000Z', usuario: 'Angie', ahora });
+  assert.deepStrictEqual([rg.antes, rg.reunion_at], ['2026-09-29T15:00:00.000Z', '2026-09-29T20:00:00.000Z']);
+  assert.strictEqual(new Date((await db.query(`SELECT due_at FROM sdr.tasks WHERE id = $1`, [reu.id])).rows[0].due_at).toISOString(), '2026-09-29T20:00:00.000Z');
+  assert.strictEqual((await toque(a)).resultado, 'reunion_reagendada');
+  await assert.rejects(reagendarReunion(db, base, { leadId: b, reunionAt: 'mañana' }), /no es válida/);
+  // Deja la hora como estaba para lo que sigue.
+  await db.query(`UPDATE sdr.leads SET reunion_at = '2026-09-29T15:00:00Z' WHERE id = $1`, [a]);
   // Segunda pasada: nada nuevo (ya están en la tabla).
   const r2 = await CAL.sincronizar(db, base, ENV, { ahora, fetchFn: k.fetchFn, log });
   assert.deepStrictEqual([r2.nuevas, r2.sin_lead, r2.canceladas], [0, 0, 0]);

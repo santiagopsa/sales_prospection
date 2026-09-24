@@ -199,8 +199,14 @@ Calendly ya pone la reunión en el calendario de Luisa y le manda la invitación
 compromiso de reunión queda solo en la app, sin un segundo evento en Google (`CALENDLY.duplicar_en_google`).
 
 Si la reunión se cuadró por otro lado, *Ya quedó agendada por fuera de Calendly* deja poner la fecha a mano
-(`CALENDLY.permitir_manual`). En la ficha, **📅 Link de Calendly** manda el link marcado por WhatsApp (abre el
-chat con el mensaje `CALENDLY.mensaje` y registra el toque) o lo copia para correo o LinkedIn.
+(`CALENDLY.permitir_manual`). En la ficha, **📅 Calendly** tiene dos caminos:
+- **Agendar ahora** (recomendado, sin pasarle la pelota al cliente): la SDR dice por qué canal quedó (llamada,
+  WhatsApp, correo, LinkedIn), llena la ficha y agenda en el Calendly embebido; queda como *Reunión agendada*
+  por ese canal. En un lead que ya tiene reunión el botón es **Reagendar ahora**: la nueva reserva mueve la fecha
+  del lead y del compromiso de Luisa (queda *Reunión reagendada* en el historial; la anterior se cancela en
+  Calendly).
+- **Mandarle el link**: por WhatsApp (abre el chat con el mensaje `CALENDLY.mensaje` y registra el toque) o
+  copiado para correo o LinkedIn, marcado con el lead y el canal.
 
 **Con `CALENDLY_TOKEN`** (token personal de la cuenta de Calendly de Luisa: Calendly → Integraciones → API y
 webhooks → Personal access tokens; en Render como variable de entorno), cada `CALENDLY.sincronizar_min`:

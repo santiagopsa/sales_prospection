@@ -857,7 +857,7 @@
                 <button class="btn" data-toque="whatsapp" ${l.telefono ? '' : 'disabled'}>WhatsApp enviado</button>
                 <button class="btn" data-toque="correo" ${l.email ? '' : 'disabled'}>Correo enviado</button>
                 <button class="btn" data-toque="linkedin">LinkedIn enviado</button>
-                ${meta.calendly ? '<button class="btn" id="link-calendly" title="Mandar el Calendly de la ejecutiva por WhatsApp, correo o LinkedIn">📅 Link de Calendly</button>' : ''}
+                ${meta.calendly ? '<button class="btn" id="link-calendly" title="Agendar la reunión tú misma en Calendly, o mandarle el link al prospecto">📅 Calendly</button>' : ''}
                 <button class="btn" id="respondio" title="Te escribió por WhatsApp, correo o LinkedIn: registra qué pasó (cuenta como conversación)">Me respondió</button>
                 <button class="btn" id="compromiso" title="Algo que quedaste con el prospecto, con fecha y hora">Compromiso</button>
                 <button class="btn peligro" id="descartar" title="Descartar o pausar">Sacar de la cola</button>
@@ -872,7 +872,7 @@
                 <button class="btn" data-ejecutiva="no_show">No se presentó</button>` : ''}
                 ${['reunion_agendada', 'reunion_realizada'].includes(l.etapa) ? `<button class="btn primario" data-ejecutiva="calificado">Calificado</button>` : ''}
                 <button class="btn" id="compromiso" title="Una tarea con fecha y hora sobre este lead">Compromiso</button>
-                ${meta.calendly && ['reunion_agendada', 'reunion_realizada'].includes(l.etapa) ? `<button class="btn" id="link-calendly" title="${l.etapa === 'reunion_agendada' ? 'Para reagendar: si reserva otro horario, la reunión se mueve sola (con el token de Calendly)' : 'Para una segunda reunión'}">📅 Link de Calendly</button>` : ''}
+                ${meta.calendly && ['reunion_agendada', 'reunion_realizada'].includes(l.etapa) ? `<button class="btn" id="link-calendly" title="${l.etapa === 'reunion_agendada' ? 'Para reagendar: si reserva otro horario, la reunión se mueve sola (con el token de Calendly)' : 'Para una segunda reunión'}">📅 Calendly</button>` : ''}
                 ${l.etapa !== 'calificado' ? `<button class="btn peligro" id="descartar">Descartar</button>` : ''}
               </div>`}
           </div>
@@ -1122,16 +1122,37 @@
       const nombre = (l.contacto || '').split(' ')[0] || '';
       return (meta.calendly.mensaje || '{link}').replace('{nombre}', nombre).replace(/\s+,/, ',').replace('{ejecutiva}', meta.calendly.ejecutiva).replace('{link}', d.enlace);
     };
-    $modal.innerHTML = `<div class="velo"><div class="dialogo" style="max-width:460px">
-      <h2>Mandar el link de Calendly</h2>
-      <p class="suave" style="margin:0 0 12px">El link lleva marcado el lead y el canal: si reserva desde ahí, la reunión queda a tu nombre y por ese canal${meta.calendly.horaDeCalendly ? ' (se detecta sola)' : ' (se detecta cuando esté el token de Calendly; si no, regístrala tú)'}.</p>
+    const puedeYo = (meta.etapasAngie || []).includes(l.etapa) || l.etapa === 'reunion_agendada';
+    $modal.innerHTML = `<div class="velo"><div class="dialogo" style="max-width:480px">
+      <h2>Calendly de ${esc(meta.calendly.ejecutiva)}</h2>
+      ${puedeYo ? `<div class="calendly-aviso" style="margin-top:0">
+        <b>${l.etapa === 'reunion_agendada' ? 'Reagendarla tú' : 'Agendarla tú'}</b> <span class="suave">· recomendado: el cliente no tiene que hacer nada</span>
+        <div class="suave" style="font-size:12px;margin:4px 0 8px">${l.etapa === 'reunion_agendada' ? 'Escoges la nueva hora en Calendly y la reunión se mueve aquí. Después cancela la anterior en Calendly.' : 'Llenas la ficha, escoges la hora en Calendly y queda registrada como reunión agendada.'}</div>
+        <button class="btn primario" data-yo>📅 ${l.etapa === 'reunion_agendada' ? 'Reagendar ahora' : 'Agendar ahora'}</button>
+      </div>
+      <p style="margin:12px 0 6px"><b>O mandarle el link</b> <span class="suave" style="font-size:12px">para que escoja él</span></p>` : ''}
+      <p class="suave" style="margin:0 0 12px;font-size:12px">El link lleva marcado el lead y el canal: si reserva desde ahí, la reunión queda a tu nombre y por ese canal${meta.calendly.horaDeCalendly ? ' (se detecta sola)' : ' (se detecta cuando esté el token de Calendly; si no, regístrala tú)'}.</p>
       <div class="acciones" style="margin:0;flex-wrap:wrap">
-        <button class="btn primario" data-link="whatsapp" ${l.telefono ? '' : 'disabled'}>💬 Por WhatsApp</button>
+        <button class="btn ${puedeYo ? '' : 'primario'}" data-link="whatsapp" ${l.telefono ? '' : 'disabled'}>💬 Por WhatsApp</button>
         <button class="btn" data-link="correo">✉️ Copiar para correo</button>
         <button class="btn" data-link="linkedin">💼 Copiar para LinkedIn</button>
         <button class="btn" data-cerrar>Cerrar</button>
       </div><div id="link-msg" class="suave" style="margin-top:10px;font-size:12px;word-break:break-all"></div></div></div>`;
     $modal.querySelector('[data-cerrar]').addEventListener('click', () => { $modal.innerHTML = ''; });
+    const $yo = $modal.querySelector('[data-yo]');
+    if ($yo) $yo.addEventListener('click', async () => {
+      if (l.etapa !== 'reunion_agendada') { $modal.innerHTML = ''; return abrirResultado(l, { agendar: true, alTerminar: despues }); }
+      // Reagendar: nueva reserva en Calendly → se mueve la fecha de la reunión.
+      $yo.disabled = true;
+      try {
+        const r = await reservarEnCalendly(l, null);
+        if (!r) { $yo.disabled = false; return; }
+        const x = await api(`leads/${l.id}/reagendar`, { method: 'POST', body: { calendly: { event_uri: r.event_uri, invitee_uri: r.invitee_uri }, reunion_at: r.reunion_at || null } });
+        $modal.innerHTML = '';
+        avisar(`Reunión movida al ${fechaHora(new Date(x.reunion_at).getTime())}. Cancela la anterior en Calendly para que no queden dos.`, 'aviso');
+        if (despues) despues(x);
+      } catch (e) { document.getElementById('link-msg').innerHTML = pintarError(e); $yo.disabled = false; }
+    });
     $modal.querySelectorAll('[data-link]').forEach(b => b.addEventListener('click', async () => {
       const canal = b.dataset.link;
       try {
@@ -1152,21 +1173,24 @@
     }));
   }
 
-  function abrirResultado(l, { callUuid = null, obligatorio = false, soloDescarte = false, compromisoId = null, alTerminar = null, respuesta = false } = {}) {
+  function abrirResultado(l, { callUuid = null, obligatorio = false, soloDescarte = false, compromisoId = null, alTerminar = null, respuesta = false, agendar = false } = {}) {
     const $modal = document.getElementById('modal');
+    // agendar: la SDR agenda en Calendly fuera de una llamada (lo cerró por WhatsApp, correo…).
     const resultados = soloDescarte ? meta.resultados.filter(r => r.id === 'descartado')
+      : agendar ? meta.resultados.filter(r => r.id === 'reunion_agendada')
       : respuesta ? meta.resultados.filter(r => (meta.respuestasOtroCanal || []).includes(r.id)) : meta.resultados;
-    const canalesRespuesta = (meta.canales || []).filter(c => c.id !== 'llamada');
+    const canalesRespuesta = (meta.canales || []).filter(c => agendar || c.id !== 'llamada');
+    if (agendar) respuesta = true;   // mismo formulario: canal + resultado
     const enUnaHora = new Date(Date.now() + 3600 * 1000);
     $modal.innerHTML = `
       <div class="velo"><form class="dialogo" id="frm" data-lead="${l.id}">
-        <h2>${soloDescarte ? 'Descartar lead' : respuesta ? 'El prospecto respondió' : 'Resultado de la llamada'}</h2>
+        <h2>${soloDescarte ? 'Descartar lead' : agendar ? 'Agendar reunión con ' + esc((meta.calendly || {}).ejecutiva || 'la ejecutiva') : respuesta ? 'El prospecto respondió' : 'Resultado de la llamada'}</h2>
         <div id="aviso-reserva" class="calendly-aviso" hidden></div>
-        ${respuesta ? `<p class="suave" style="margin:0 0 10px">${esc(l.empresa || '')}${l.contacto ? ' · ' + esc(l.contacto) : ''} te escribió. Queda como toque por ese canal con el resultado que elijas: cuenta como conversación y mueve la etapa igual que una llamada.</p>
+        ${respuesta ? `<p class="suave" style="margin:0 0 10px">${agendar ? `${esc(l.empresa || '')}${l.contacto ? ' · ' + esc(l.contacto) : ''}. ¿Por dónde quedó la reunión? Así sabemos qué canal la logró.` : `${esc(l.empresa || '')}${l.contacto ? ' · ' + esc(l.contacto) : ''} te escribió. Queda como toque por ese canal con el resultado que elijas: cuenta como conversación y mueve la etapa igual que una llamada.`}</p>
         <div class="opciones fila" style="margin-bottom:8px">${canalesRespuesta.map((c, i) => `<label class="opcion"><input type="radio" name="canal" value="${c.id}" ${i === 0 ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')}</div>` : ''}
         ${compromisoId ? `<p class="suave" style="margin:0 0 10px">Seguimiento con <b>${esc(l.empresa || '')}</b>${l.contacto ? ' · ' + esc(l.contacto) : ''}. Al guardar, el compromiso queda hecho y la llamada cuenta en tus indicadores.</p>` : ''}
         ${obligatorio ? '<p class="suave" style="margin:0 0 10px">Obligatorio: la llamada no queda registrada hasta que elijas un resultado.</p>' : ''}
-        <div class="opciones">${resultados.map((r, i) => `<label class="opcion"><input type="radio" name="resultado" value="${r.id}" ${soloDescarte || (i === 0 && false) ? 'checked' : ''} required> ${esc(r.label)}</label>`).join('')}</div>
+        <div class="opciones">${resultados.map((r, i) => `<label class="opcion"><input type="radio" name="resultado" value="${r.id}" ${soloDescarte || agendar ? 'checked' : ''} required> ${esc(r.label)}</label>`).join('')}</div>
         <div id="campos-descarte" hidden>
           <label>Razón</label>
           <select name="razon">${meta.razones.map(r => `<option value="${r.id}">${esc(r.label)}</option>`).join('')}</select>

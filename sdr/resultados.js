@@ -358,6 +358,33 @@ async function registrarEjecutiva(db, config, { leadId, accion, razon, nota, usu
   return r;
 }
 
+// Reagendar una reunión que ya estaba agendada (la SDR la mueve en Calendly o a mano): cambia la
+// fecha del lead y del compromiso de la ejecutiva y deja rastro. No cambia la etapa ni la comisión
+// (la reunión sigue siendo la misma, con otra fecha).
+async function reagendarReunion(db, config, { leadId, reunionAt, nota, usuario, ahora = new Date() }) {
+  leadId = Number(leadId);
+  usuario = usuarioValido(config, usuario);
+  const cuando = new Date(reunionAt);
+  if (!reunionAt || isNaN(cuando)) throw error(400, 'La nueva fecha de la reunión no es válida');
+  const r = await enTransaccion(db, async c => {
+    const lead = await leerLead(c, leadId);
+    if (lead.etapa !== 'reunion_agendada') throw error(409, 'Solo se reagenda un lead con reunión agendada');
+    const antes = lead.reunion_at ? new Date(lead.reunion_at).toISOString() : null;
+    await c.query(`UPDATE ${T.leads} SET reunion_at = $2 WHERE id = $1`, [leadId, cuando.toISOString()]);
+    const comp = await c.query(
+      `UPDATE ${T.tasks} SET due_at = $2, con_hora = TRUE WHERE lead_id = $1 AND tipo = 'reunion' AND estado = 'pendiente' RETURNING id`,
+      [leadId, cuando.toISOString()]);
+    await c.query(
+      `INSERT INTO ${T.touches} (lead_id, canal, resultado, nota, detalle, usuario, created_at) VALUES ($1, 'ejecutiva', 'reunion_reagendada', $2, $3, $4, $5)`,
+      [leadId, nota || null, JSON.stringify({ antes, reunion_at: cuando.toISOString() }), usuario, ahora.toISOString()]);
+    return { etapa: lead.etapa, reunion_at: cuando.toISOString(), antes, compromisos: comp.rows.map(x => x.id) };
+  });
+  // Compromisos con evento propio en Google (no los de Calendly) se mueven allá también.
+  for (const id of r.compromisos) await require('./compromisos').sincronizar(db, config, process.env, id, 'mover');
+  delete r.compromisos;
+  return r;
+}
+
 // Deal en public.deals con la ficha de Angie prellenada, para que la ejecutiva abra el demo en el
 // Sandler con contexto. `data` sigue la forma del borrador del Sandler (public/app.js · newDraft).
 async function crearDeal(c, lead, detalle, reunionAt) {
@@ -445,4 +472,4 @@ async function agregarAListaNegra(db, config, { telefono, email, empresa, domini
   });
 }
 
-module.exports = { registrarToque, registrarEjecutiva, agregarAListaNegra, sacarDeCola, mesesReintento, actividadDelDia, siguienteEtapa, enTransaccion, usuarioValido, usuariosSdr, filtroUsuario, paramUsuario };
+module.exports = { registrarToque, registrarEjecutiva, reagendarReunion, agregarAListaNegra, sacarDeCola, mesesReintento, actividadDelDia, siguienteEtapa, enTransaccion, usuarioValido, usuariosSdr, filtroUsuario, paramUsuario };

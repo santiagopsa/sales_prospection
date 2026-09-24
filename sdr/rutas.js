@@ -52,6 +52,16 @@ function rutas({ db, config }) {
       }
       return r;
     }],
+    // Reagendar una reunión ya agendada (desde el Calendly embebido o a mano).
+    ['post', '/api/leads/:id/reagendar', async ({ params, body }) => {
+      sinDb();
+      const b = body || {};
+      const CAL = require('./calendly');
+      const { detalle, evento } = await CAL.prepararDetalle(process.env, { reunion_at: b.reunion_at, calendly: b.calendly });
+      const r = await require('./resultados').reagendarReunion(db, config, { leadId: params.id, reunionAt: detalle.reunion_at, nota: b.nota, usuario: b.usuario });
+      if (evento) await CAL.registrarEvento(db, { ...evento, lead_id: Number(params.id), origen: 'app', estado: 'registrado' });
+      return r;
+    }],
     // Link de Calendly para mandar por WhatsApp / correo / LinkedIn, marcado con el lead y el canal.
     ['get', '/api/leads/:id/calendly', async ({ params, query }) => {
       sinDb();
