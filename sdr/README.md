@@ -217,7 +217,7 @@ Coach. **Calificada** = la ejecutiva la tomó en el Sandler y quedó con calific
 *No calificó* = quedó Parcial o No califica. *No asistió* = la ejecutiva marcó no-show. *Cancelada* = la canceló en Calendly. Si la ejecutiva crea un
 deal nuevo en vez de **Tomar este deal**, no queda enlazado y no cuenta: siempre tomar el del SDR.
 
-Huecos en `COMISION` (`config.js`): `tramos` (desde / valor: 0 → 23, 15 → 30, 30 → 40), `modo` (`escalon`:
+Huecos en `COMISION` (`config.js`): `tramos` (desde / valor: 0 → 23, 16 → 30, 31 → 40: hasta 15 a US$23, hasta 30 a US$30, de ahí en adelante a US$40), `modo` (`escalon`:
 al llegar a un tramo todas las del mes pasan a ese valor; `tramos`: cada una a su tramo), `califica_con`,
 `mes_por` (`reunion` o `agendada`). Una SDR ve lo suyo; la ejecutiva y el admin ven al equipo SDR.
 ```

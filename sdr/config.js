@@ -81,11 +81,12 @@ module.exports = {
     // reunión (inclusive). Primer tramo siempre desde 0.
     tramos: [
       { desde: 0,  valor: 23, nombre: 'Tramo bajo',  nota: 'Aplica bajo el umbral medio' },
-      { desde: 15, valor: 30, nombre: 'Meta',        nota: 'Meta promedio' },
-      { desde: 30, valor: 40, nombre: 'Sobre meta',  nota: 'Excedió la meta' },
+      { desde: 16, valor: 30, nombre: 'Meta',        nota: 'Meta promedio' },
+      { desde: 31, valor: 40, nombre: 'Sobre meta',  nota: 'Excedió la meta' },
     ],
+    // Hoy: hasta 15 a 23, de 16 a 30 a 30, de 31 en adelante a 40.
     // 'escalon': al alcanzar un tramo, TODAS las del mes se pagan a ese valor (20 → 20 × 30).
-    // 'tramos':  cada reunión se paga al valor de su tramo (20 → 14 × 23 + 6 × 30).
+    // 'tramos':  cada reunión se paga al valor de su tramo (20 → 15 × 23 + 5 × 30).
     modo: 'escalon',
     // Qué calificación del Sandler Coach (deals.calificacion_sandler) cuenta como calificada.
     // Valores posibles: 'Completa', 'Parcial', 'No califica'.
