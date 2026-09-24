@@ -82,6 +82,13 @@ function crear({ host = '/tmp', port = 5433, user = 'postgres', database = 'post
   });
 
   function query(sql, params = []) {
+    // Como el driver real (protocolo extendido): un parámetro que no aparece en el SQL no tiene tipo
+    // y Postgres responde "could not determine data type of parameter $n". Aquí se sustituye como
+    // texto, así que hay que chequearlo a mano para que el error salga en las pruebas y no en producción.
+    const usados = new Set([...sql.matchAll(/\$(\d+)/g)].map(m => Number(m[1])));
+    for (let i = 1; i <= params.length; i++) {
+      if (!usados.has(i)) return Promise.reject(new Error(`could not determine data type of parameter $${i} (el SQL no lo usa)`));
+    }
     const texto = sql.replace(/\$(\d+)/g, (_, i) => literal(params[Number(i) - 1]));
     const p = cadena.then(() => listo).then(() => new Promise((ok, no) => {
       espera = r => (r.error ? no(r.error) : ok({ rows: r.rows }));

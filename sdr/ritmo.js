@@ -157,9 +157,9 @@ async function historialDia(db, config, { fecha, usuario = null } = {}) {
      JOIN ${T.leads} l ON l.id = x.lead_id
      LEFT JOIN ${T.calls} c ON c.id = x.call_id
      LEFT JOIN ${T.tasks} tk ON tk.id = x.task_id AND tk.tipo <> 'secuencia'
-     WHERE x.created_at >= $1 AND x.created_at < $2 AND x.canal <> 'ejecutiva' ${filtroUsuario(config, 4, usuario).replace(/\busuario\b/g, 'x.usuario')}
+     WHERE x.created_at >= $1 AND x.created_at < $2 AND x.canal <> 'ejecutiva' ${filtroUsuario(config, 3, usuario).replace(/\busuario\b/g, 'x.usuario')}
      ORDER BY x.created_at`,
-    [desde, hasta, conv, paramUsuario(config, usuario)]);
+    [desde, hasta, paramUsuario(config, usuario)]);
   // Compromisos cumplidos ese día que no dejaron toque (los de antes del arreglo, o de leads ya con la ejecutiva).
   const k = await db.query(
     `SELECT t.id, t.lead_id, t.tipo, t.titulo, t.canal, t.usuario, ${ms('t.done_at')} AS done_ms, l.empresa, l.contacto
