@@ -254,6 +254,16 @@ anterior o siguiente. Los compromisos que se marcaron hechos ese día sin dejar 
 arreglo de *Hecha*) salen en su propio bloque, para que la gestión no se pierda aunque no tenga resultado.
 `GET /api/historial?fecha=YYYY-MM-DD&usuario=Angie`.
 
+## Marcar: conectar con la empresa antes de crearla
+En **Marcar**, al escribir la empresa aparecen las que ya están en la base (sin importar tildes, mayúsculas ni
+S.A.S.), con sus contactos y en qué etapa va cada uno:
+- **es esta persona**: el número se agrega a ese contacto (en el principal si no tenía, si no como segundo
+  teléfono) y se llama a ese número. No crea nada nuevo.
+- **nuevo contacto aquí**: crea el contacto en esa empresa, con el mismo nombre de empresa, la ciudad y los datos
+  de empresa (industria, empleados, país, web…), no los de la otra persona.
+- Sin elegir: si la empresa escrita coincide con una existente se conecta igual (y si el contacto tiene el mismo
+  nombre, se le agrega el número); si no existe, se crea. Una empresa en lista negra no se deja crear.
+
 ## Buscador y respuestas por otros canales
 En la barra hay un buscador (atajo: tecla `/`): empresa, contacto, cargo, correo o teléfono, sin acentos ni
 mayúsculas ("exito" encuentra "Grupo Éxito"; "313 470" encuentra +57 313 470 5454, también en el segundo

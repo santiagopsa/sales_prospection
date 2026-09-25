@@ -303,3 +303,12 @@ a.panel.comision:hover { text-decoration: none; border-color: #86efac; }
 div.llamada .btn.agendar { background: #fff; border-color: #bfdbfe; color: var(--azul-osc); padding: 7px 12px; font-size: 13px; }
 div.llamada .agendada { font-size: 13px; font-weight: 600; color: #15803d; }
 div.llamada .txt b { white-space: nowrap; }
+
+/* Marcar: empresas existentes */
+.buscador-empresa { position: relative; }
+.buscador-empresa .buscar-resultados { min-width: 360px; }
+.emp-grupo { border-bottom: 1px solid var(--linea); }
+.emp-grupo:last-of-type { border-bottom: 0; }
+.buscar-resultados a.res.sub { padding: 6px 12px 6px 22px; border-bottom: 0; font-size: 13px; }
+.buscar-resultados a.res u { text-decoration: none; color: var(--azul-osc); font-weight: 600; }
+#conexion { margin-top: 10px; }

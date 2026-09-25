@@ -91,32 +91,107 @@ module.exports = { pipeline, listarLeads, detalleLead, cargas, detalleCarga };
 
 // Marcación directa: un teléfono escrito a mano. Si ya es de un lead, devuelve ese lead; si no,
 // crea uno nuevo con la secuencia por defecto (la llamada que sigue cumple su paso 1).
-async function leadParaMarcar(db, config, { telefono, empresa, contacto, ahora = new Date() }) {
+// Datos de empresa (no de la persona) que se copian a un contacto nuevo de una empresa que ya existe.
+const EXTRA_EMPRESA = ['industria', 'empleados', 'pais', 'pais_empresa', 'region', 'sitio_web', 'linkedin_empresa', 'keywords', 'tecnologias', 'ingresos'];
+const nombreSimple = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+// Empresas que ya están en la base y se parecen a lo que se escribe, con sus contactos. Agrupa por el
+// nombre normalizado (sin tildes ni S.A.S.), así "Grupo Éxito SAS" y "grupo exito" son la misma.
+async function buscarEmpresas(db, q, { limite = 8 } = {}) {
+  const LN = require('./listanegra');
+  const texto = limpiarBusqueda(q);
+  if (texto.length < 2) return [];
+  const params = [], cond = [];
+  for (const palabra of texto.split(/\s+/).filter(Boolean)) {
+    params.push(`%${palabra}%`);
+    cond.push(`${SIN_ACENTO("COALESCE(l.empresa, '')")} LIKE $${params.length}`);
+  }
+  const r = await db.query(
+    `SELECT l.id, l.empresa, l.contacto, l.cargo, l.telefono, l.telefono_alt, l.email, l.etapa,
+            CASE WHEN l.pausado_hasta > NOW() THEN ${ms('l.pausado_hasta')} END AS pausado_ms, ${ms('l.created_at')} AS created_ms
+     FROM ${T.leads} l WHERE l.empresa IS NOT NULL AND l.empresa <> 'Sin empresa' AND ${cond.join(' AND ')}
+     ORDER BY l.created_at DESC LIMIT 300`, params);
+  const grupos = new Map();
+  for (const x of r.rows) {
+    const k = LN.normalizarEmpresa(x.empresa);
+    if (!k) continue;
+    if (!grupos.has(k)) grupos.set(k, { empresa: x.empresa, norm: k, contactos: [] });
+    grupos.get(k).contactos.push(x);
+  }
+  const lista = [...grupos.values()];
+  const ln = await LN.enLista(db, [], [], lista.map(g => g.empresa), []);
+  for (const g of lista) g.lista_negra = !!LN.motivoDe(ln, { empresa: g.empresa });
+  const inicia = g => (g.norm.startsWith(LN.normalizarEmpresa(q) || texto) ? 0 : 1);
+  return lista.sort((a, b) => inicia(a) - inicia(b) || b.contactos.length - a.contactos.length).slice(0, limite);
+}
+
+// Marcación directa: un teléfono escrito a mano. En orden:
+//   1. el número ya es de un lead → ese lead;
+//   2. se eligió un contacto existente (leadId) → se le agrega el número a ese contacto;
+//   3. la empresa ya existe (mismo nombre normalizado) → si el contacto coincide por nombre, se le agrega
+//      el número; si no, se crea un contacto nuevo EN ESA empresa (mismo nombre y datos de empresa);
+//   4. si no, lead nuevo. Todo lo nuevo sale con la secuencia por defecto.
+async function leadParaMarcar(db, config, { telefono, empresa, contacto, leadId, usuario = null, ahora = new Date() }) {
   const { normalizarTelefono } = require('./normalizar');
   const { planificar } = require('./secuencia');
+  const LN = require('./listanegra');
   const tiempo = require('./tiempo');
   const tel = normalizarTelefono(telefono, null, config);
   if (!tel.e164) throw error(400, tel.error || 'Escribe un teléfono');
-  const ln = await require('./listanegra').enLista(db, [tel.e164], []);
+  const ln = await LN.enLista(db, [tel.e164], []);
   if (ln.telefonos.size) throw error(409, 'Ese número está en la lista negra: pidió que no lo contacten.');
-  const existe = await db.query(`SELECT id, empresa, etapa FROM ${T.leads} WHERE telefono = $1`, [tel.e164]);
+  const existe = await db.query(`SELECT id, empresa, etapa FROM ${T.leads} WHERE telefono = $1 OR telefono_alt = $1 ORDER BY (telefono = $1) DESC LIMIT 1`, [tel.e164]);
   if (existe.rows.length) return { lead_id: existe.rows[0].id, existente: true, empresa: existe.rows[0].empresa, etapa: existe.rows[0].etapa };
+
+  // Agregar el número a un contacto que ya existe: en el principal si no tiene, si no en el alterno.
+  const agregarNumero = async l => {
+    if (!l.telefono) await db.query(`UPDATE ${T.leads} SET telefono = $2, telefono_original = COALESCE(telefono_original, $3) WHERE id = $1`, [l.id, tel.e164, String(telefono).trim()]);
+    else if (!l.telefono_alt) await db.query(`UPDATE ${T.leads} SET telefono_alt = $2 WHERE id = $1`, [l.id, tel.e164]);
+    else throw error(409, `${l.contacto || 'Ese contacto'} ya tiene dos teléfonos. Edita su ficha para cambiar uno.`);
+    await db.query(`INSERT INTO ${T.touches} (lead_id, canal, resultado, nota, usuario, created_at) VALUES ($1, 'ejecutiva', 'editado', $2, $3, $4)`,
+      [l.id, `Número agregado desde Marcar: ${tel.e164}`, usuario, ahora.toISOString()]);
+    return { lead_id: l.id, existente: true, conectado: 'contacto', empresa: l.empresa, etapa: l.etapa, telefono: tel.e164, principal: !l.telefono };
+  };
+  if (leadId) {
+    const l = (await db.query(`SELECT id, empresa, contacto, telefono, telefono_alt, etapa FROM ${T.leads} WHERE id = $1`, [Number(leadId)])).rows[0];
+    if (!l) throw error(404, 'Ese contacto ya no existe');
+    return agregarNumero(l);
+  }
+
+  const nombreEmpresa = String(empresa || '').trim();
+  let base = null;
+  if (nombreEmpresa) {
+    const lnE = await LN.enLista(db, [], [], [nombreEmpresa], []);
+    if (LN.motivoDe(lnE, { empresa: nombreEmpresa })) throw error(409, `${nombreEmpresa} está en la lista negra (empresa vetada).`);
+    const norm = LN.normalizarEmpresa(nombreEmpresa);
+    const misma = (await buscarEmpresas(db, nombreEmpresa, { limite: 20 })).find(g => g.norm === norm);
+    if (misma) {
+      const c = nombreSimple(contacto);
+      const igual = c && misma.contactos.find(x => nombreSimple(x.contacto) === c);
+      if (igual) return agregarNumero((await db.query(`SELECT id, empresa, contacto, telefono, telefono_alt, etapa FROM ${T.leads} WHERE id = $1`, [igual.id])).rows[0]);
+      base = (await db.query(`SELECT empresa, ciudad, extra FROM ${T.leads} WHERE id = $1`, [misma.contactos[0].id])).rows[0];
+      base.otros = misma.contactos.length;
+    }
+  }
+  const extra = base && base.extra ? Object.fromEntries(Object.entries(base.extra).filter(([k]) => EXTRA_EMPRESA.includes(k))) : null;
   const plan = planificar(config, tiempo.fechaBogota(ahora));
   const r = await db.query(
     `WITH nuevo AS (
-       INSERT INTO ${T.leads} (empresa, contacto, telefono, telefono_original, fuente)
-       VALUES ($1, $2, $3, $4, 'marcacion directa') RETURNING id
+       INSERT INTO ${T.leads} (empresa, contacto, telefono, telefono_original, fuente, ciudad, extra)
+       VALUES ($1, $2, $3, $4, 'marcacion directa', $6, $7) RETURNING id
      ), tareas AS (
        INSERT INTO ${T.tasks} (lead_id, paso, canal, due_at)
        SELECT nuevo.id, t.paso, t.canal, t.due_at FROM nuevo CROSS JOIN jsonb_to_recordset($5::jsonb) AS t(paso INT, canal TEXT, due_at TIMESTAMPTZ)
      )
      SELECT id FROM nuevo`,
-    [String(empresa || '').trim() || 'Sin empresa', String(contacto || '').trim() || null, tel.e164, String(telefono).trim(),
-     JSON.stringify(plan.map(p => ({ paso: p.paso, canal: p.canal, due_at: p.due_at.toISOString() })))]);
-  return { lead_id: r.rows[0].id, existente: false, telefono: tel.e164 };
+    [base ? base.empresa : (nombreEmpresa || 'Sin empresa'), String(contacto || '').trim() || null, tel.e164, String(telefono).trim(),
+     JSON.stringify(plan.map(p => ({ paso: p.paso, canal: p.canal, due_at: p.due_at.toISOString() }))),
+     base ? base.ciudad : null, extra && Object.keys(extra).length ? JSON.stringify(extra) : null]);
+  return { lead_id: r.rows[0].id, existente: false, telefono: tel.e164, ...(base ? { empresa_existente: base.empresa, otros_contactos: base.otros } : {}) };
 }
 
 module.exports.leadParaMarcar = leadParaMarcar;
+module.exports.buscarEmpresas = buscarEmpresas;
 
 // Editar los datos de contacto de un lead. Los teléfonos se normalizan; el principal sigue siendo
 // llave de deduplicación (si ya es de otro lead, 409 con quién). Queda un rastro en el historial.

@@ -1328,26 +1328,75 @@
 
   // ---------------------------------------------------------------- marcar
   function vistaMarcar() {
+    const campo = 'font:inherit;width:100%;padding:8px 10px;border:1px solid var(--linea);border-radius:8px;box-sizing:border-box';
     $app.innerHTML = `
-      <div class="cabeza"><div><h1>Marcar</h1><div class="suave">Un número que no está en ninguna lista. Si ya es de un lead, abre su ficha; si no, lo crea con la secuencia normal.</div></div></div>
-      <form class="panel" id="frm-marcar" style="max-width:520px">
+      <div class="cabeza"><div><h1>Marcar</h1><div class="suave">Un número que no está en ninguna lista. Si el número ya es de un lead, abre su ficha. Si la empresa ya existe, lo conecta con ella; si no, la crea con la secuencia normal.</div></div></div>
+      <form class="panel" id="frm-marcar" style="max-width:560px" autocomplete="off">
         <label class="suave" style="display:block;font-size:12px;font-weight:600;margin-bottom:4px">Teléfono</label>
-        <input name="telefono" inputmode="tel" autofocus required placeholder="300 123 4567 · +52 55 1234 5678" style="font:inherit;font-size:20px;width:100%;padding:10px 12px;border:1px solid var(--linea);border-radius:9px" />
+        <input name="telefono" inputmode="tel" autofocus required placeholder="300 123 4567 · +52 55 1234 5678" style="font:inherit;font-size:20px;width:100%;padding:10px 12px;border:1px solid var(--linea);border-radius:9px;box-sizing:border-box" />
         <div class="dos" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
-          <div><label class="suave" style="display:block;font-size:12px;font-weight:600;margin-bottom:4px">Empresa (opcional)</label><input name="empresa" style="font:inherit;width:100%;padding:8px 10px;border:1px solid var(--linea);border-radius:8px" /></div>
-          <div><label class="suave" style="display:block;font-size:12px;font-weight:600;margin-bottom:4px">Contacto (opcional)</label><input name="contacto" style="font:inherit;width:100%;padding:8px 10px;border:1px solid var(--linea);border-radius:8px" /></div>
+          <div class="buscador-empresa"><label class="suave" style="display:block;font-size:12px;font-weight:600;margin-bottom:4px">Empresa</label>
+            <input name="empresa" placeholder="Escribe para buscar si ya existe" style="${campo}" />
+            <div id="empresas-sug" class="buscar-resultados" hidden></div></div>
+          <div><label class="suave" style="display:block;font-size:12px;font-weight:600;margin-bottom:4px">Contacto (opcional)</label><input name="contacto" style="${campo}" /></div>
         </div>
+        <div id="conexion" class="calendly-aviso" hidden></div>
         <div class="acciones"><button class="btn primario grande" type="submit">📞 Llamar</button><button class="btn" type="button" id="solo-crear">Solo abrir la ficha</button></div>
         <div id="marcar-error"></div>
       </form>`;
     const $f = document.getElementById('frm-marcar');
+    const $emp = $f.querySelector('input[name=empresa]'), $con = $f.querySelector('input[name=contacto]');
+    const $sug = document.getElementById('empresas-sug'), $cx = document.getElementById('conexion');
+    let elegido = null;          // { tipo: 'contacto'|'empresa', empresa, lead? }
+    let temporizador = null, grupos = [];
+    const etapaTxt = c => c.pausado_ms ? 'En pausa' : etiqueta(meta.etapas, c.etapa);
+    const pintarConexion = () => {
+      if (!elegido) { $cx.hidden = true; return; }
+      $cx.hidden = false;
+      $cx.innerHTML = elegido.tipo === 'contacto'
+        ? `🔗 El número se agrega a <b>${esc(elegido.lead.contacto || 'este contacto')}</b> de <b>${esc(elegido.empresa)}</b> (${esc(etapaTxt(elegido.lead))})${elegido.lead.telefono ? ' como segundo teléfono' : ''}. <a href="#" data-soltar>Cambiar</a>`
+        : `🔗 Nuevo contacto en <b>${esc(elegido.empresa)}</b>, que ya tiene ${plural(elegido.n, 'contacto', 'contactos')}: queda con el mismo nombre de empresa y sus datos. <a href="#" data-soltar>Cambiar</a>`;
+      $cx.querySelector('[data-soltar]').addEventListener('click', e => { e.preventDefault(); elegido = null; pintarConexion(); $emp.focus(); });
+    };
+    const pintarSug = () => {
+      if (!grupos.length) { $sug.hidden = true; return; }
+      $sug.innerHTML = grupos.map((g, i) => `
+        <div class="emp-grupo">
+          <a href="#" class="res" data-emp="${i}"><b>${esc(g.empresa)}</b>${g.lista_negra ? ' <span class="chip vencida">lista negra</span>' : ''}<span class="suave"> · ${plural(g.contactos.length, 'contacto', 'contactos')} · <u>nuevo contacto aquí</u></span></a>
+          ${g.contactos.slice(0, 4).map((c, j) => `<a href="#" class="res sub" data-emp="${i}" data-c="${j}">↳ ${esc(c.contacto || 'Sin nombre')}${c.cargo ? ' · ' + esc(c.cargo) : ''} <span class="suave">· ${esc(etapaTxt(c))}${c.telefono ? ' · ' + esc(telVisible(c.telefono)) : ' · sin teléfono'} · <u>es esta persona</u></span></a>`).join('')}
+        </div>`).join('') + `<div class="nada">¿No está? Sigue escribiendo y se crea como empresa nueva.</div>`;
+      $sug.hidden = false;
+    };
+    $emp.addEventListener('input', () => {
+      elegido = null; pintarConexion();
+      clearTimeout(temporizador);
+      const q = $emp.value.trim();
+      if (q.length < 2) { grupos = []; return pintarSug(); }
+      temporizador = setTimeout(async () => { try { grupos = await api('empresas/buscar?q=' + encodeURIComponent(q)); if ($emp.value.trim() === q) pintarSug(); } catch (_) {} }, 220);
+    });
+    $sug.addEventListener('click', e => {
+      const a = e.target.closest('a.res'); if (!a) return;
+      e.preventDefault();
+      const g = grupos[Number(a.dataset.emp)];
+      if (g.lista_negra) { document.getElementById('marcar-error').innerHTML = pintarError(new Error(`${g.empresa} está en la lista negra (empresa vetada).`)); return; }
+      $emp.value = g.empresa;
+      if (a.dataset.c !== undefined) { const c = g.contactos[Number(a.dataset.c)]; elegido = { tipo: 'contacto', empresa: g.empresa, lead: c }; if (c.contacto) $con.value = c.contacto; }
+      else { elegido = { tipo: 'empresa', empresa: g.empresa, n: g.contactos.length }; $con.focus(); }
+      $sug.hidden = true; pintarConexion();
+    });
+    $emp.addEventListener('blur', () => setTimeout(() => { $sug.hidden = true; }, 200));
+    $emp.addEventListener('focus', () => { if (grupos.length && !elegido) $sug.hidden = false; });
     const ir = async llamar => {
       const d = Object.fromEntries(new FormData($f));
       if (!d.telefono.trim()) return;
+      if (elegido && elegido.tipo === 'contacto') d.lead_id = elegido.lead.id;
       try {
         const r = await api('marcar', { method: 'POST', body: d });
-        if (r.existente) avisar(`Ese número ya es de ${r.empresa} (${etiqueta(meta.etapas, r.etapa)}).`);
-        location.hash = `#/lead/${r.lead_id}${llamar ? '?llamar=1' : ''}`;
+        if (r.conectado === 'contacto') avisar(`Número agregado a ${elegido ? elegido.lead.contacto || 'ese contacto' : 'ese contacto'} de ${r.empresa}${r.principal ? '' : ' (segundo teléfono)'}.`);
+        else if (r.existente) avisar(`Ese número ya es de ${r.empresa} (${etiqueta(meta.etapas, r.etapa)}).`);
+        else if (r.empresa_existente) avisar(`Contacto nuevo en ${r.empresa_existente} (ya tenía ${plural(r.otros_contactos, 'contacto', 'contactos')}).`);
+        // Si el número quedó como segundo teléfono, se llama a ese.
+        location.hash = `#/lead/${r.lead_id}${llamar ? (r.conectado === 'contacto' && !r.principal ? '?llamar=alt' : '?llamar=1') : ''}`;
       } catch (e) { document.getElementById('marcar-error').innerHTML = pintarError(e); }
     };
     $f.addEventListener('submit', e => { e.preventDefault(); ir(true); });
@@ -1498,9 +1547,10 @@
       else if (partes[0] === 'comision') await vistaComision(new URLSearchParams(query));
       else if (partes[0] === 'lead' && partes[1]) {
         await vistaLead(partes[1]);
-        if (new URLSearchParams(query).get('llamar') === '1') {
+        const llamarA = new URLSearchParams(query).get('llamar');
+        if (llamarA === '1' || llamarA === 'alt') {
           history.replaceState(null, '', '#/lead/' + partes[1]);
-          const $b = document.getElementById('llamar');
+          const $b = document.getElementById(llamarA === 'alt' ? 'llamar-alt' : 'llamar');
           if ($b && !$b.disabled) $b.click(); else avisar('No se puede llamar: ' + (($b && $b.title) || 'sin telefonía'), 'aviso');
         }
       }

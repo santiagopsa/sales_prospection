@@ -124,5 +124,38 @@ test('integración con Postgres', { skip: !url && 'sin SDR_TEST_DATABASE_URL' },
     await assert.rejects(L.leadParaMarcar(db, config, { telefono: '12' }), /colombiano/);
   });
 
+  await t.test('marcación directa: conecta con la empresa existente antes de crearla', async () => {
+    await db.query(`INSERT INTO sdr.leads (empresa, contacto, telefono, ciudad, extra, etapa) VALUES
+      ('Avalon Pharmaceutical LATAM S.A.S.', 'Jenny Molina', '+573188018246', 'Bogota', '{"industria":"pharma","empleados":"76","seniority":"Entry"}', 'reunion_agendada'),
+      ('Avalon Pharmaceutical LATAM S.A.S.', 'Carlos Sin Tel', NULL, 'Bogota', NULL, 'nuevo')`);
+    const emp = await L.buscarEmpresas(db, 'avalon pharma');
+    assert.strictEqual(emp.length, 1);
+    assert.strictEqual(emp[0].contactos.length, 2);
+    assert.strictEqual(emp[0].lista_negra, false);
+    // Misma empresa escrita distinto, persona nueva → contacto nuevo EN esa empresa, con sus datos de empresa.
+    const n = await L.leadParaMarcar(db, config, { telefono: '311 555 0001', empresa: 'AVALON pharmaceutical latam', contacto: 'Ana Ruiz', usuario: 'Angie', ahora: jueves });
+    assert.deepStrictEqual([n.existente, n.empresa_existente, n.otros_contactos], [false, 'Avalon Pharmaceutical LATAM S.A.S.', 2]);
+    const nl = (await db.query('SELECT empresa, ciudad, extra FROM sdr.leads WHERE id=$1', [n.lead_id])).rows[0];
+    assert.deepStrictEqual(nl, { empresa: 'Avalon Pharmaceutical LATAM S.A.S.', ciudad: 'Bogota', extra: { industria: 'pharma', empleados: '76' } }); // sin seniority (es de la persona)
+    // Mismo contacto (por nombre, sin tildes) → se le agrega el número, no se duplica.
+    const c = await L.leadParaMarcar(db, config, { telefono: '311 555 0002', empresa: 'Avalon Pharmaceutical LATAM', contacto: 'jenny molina', usuario: 'Angie', ahora: jueves });
+    assert.deepStrictEqual([c.existente, c.conectado, c.principal], [true, 'contacto', false]);
+    assert.strictEqual((await db.query(`SELECT telefono_alt FROM sdr.leads WHERE contacto='Jenny Molina'`)).rows[0].telefono_alt, '+573115550002');
+    // Contacto elegido explícitamente sin teléfono → queda como principal.
+    const sin = (await db.query(`SELECT id FROM sdr.leads WHERE contacto='Carlos Sin Tel'`)).rows[0].id;
+    const k = await L.leadParaMarcar(db, config, { telefono: '311 555 0003', leadId: sin, ahora: jueves });
+    assert.deepStrictEqual([k.conectado, k.principal], ['contacto', true]);
+    // El número alterno ya se reconoce como de ese lead.
+    assert.strictEqual((await L.leadParaMarcar(db, config, { telefono: '311 555 0002' })).existente, true);
+    // Jenny ya tiene dos teléfonos: no se pisa.
+    await assert.rejects(L.leadParaMarcar(db, config, { telefono: '311 555 0004', empresa: 'Avalon Pharmaceutical LATAM', contacto: 'Jenny Molina' }), /dos teléfonos/);
+    // Empresa en lista negra → no deja crearla.
+    await db.query(`INSERT INTO sdr.lista_negra (empresa_norm, nota) VALUES ('vetada', 'competidor')`);
+    await assert.rejects(L.leadParaMarcar(db, config, { telefono: '311 555 0005', empresa: 'Vetada S.A.S.' }), /lista negra/);
+    // Empresa nueva → se crea como antes.
+    const z = await L.leadParaMarcar(db, config, { telefono: '311 555 0006', empresa: 'Zeta Nueva', ahora: jueves });
+    assert.deepStrictEqual([z.existente, z.empresa_existente], [false, undefined]);
+  });
+
   db.end();
 });

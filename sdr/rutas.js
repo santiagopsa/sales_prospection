@@ -151,7 +151,8 @@ function rutas({ db, config }) {
     ['get', '/api/llamadas/fallidas', async () => { sinDb(); return L.fallosDeMarcacion(db); }],
     ['post', '/api/llamadas/reportar', async ({ body }) => { sinDb(); const b = body || {}; return L.reportarLlamada(db, { uuid: b.uuid, leadId: b.lead_id, telefono: b.telefono, codigo: b.codigo, estado: b.estado, nota: b.nota, usuario: require('./resultados').usuarioValido(config, b.usuario) }); }],
     ['post', '/api/llamadas/:id/revisar', async ({ params, body }) => { sinDb(); return L.revisarFallo(db, params.id, (body || {}).revisado !== false); }],
-    ['post', '/api/marcar', async ({ body }) => { sinDb(); const b = body || {}; return L.leadParaMarcar(db, config, { telefono: b.telefono, empresa: b.empresa, contacto: b.contacto }); }],
+    ['post', '/api/marcar', async ({ body }) => { sinDb(); const b = body || {}; return L.leadParaMarcar(db, config, { telefono: b.telefono, empresa: b.empresa, contacto: b.contacto, leadId: b.lead_id || null, usuario: require('./resultados').usuarioValido(config, b.usuario) }); }],
+    ['get', '/api/empresas/buscar', async ({ query }) => { sinDb(); return L.buscarEmpresas(db, query.q); }],
     ['get', '/api/cargas', async () => { sinDb(); return L.cargas(db); }],
     ['get', '/api/cargas/:id', async ({ params }) => { sinDb(); return L.detalleCarga(db, params.id); }],
     ['post', '/api/importar', async ({ body }) => {
