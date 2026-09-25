@@ -40,7 +40,7 @@ with sync_playwright() as pw:
 
     # --- tablero vacío ---
     pg.goto(B); pg.wait_for_timeout(700)
-    assert "Vacantes verificables" in pg.inner_text("#vTablero"), "no cargó el tablero"
+    assert "Tablero" in pg.inner_text("#vTablero"), "no cargó el tablero"
     assert "Todavía no hay vacantes" in pg.inner_text("#vacList"), "estado vacío mal"
     shot(pg, "app_01_tablero_vacio")
 
@@ -189,7 +189,7 @@ with sync_playwright() as pw:
     r = pg.goto(f"http://127.0.0.1:{PORT}/verificacion")
     if not pg.url.endswith("/verificacion/"): errs.append(f"no redirigió al slash final: {pg.url}")
     pg.wait_for_timeout(600)
-    if "Vacantes verificables" not in pg.inner_text("#vTablero"): errs.append("no cargó montada sin slash")
+    if "Tablero" not in pg.inner_text("#vTablero"): errs.append("no cargó montada sin slash")
     if pg.evaluate("getComputedStyle(document.body).backgroundColor") in ("rgba(0, 0, 0, 0)","transparent"):
         errs.append("el CSS no cargó bajo el mount point")
 

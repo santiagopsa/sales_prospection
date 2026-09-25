@@ -176,4 +176,86 @@ t('no se repite en 500 intentos', () => {
   assert.ok(s.size > 495, 'demasiadas colisiones: ' + s.size);
 });
 
+console.log('el empleo que se verifica');
+const { conciliarEmpleo, mismaEmpresa, estadisticas, estadoTablero, claveEvaluador } = require('../rules');
+const C = (c1, c2, c3, c4) => [['C1',c1],['C2',c2],['C3',c3],['C4',c4]].map(([id, v]) => ({id, cumplido:v, como:''}));
+t('la misma empresa se reconoce con sufijos, tildes y mayúsculas', () => {
+  assert.ok(mismaEmpresa('Jerónimo Martins Colombia S.A.S.', 'jeronimo martins'));
+  assert.ok(mismaEmpresa('Grupo Éxito', 'Éxito'));
+  assert.ok(!mismaEmpresa('Alpina', 'Nutresa'));
+});
+t('si el análisis verifica OTRO empleo, el declarado queda no verificado y se avisa', () => {
+  const r = conciliarEmpleo({empresa:'Alpina', cargo:'Consultor'}, {empresa:'Nutresa', estado:'verificada', verificada:true, criterios:C(true,true,true,true), por_que_verificada:'x'});
+  assert.strictEqual(r.estado, 'no_verificada'); assert.strictEqual(r.verificada, false);
+  assert.strictEqual(r.empresa, 'Alpina'); assert.strictEqual(r.aviso, 'otro_empleo'); assert.strictEqual(r.otro_empleo, 'Nutresa');
+  assert.strictEqual(r.por_que_verificada, '');
+});
+t('verificada exige C1, C2 y C3 cumplidos: sin C3 baja a no verificada y dice qué faltó', () => {
+  const r = conciliarEmpleo({empresa:'Alpina'}, {empresa:'Alpina S.A.', estado:'verificada', criterios:C(true,true,null,true), por_que_verificada:'x'});
+  assert.strictEqual(r.estado, 'no_verificada'); assert.match(r.que_falto, /C3/);
+});
+t('C4 incumplido es "contradice", aunque el modelo diga verificada', () => {
+  assert.strictEqual(conciliarEmpleo({empresa:'Alpina'}, {empresa:'Alpina', estado:'verificada', criterios:C(true,true,true,false)}).estado, 'contradice');
+});
+t('con los cuatro criterios, queda verificada con su porqué y los datos del ancla', () => {
+  const r = conciliarEmpleo({empresa:'Alpina', cargo:'Consultor SAP PP', periodo:'2023 - hoy'}, {empresa:'alpina', cargo:'otro texto', estado:'verificada', criterios:C(true,true,true,true), por_que_verificada:'Narró decisiones propias.'});
+  assert.strictEqual(r.estado, 'verificada'); assert.strictEqual(r.cargo, 'Consultor SAP PP'); assert.strictEqual(r.por_que_verificada, 'Narró decisiones propias.');
+});
+t('sin ancla y sin empresa identificada no hay nada que verificar', () => {
+  assert.strictEqual(conciliarEmpleo(null, {estado:'verificada', verificada:true}).estado, 'no_verificada');
+});
+t('análisis anteriores sin "estado" se leen por el booleano', () => {
+  assert.strictEqual(conciliarEmpleo({empresa:'Alpina'}, {empresa:'Alpina', verificada:true}).estado, 'verificada');
+});
+
+console.log('el tablero');
+// Jueves 24 de septiembre de 2026, 15:00 en Colombia (20:00 UTC).
+const AHORA = Date.parse('2026-09-24T20:00:00Z');
+const hace = (dias, horas = 0) => new Date(AHORA - dias * 86400000 - horas * 3600000).toISOString();
+const S = [
+  {evaluator:'Weimar', status:'issued', entrevista_at:hace(0, 20), issued_at:hace(0, 2), req_total:3, req_cumple:3},
+  {evaluator:'weimar ', status:'issued', entrevista_at:hace(1, 30), issued_at:hace(1, 6), req_total:3, req_cumple:2},
+  {evaluator:'Weimar', status:'issued', entrevista_at:hace(8), issued_at:hace(7), req_total:2, req_cumple:2},
+  {evaluator:'Weimar', status:'draft', transcript_at:hace(0, 1), started_at:hace(0, 3)},
+  {evaluator:'Weimar', status:'esperando', entrevista_at:hace(0, 5)},
+  {evaluator:'Laura M.', status:'issued', entrevista_at:hace(2), issued_at:hace(2, -4), req_total:3, req_cumple:3},
+];
+t('el estado del tablero sale de la sesión', () => {
+  assert.strictEqual(estadoTablero(S[0]), 'emitido');
+  assert.strictEqual(estadoTablero(S[3]), 'calificar');
+  assert.strictEqual(estadoTablero(S[4]), 'espera');
+  assert.strictEqual(estadoTablero({status:'draft', transcript_status:'procesando', transcript_started_at:new Date().toISOString()}), 'analizando');
+  assert.strictEqual(estadoTablero({status:'draft'}), 'en_curso');
+});
+t('el evaluador se agrupa aunque lo escriban distinto', () => {
+  assert.strictEqual(claveEvaluador(' Weimar '), claveEvaluador('weimar'));
+  const e = estadisticas(S, {ahora:AHORA});
+  assert.deepStrictEqual(e.evaluadores.map(x => x.nombre), ['Weimar', 'Laura M.']);
+});
+t('esta semana, la pasada, racha, pendientes y calidad — por evaluador', () => {
+  const e = estadisticas(S, {evaluador:'WEIMAR', ahora:AHORA});
+  assert.strictEqual(e.semanas.length, 8);
+  assert.strictEqual(e.esta_semana.informes, 2);          // jueves y miércoles
+  assert.strictEqual(e.semana_pasada.informes, 1);        // hace 7 días
+  assert.strictEqual(e.racha, 2);                         // hoy y ayer
+  assert.strictEqual(e.pendientes.calificar, 1);
+  assert.strictEqual(e.pendientes.espera, 1);
+  assert.strictEqual(e.cumplen.informes, 3); assert.strictEqual(e.cumplen.cumplen, 2); assert.strictEqual(e.cumplen.pct, 67);
+  assert.ok(e.horas_a_informe.mediana > 17 && e.horas_a_informe.mediana < 25, String(e.horas_a_informe.mediana));
+  assert.strictEqual(e.equipo_semana, 3);                 // incluye a Laura
+});
+t('la racha salta el fin de semana y no la rompe un hoy todavía sin informe', () => {
+  // Lunes 28 de septiembre, sin informe hoy; hubo el viernes 25 y el jueves 24.
+  const lunes = Date.parse('2026-09-28T15:00:00Z');
+  const r = estadisticas([
+    {evaluator:'A', status:'issued', issued_at:'2026-09-25T18:00:00Z'},
+    {evaluator:'A', status:'issued', issued_at:'2026-09-24T18:00:00Z'},
+  ], {ahora:lunes}).racha;
+  assert.strictEqual(r, 2);
+});
+t('sin datos no se rompe', () => {
+  const e = estadisticas([], {ahora:AHORA});
+  assert.strictEqual(e.racha, 0); assert.strictEqual(e.cumplen.pct, null); assert.strictEqual(e.horas_a_informe.mediana, null);
+});
+
 console.log(`\n${n} pruebas · todo en verde`);

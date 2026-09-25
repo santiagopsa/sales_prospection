@@ -1,4 +1,4 @@
-"""Con CV cargado: preguntas del candidato, fase de trayectoria y bloque en el acta."""
+"""Con CV cargado: preguntas del candidato, el último empleo anclado a la hoja de vida y bloque en el acta."""
 from playwright.sync_api import sync_playwright
 import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
@@ -44,9 +44,10 @@ with sync_playwright() as pw:
 
     pg.click("#btnIniciar"); pg.wait_for_selector("#vLive.on", timeout=15000); pg.wait_for_timeout(600)
 
-    # la fase de trayectoria solo aparece porque hay CV
+    # el tramo del último empleo está siempre; con CV arranca anclado al primer empleo declarado
     nav = pg.inner_text("#phaseNav")
-    if "Trayectoria" not in nav: errs.append("no apareció la fase de trayectoria")
+    if "Último empleo" not in nav: errs.append("no apareció la fase del último empleo")
+    sid = pg.evaluate("() => S.sid")
 
     for k in ["grab","cam"]: pg.click(f'[data-idc="{k}"]'); pg.wait_for_timeout(90)
     pg.click("[data-next]"); pg.wait_for_timeout(400)
@@ -64,13 +65,19 @@ with sync_playwright() as pw:
     r2 = pg.inner_text("#stage")
     if "no menciona" not in r2.lower(): errs.append("no avisa que el CV no cubre el segundo requisito")
 
-    # la trayectoria durante la entrevista es guía: se pregunta, no se marca.
-    # Se busca por selector porque entremedio puede haber una fase de inglés.
-    flujo.avanzar_hasta(pg, "#stage .tray")
+    # El último empleo durante la entrevista: anclado a la hoja de vida, con la pregunta literal y
+    # su criterio. Se pregunta, no se marca. La trayectoria completa queda plegada, sin verificar.
+    flujo.avanzar_hasta(pg, "#pregEmp")
     tg = pg.inner_text("#stage")
-    if "Trayectoria" not in tg: errs.append("la trayectoria no aparece durante la entrevista")
-    if pg.query_selector('[data-tray="0"][data-est="confirmado"]'):
-        errs.append("durante la entrevista deja marcar la trayectoria — eso viene con la transcripción")
+    if pg.input_value('[data-emp="empresa"]') != "Alpina":
+        errs.append(f"el último empleo no quedó anclado al primero de la hoja de vida: {pg.input_value('[data-emp=empresa]')!r}")
+    if "Alpina" not in pg.inner_text("#pregEmp"): errs.append("la pregunta del último empleo no nombra la empresa")
+    if "Se da por buena si" not in tg: errs.append("la pregunta del último empleo no trae su criterio")
+    if "no se verifican" not in tg.lower(): errs.append("no aclara que los empleos anteriores no se verifican")
+    if "Hueco de casi un año" not in tg: errs.append("los puntos abiertos del CV no aparecen durante la entrevista")
+    if pg.query_selector('[data-expest]'):
+        errs.append("durante la entrevista deja marcar el empleo — eso viene con la transcripción")
+    pg.screenshot(path="/tmp/pk/cv_03a_empleo_guia.png", full_page=True)
 
     # entrevista → transcripción → niveles confirmados
     flujo.recorrer_guia(pg)
@@ -80,15 +87,20 @@ with sync_playwright() as pw:
         "Sondeado desde cero; la escena quedó genérica.",
     ])
 
-    # trayectoria: ahora sí se marca. Se avanza por selector y no contando clics, porque
-    # entremedio puede haber una fase de inglés según lo que pida la vacante.
-    flujo.avanzar_hasta(pg, '[data-tray="0"][data-est="confirmado"]')
+    # El análisis recibió el empleo declarado como ancla.
+    import json as _json
+    ses = _json.load(urllib.request.urlopen(B + f"api/sessions/{sid}"))
+    if ((ses.get("__empleo_recibido") or {}).get("empresa")) != "Alpina":
+        errs.append(f"el análisis no recibió el último empleo como ancla: {ses.get('__empleo_recibido')!r}")
+
+    # Último empleo en la calificación: criterio por criterio y el estado propuesto.
+    flujo.avanzar_hasta(pg, '[data-expest="verificada"]')
     tr = pg.inner_text("#stage")
-    for must in ["Trayectoria", "Alpina", "Quala", "Hueco de casi un año"]:
-        if must.lower() not in tr.lower(): errs.append(f"la fase de trayectoria no muestra: {must}")
-    pg.screenshot(path="/tmp/pk/cv_03_trayectoria.png", full_page=True)
-    pg.click('[data-tray="0"][data-est="confirmado"]'); pg.wait_for_timeout(200)
-    pg.click('[data-tray="1"][data-est="sin_sostener"]'); pg.wait_for_timeout(300)
+    for must in ["Último empleo", "C1", "C3", "En Alpina, entre marzo y noviembre"]:
+        if must.lower() not in tr.lower(): errs.append(f"la fase del último empleo no muestra: {must}")
+    if not pg.query_selector('[data-expest="verificada"].sel'):
+        errs.append("la propuesta del análisis (verificada) no quedó seleccionada")
+    pg.screenshot(path="/tmp/pk/cv_03_empleo.png", full_page=True)
     pg.click("[data-next]"); pg.wait_for_timeout(500)
 
     # contexto y cierre

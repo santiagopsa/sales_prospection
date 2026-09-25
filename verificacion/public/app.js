@@ -80,6 +80,7 @@ const ROTULOS = {
     pr_sen_ok_t: 'Sin señales de asistencia', pr_sen_ok_s: 'Sin lectura de IA ni ayuda externa',
     pr_sen_no_s: 'Observación factual durante la sesión',
     ing_exigido_corto: 'El cargo pide', ing_no_eval: 'NO EVALUADO', ing_conv: 'valoración conversacional en vivo, no certificación',
+    corregido: 'Corregido el', corr_candidato: 'nombre del candidato',
     sello_exp_ok: 'Experiencia reciente verificada', sello_exp_no: 'Experiencia reciente no verificada',
     chip_ubicacion: 'Ubicación', chip_disponibilidad: 'Disponibilidad', chip_pretension: 'Aspiración', chip_ingles: 'Inglés', chip_procesos: 'Otros procesos',
     posicionamiento: 'Posicionamiento',
@@ -139,6 +140,7 @@ const ROTULOS = {
     pr_sen_ok_t: 'No signs of assistance', pr_sen_ok_s: 'No AI reading or external help',
     pr_sen_no_s: 'Factual observation during the session',
     ing_exigido_corto: 'Role requires', ing_no_eval: 'NOT ASSESSED', ing_conv: 'live conversational assessment, not a certification',
+    corregido: 'Corrected on', corr_candidato: 'candidate name',
     sello_exp_ok: 'Recent experience verified', sello_exp_no: 'Recent experience not verified',
     chip_ubicacion: 'Location', chip_disponibilidad: 'Availability', chip_pretension: 'Salary expectation', chip_ingles: 'English', chip_procesos: 'Other processes',
     posicionamiento: 'Positioning',
@@ -363,6 +365,32 @@ const EV_MIN = 10;   // mínimo de caracteres para que el porqué cuente; el ser
 // Lo que se exige para emitir es el porqué del nivel — lo que se imprime. El rastro de
 // auditoría sirve de respaldo para sesiones anteriores, donde era el único texto.
 const porqueDe = r => String(r.exp || r.ev || '').trim();
+
+/* ---- el empleo que se verifica ----
+   UNO: el más reciente declarado (hoja de vida, o lo que el reclutador anota en la entrevista).
+   Los criterios son fijos y son los mismos que usa el análisis (prompts.js · CRITERIOS_EMPLEO). */
+const CRIT_EMPLEO = {
+  C1: 'Confirma empresa, cargo y fechas, y cuadran con lo declarado',
+  C2: 'Describe lo que hacía él en el día a día, no el equipo',
+  C3: 'Cuenta una situación, decisión o resultado concreto de ese empleo',
+  C4: 'Nada de lo que cuenta contradice lo declarado',
+};
+const ESTADO_EXP = {
+  verificada:    ['ok',  'Verificada',   'Narró ese empleo con sus responsabilidades y un caso propio.'],
+  no_verificada: ['par', 'No verificada', 'No quedó narrado con lo que piden los criterios.'],
+  contradice:    ['no',  'No coincide',   'Lo que contó no cuadra con lo declarado.'],
+};
+// Estado del empleo: el explícito si lo hay; en análisis anteriores, el booleano.
+const estadoExp = x => !x ? null
+  : (x.estado !== undefined ? x.estado : (x.verificada === true ? 'verificada' : (x.verificada === false ? 'no_verificada' : null)));
+// La pregunta se lee literal: completa (pide todo lo que exigen C1–C3) y natural.
+function preguntaEmpleo(e){
+  const emp = e && String(e.empresa || '').trim();
+  return emp
+    ? `Cuéntame de tu trabajo más reciente, en ${emp}: qué cargo tenías y desde cuándo, qué era lo tuyo en el día a día, y una situación o un resultado concreto de ahí que te haya tocado a ti.`
+    : 'Cuéntame de tu trabajo más reciente: en qué empresa, qué cargo tenías y desde cuándo, qué era lo tuyo en el día a día, y una situación o un resultado concreto de ahí que te haya tocado a ti.';
+}
+const CRIT_EMPLEO_TXT = 'nombra empresa, cargo y fechas que cuadran con lo declarado; describe sus responsabilidades propias; y cuenta al menos una situación o resultado concreto de ese empleo.';
 let X = null;      // extracción del levantamiento en revisión
 let S = null;      // sesión en curso
 let VAC = null;    // vacante cargada para la sesión
@@ -383,72 +411,297 @@ function go(id){
   $('#btnReset').style.display = ((live || id==='vActa')) ? 'block' : 'none';
   $('#btnReset').textContent = lectura ? 'Volver a la lista' : 'Salir de la sesión';
   $('#whoTop').innerHTML = (S && (live || id==='vActa'))
-    ? [`<b>${esc(S.cand)}</b>`, S.rol && esc(S.rol)].filter(Boolean).join(' · ') : '';
+    ? [`<b>${esc(S.cand)}</b>${S.sid ? ' <button class="lapiz" id="btnCorregirNombre" type="button" title="Corregir el nombre del candidato">✎</button>' : ''}`, S.rol && esc(S.rol)].filter(Boolean).join(' · ') : '';
+  const bl = $('#btnCorregirNombre'); if(bl) bl.addEventListener('click', corregirNombre);
   window.scrollTo({top:0, behavior:'instant'});
 }
 
 /* ===================== tablero ===================== */
+/* Tres preguntas, en este orden: qué me toca hacer ahora (la cola), cómo voy (meta, racha y
+   cuatro indicadores) y dónde está cada vacante con sus candidatos. La lista completa queda al
+   final, con buscador. El "ver como" filtra la cola, los indicadores y la lista por evaluador;
+   las vacantes son del equipo y muestran a todos sus candidatos. */
+const TB = { vs: [], ss: [], st: null, fv: 'activas', fs: 'todas', qv: '', qs: '', lim: 25, abiertas: new Set() };
+const LS_EVAL = 'pkv_evaluador', LS_META = 'pkv_meta_semana';
+const lsGet = (k, d) => { try{ const v = localStorage.getItem(k); return v == null ? d : v; }catch(e){ return d; } };
+const lsSet = (k, v) => { try{ localStorage.setItem(k, v); }catch(e){} };
+const normTxt = t => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const claveEval = t => normTxt(t).replace(/[^a-z0-9 ]+/g, '').replace(/\s+/g, ' ').trim();
+const evalActual = () => lsGet(LS_EVAL, '');
+const metaSemana = () => { const n = parseInt(lsGet(LS_META, '10'), 10); return n > 0 && n < 500 ? n : 10; };
+
+function haceCuanto(ts){
+  if(!ts) return '';
+  const d = Date.now() - new Date(ts).getTime(); if(isNaN(d)) return '';
+  const m = Math.round(d / 60000);
+  if(m < 2) return 'ahora';
+  if(m < 60) return `hace ${m} min`;
+  const h = Math.round(m / 60);
+  if(h < 24) return `hace ${h} h`;
+  const dd = Math.round(h / 24);
+  if(dd === 1) return 'ayer';
+  if(dd < 14) return `hace ${dd} días`;
+  return fechaCorta(ts);
+}
+function horasTexto(h){
+  if(h == null) return '—';
+  if(h < 1) return `${Math.max(1, Math.round(h * 60))} min`;
+  if(h < 48) return `${Math.round(h)} h`;
+  return `${Math.round(h / 24)} días`;
+}
+// Qué me toca hacer con esta verificación: la etiqueta, el color y la acción.
+const ESTADO_TB = {
+  fallo:      {tag:'r',   tx:'ANÁLISIS FALLÓ',       cta:'Reintentar',          orden:0},
+  calificar:  {tag:'v',   tx:'LISTA PARA CALIFICAR', cta:'Calificar',           orden:1},
+  espera:     {tag:'a',   tx:'ESPERA TRANSCRIPCIÓN', cta:'Pegar transcripción', orden:2},
+  en_curso:   {tag:'n',   tx:'EN CURSO',             cta:'Retomar',             orden:3},
+  analizando: {tag:'acc', tx:'⏳ ANALIZANDO',         cta:'',                    orden:4},
+};
+const estadoDe = s => s.estado_tablero || (s.status === 'issued' ? 'emitido' : 'en_curso');
+const resultadoDe = s => {
+  if(s.status !== 'issued' || !Number(s.req_total)) return null;
+  const c = Number(s.req_cumple) || 0, t = Number(s.req_total);
+  return c >= t ? 'ok' : (c > 0 ? 'par' : 'no');
+};
+function sesionesDelEval(){
+  const k = claveEval(evalActual());
+  return k ? TB.ss.filter(s => claveEval(s.evaluator) === k) : TB.ss;
+}
+
+// Barras de las últimas 8 semanas. La semana en curso en el color de acento; las demás apagadas.
+function barrasSemanas(sem, campo, rotulo){
+  const max = Math.max(1, ...sem.map(x => x[campo]));
+  const w = 12, g = 3, h = 30;
+  return `<svg class="spark" viewBox="0 0 ${sem.length * (w + g) - g} ${h}" role="img" aria-label="${esc(rotulo)} por semana, últimas ${sem.length} semanas">
+    ${sem.map((x, i) => { const bh = x[campo] ? Math.max(3, Math.round((x[campo] / max) * (h - 2))) : 2;
+      return `<rect x="${i * (w + g)}" y="${h - bh}" width="${w}" height="${bh}" rx="2" class="${i === sem.length - 1 ? 'hoy' : ''}${x[campo] ? '' : ' cero'}"><title>Semana del ${fechaCorta(x.inicio + 'T12:00:00')}: ${x[campo]} ${esc(rotulo.toLowerCase())}</title></rect>`; }).join('')}
+  </svg>`;
+}
+function deltaTexto(ahora, antes, mejorSiSube = true, fmt = n => String(n)){
+  if(antes == null || ahora == null) return '';
+  const d = ahora - antes;
+  if(Math.abs(d) < 0.5) return `<span class="delta">igual que la semana pasada</span>`;
+  const bueno = mejorSiSube ? d > 0 : d < 0;
+  return `<span class="delta ${bueno ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${fmt(Math.abs(d))} ${d > 0 ? 'más' : 'menos'} que la semana pasada</span>`;
+}
+
+function pintarIndicadores(){
+  const st = TB.st;
+  if(!st){ $('#kpis').innerHTML = ''; $('#metaCard').innerHTML = ''; return; }
+  const ev = evalActual();
+  const nombre = ev ? ((st.evaluadores.find(e => e.clave === claveEval(ev)) || {}).nombre || ev) : '';
+  $('#tabSaludo').textContent = nombre ? `Hola, ${nombre.split(' ')[0]}` : 'Tablero del equipo';
+  $('#tabLede').textContent = nombre ? 'Lo que te toca hacer, cómo vas esta semana y dónde está cada vacante.'
+                                      : 'Lo pendiente, cómo va el equipo esta semana y dónde está cada vacante.';
+
+  // Meta de la semana y racha: lo que motiva es ver el avance, no un ranking.
+  const meta = metaSemana(), hechos = st.esta_semana.informes;
+  const pct = Math.min(100, Math.round(100 * hechos / meta));
+  const pend = st.pendientes || {};
+  const nudge = hechos >= meta ? `Meta cumplida${hechos > meta ? ` y ${hechos - meta} de más` : ''}. Buen trabajo.`
+    : pend.calificar ? `Tienes ${pend.calificar} ${pend.calificar === 1 ? 'verificación lista' : 'verificaciones listas'} para calificar: ${pend.calificar === 1 ? 'es un informe casi hecho' : 'son informes casi hechos'}.`
+    : hechos > st.semana_pasada.informes ? `Llevas ${hechos - st.semana_pasada.informes} más que toda la semana pasada.`
+    : hechos ? `Te faltan ${meta - hechos} para la meta.` : 'La semana está empezando: el primer informe marca el ritmo.';
+  $('#metaCard').innerHTML = `
+    <div class="metamain">
+      <div class="metatop"><b>Meta de la semana</b><span><b class="metanum">${hechos}</b> de ${meta} informes</span>
+        <button class="linkbtn" id="btnMeta" type="button">cambiar</button></div>
+      <div class="meter" role="progressbar" aria-valuemin="0" aria-valuemax="${meta}" aria-valuenow="${hechos}"><i style="width:${pct}%"></i></div>
+      <p class="nudge">${esc(nudge)}${ev && st.equipo_semana ? ` <span class="equipo">El equipo lleva ${st.equipo_semana} esta semana.</span>` : ''}</p>
+    </div>
+    <div class="racha ${st.racha ? 'on' : ''}" title="Días hábiles seguidos con al menos un informe emitido">
+      <b>${st.racha ? '🔥 ' + st.racha : '0'}</b><span>${st.racha === 1 ? 'día hábil seguido' : 'días hábiles seguidos'} emitiendo</span>
+    </div>`;
+  $('#btnMeta').addEventListener('click', async () => {
+    const v = await preguntar('Meta de informes por semana', 'Cuántos informes quieres emitir cada semana. Se guarda en este navegador.', 'Guardar', 'Cancelar', String(meta));
+    const n = parseInt(v, 10);
+    if(v !== null && n > 0 && n < 500){ lsSet(LS_META, String(n)); pintarIndicadores(); }
+  });
+
+  const hm = st.horas_a_informe || {};
+  const cu = st.cumplen || {};
+  const tiles = [
+    {l:'Informes emitidos', v:String(st.esta_semana.informes), sub:'esta semana', d:deltaTexto(st.esta_semana.informes, st.semana_pasada.informes), sp:barrasSemanas(st.semanas, 'informes', 'Informes')},
+    {l:'Entrevistas', v:String(st.esta_semana.entrevistas), sub:'esta semana', d:deltaTexto(st.esta_semana.entrevistas, st.semana_pasada.entrevistas), sp:barrasSemanas(st.semanas, 'entrevistas', 'Entrevistas')},
+    {l:'De la entrevista al informe', v:horasTexto(hm.mediana), sub: hm.n ? `mediana de ${hm.n} informe${hm.n === 1 ? '' : 's'}, 30 días` : 'sin informes en 30 días',
+     d: (hm.mediana != null && hm.previa != null && Math.abs(hm.mediana - hm.previa) >= 1)
+       ? `<span class="delta ${hm.mediana < hm.previa ? 'up' : 'down'}">${hm.mediana < hm.previa ? '▼' : '▲'} ${horasTexto(Math.abs(hm.mediana - hm.previa))} ${hm.mediana < hm.previa ? 'más rápido' : 'más lento'} que el mes anterior</span>` : '', sp:''},
+    {l:'Candidatos que cumplen todo', v: cu.pct == null ? '—' : cu.pct + '%', sub: cu.informes ? `${cu.cumplen} de ${cu.informes} informes, 30 días` : 'sin informes en 30 días', d:'', sp:''},
+  ];
+  $('#kpis').innerHTML = tiles.map(t => `<div class="kpi">
+      <div class="kl">${esc(t.l)}</div>
+      <div class="kv">${esc(t.v)}</div>
+      <div class="ks">${esc(t.sub)}</div>
+      ${t.d || ''}
+      ${t.sp || ''}
+    </div>`).join('');
+}
+
+function pintarCola(){
+  const mias = sesionesDelEval().filter(s => ESTADO_TB[estadoDe(s)]);
+  mias.sort((a, b) => ESTADO_TB[estadoDe(a)].orden - ESTADO_TB[estadoDe(b)].orden
+    || new Date(a.updated_at || a.entrevista_at || a.started_at) - new Date(b.updated_at || b.entrevista_at || b.started_at));
+  const cuenta = {}; mias.forEach(s => { const e = estadoDe(s); cuenta[e] = (cuenta[e] || 0) + 1; });
+  $('#colaCount').textContent = mias.length ? `${mias.length} pendiente${mias.length === 1 ? '' : 's'}` : '';
+  $('#colaRes').innerHTML = Object.keys(ESTADO_TB).filter(k => cuenta[k]).map(k =>
+    `<span class="tag ${ESTADO_TB[k].tag}">${cuenta[k]} · ${ESTADO_TB[k].tx.replace('⏳ ', '')}</span>`).join('');
+  $('#colaList').innerHTML = mias.length ? mias.slice(0, 12).map(s => {
+    const e = estadoDe(s), E = ESTADO_TB[e];
+    const ref = e === 'espera' ? (s.entrevista_at || s.started_at) : (s.updated_at || s.transcript_at || s.started_at);
+    const viejo = e === 'espera' && ref && (Date.now() - new Date(ref).getTime()) > 86400000;
+    return `<div class="crow" data-abrir="${s.id}" role="button" tabindex="0">
+      <span class="tag ${E.tag}">${E.tx}</span>
+      <div class="rowmain"><b>${esc(s.candidate)}</b><span>${esc(s.vacancy_title || 'sin vacante')}${s.company_name ? ' · ' + esc(s.company_name) : ''}${evalActual() ? '' : ' · ' + esc(s.evaluator || 'sin evaluador')}</span></div>
+      <span class="cwhen ${viejo ? 'viejo' : ''}">${esc(haceCuanto(ref))}</span>
+      ${E.cta ? `<span class="ccta">${E.cta} →</span>` : '<span class="ccta muted">en segundos</span>'}
+    </div>`;
+  }).join('') + (mias.length > 12 ? `<p class="hint">Y ${mias.length - 12} más: están en la lista de verificaciones, filtro “Pendientes”.</p>` : '')
+    : `<div class="empty ok">Nada pendiente. Todo lo entrevistado ya tiene su informe.</div>`;
+}
+
+function pintarVacantes(){
+  const q = normTxt(TB.qv.trim());
+  const porVac = {};
+  TB.ss.forEach(s => { if(s.vacancy_id != null) (porVac[s.vacancy_id] = porVac[s.vacancy_id] || []).push(s); });
+  const cerrada = v => (v.status || 'activa') === 'cerrada';
+  let vs = TB.vs.filter(v => TB.fv === 'todas' || (TB.fv === 'cerradas' ? cerrada(v) : !cerrada(v)));
+  if(q) vs = vs.filter(v => normTxt(v.title + ' ' + (v.company_name || '')).includes(q));
+  const act = v => new Date(v.ultima_actividad || v.created_at || 0).getTime();
+  vs.sort((a, b) => act(b) - act(a));
+  const activas = TB.vs.filter(v => !cerrada(v)).length;
+  $('#vacCount').textContent = TB.vs.length ? `${activas} activa${activas === 1 ? '' : 's'}${TB.vs.length > activas ? ` · ${TB.vs.length - activas} cerrada${TB.vs.length - activas === 1 ? '' : 's'}` : ''}` : '';
+  if(!TB.vs.length){
+    $('#vacList').innerHTML = `<div class="empty">Todavía no hay vacantes. Empieza cargando el levantamiento de un cliente nuevo.</div>`;
+    return;
+  }
+  $('#vacList').innerHTML = vs.length ? vs.map(v => {
+    const cs = (porVac[v.id] || []).slice().sort((a, b) => new Date(b.updated_at || b.started_at) - new Date(a.updated_at || a.started_at));
+    const emit = cs.filter(s => s.status === 'issued');
+    const cumplen = emit.filter(s => resultadoDe(s) === 'ok').length;
+    const pend = cs.filter(s => s.status !== 'issued').length;
+    const abierta = TB.abiertas.has(v.id);
+    const puntos = cs.slice(0, 14).map(s => {
+      const r = resultadoDe(s), e = estadoDe(s);
+      const cl = r || (e === 'emitido' ? 'nv' : 'proc');
+      const tt = `${s.candidate} · ${r === 'ok' ? 'cumple todo' : r === 'par' ? 'cumple en parte' : r === 'no' ? 'no cumple' : (ESTADO_TB[e] ? ESTADO_TB[e].tx.replace('⏳ ', '').toLowerCase() : 'emitido')}`;
+      return `<i class="pt ${cl}" title="${esc(tt)}"></i>`;
+    }).join('') + (cs.length > 14 ? `<span class="ptmas">+${cs.length - 14}</span>` : '');
+    return `<div class="vac ${cerrada(v) ? 'cerrada' : ''}">
+      <button class="row vrow" data-vac="${v.id}" type="button">
+        <div class="rowmain">
+          <b>${esc(v.title)}${cerrada(v) ? ' <span class="tag n">CERRADA</span>' : ''}</b>
+          <span>${esc(v.company_name || 'sin empresa')} · ${v.req_count} excluyente${v.req_count === 1 ? '' : 's'}${v.ultima_actividad ? ' · actividad ' + esc(haceCuanto(v.ultima_actividad)) : ' · creada ' + fechaCorta(v.created_at)}</span>
+        </div>
+        <div class="vnums">
+          <span><b>${cs.length}</b> entrevistado${cs.length === 1 ? '' : 's'}</span>
+          <span><b>${emit.length}</b> informe${emit.length === 1 ? '' : 's'}</span>
+          <span class="${cumplen ? 'okc' : ''}"><b>${cumplen}</b> cumple${cumplen === 1 ? '' : 'n'} todo</span>
+          ${pend ? `<span class="penc"><b>${pend}</b> en proceso</span>` : ''}
+        </div>
+      </button>
+      ${cs.length ? `<div class="vpipe">
+        <div class="pts" aria-label="Candidatos de esta vacante">${puntos}</div>
+        <button class="linkbtn" data-vexp="${v.id}" type="button" aria-expanded="${abierta}">${abierta ? 'Ocultar candidatos' : `Ver ${cs.length === 1 ? 'el candidato' : `los ${cs.length} candidatos`}`}</button>
+      </div>` : ''}
+      ${abierta ? `<div class="vcands">${cs.map(s => filaSesion(s, 'data-abrir')).join('')}</div>` : ''}
+    </div>`;
+  }).join('') : `<div class="empty">Ninguna vacante coincide.</div>`;
+}
+
+// Una fila de verificación. `attr` separa las filas de la lista principal (data-ses) de las
+// que se repiten dentro de una vacante (data-abrir): hacen lo mismo, pero se cuentan aparte.
+function filaSesion(s, attr = 'data-ses'){
+  const e = estadoDe(s), E = ESTADO_TB[e];
+  const semTag = E ? E.tag : (s.semaforo === 'verde' ? 'v' : (s.semaforo === 'amarillo' ? 'a' : (s.semaforo === 'rojo' ? 'r' : 'n')));
+  const semTx = E ? E.tx : (s.semaforo ? s.semaforo.toUpperCase() : 'EMITIDO');
+  const r = resultadoDe(s);
+  return `<button class="row" ${attr}="${s.id}" type="button">
+    <div class="rowmain">
+      <b>${esc(s.candidate)}</b>
+      <span>${esc(s.vacancy_title || 'sin vacante')}${s.company_name ? ' · ' + esc(s.company_name) : ''} · ${esc(s.evaluator || 'sin evaluador')}</span>
+    </div>
+    ${r ? `<div class="res3 ${r}" title="Cumplió ${s.req_cumple} de ${s.req_total} requisitos"><span class="rq">${Array.from({length: Number(s.req_total)}, (_, i) => `<i class="${i < s.req_cumple ? 'on' : ''}"></i>`).join('')}</span><span>${s.req_cumple}/${s.req_total}</span></div>` : ''}
+    <div class="rowmeta">
+      <span class="tag ${semTag}">${semTx}</span><br>
+      <span class="mono">${esc(s.report_code || '')}</span> · ${fechaCorta(s.issued_at || s.started_at)}
+    </div>
+  </button>`;
+}
+
+function pintarVerificaciones(){
+  const q = normTxt(TB.qs.trim());
+  let ss = sesionesDelEval();
+  if(TB.fs === 'pendientes') ss = ss.filter(s => s.status !== 'issued');
+  if(TB.fs === 'emitidas') ss = ss.filter(s => s.status === 'issued');
+  if(q) ss = ss.filter(s => normTxt([s.candidate, s.vacancy_title, s.company_name, s.report_code, s.evaluator].join(' ')).includes(q));
+  const tot = sesionesDelEval().length;
+  $('#sesCount').textContent = tot ? (ss.length === tot ? `${tot} verificaci${tot === 1 ? 'ón' : 'ones'}` : `${ss.length} de ${tot}`) : '';
+  $('#sesList').innerHTML = ss.length ? ss.slice(0, TB.lim).map(s => filaSesion(s)).join('')
+    : `<div class="empty">${tot ? 'Ninguna verificación coincide.' : 'Ninguna verificación todavía.'}</div>`;
+  const b = $('#btnMasSes');
+  b.hidden = ss.length <= TB.lim;
+  if(!b.hidden) b.textContent = `Ver ${Math.min(25, ss.length - TB.lim)} más · quedan ${ss.length - TB.lim}`;
+}
+
+function enganchesTablero(){
+  // Delegación: las listas se repintan enteras y los botones nacen y mueren con ellas.
+  if(enganchesTablero.hecho) return;
+  enganchesTablero.hecho = true;
+  const abrir = e => {
+    const x = e.target.closest('[data-abrir],[data-ses],[data-vac],[data-vexp]');
+    if(!x) return;
+    if(x.dataset.vexp){ const id = +x.dataset.vexp; TB.abiertas.has(id) ? TB.abiertas.delete(id) : TB.abiertas.add(id); pintarVacantes(); return; }
+    if(x.dataset.vac){ verVacante(+x.dataset.vac); return; }
+    verSesion(+(x.dataset.abrir || x.dataset.ses));
+  };
+  ['#colaList', '#vacList', '#sesList'].forEach(sel => {
+    $(sel).addEventListener('click', abrir);
+    $(sel).addEventListener('keydown', e => { if((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-abrir]')){ e.preventDefault(); abrir(e); } });
+  });
+  $('#qVac').addEventListener('input', e => { TB.qv = e.target.value; pintarVacantes(); });
+  $('#qSes').addEventListener('input', e => { TB.qs = e.target.value; TB.lim = 25; pintarVerificaciones(); });
+  $('#segVac').querySelectorAll('[data-fv]').forEach(b => b.addEventListener('click', () => {
+    TB.fv = b.dataset.fv; $('#segVac').querySelectorAll('[data-fv]').forEach(x => x.classList.toggle('sel', x === b)); pintarVacantes();
+  }));
+  $('#segSes').querySelectorAll('[data-fs]').forEach(b => b.addEventListener('click', () => {
+    TB.fs = b.dataset.fs; TB.lim = 25; $('#segSes').querySelectorAll('[data-fs]').forEach(x => x.classList.toggle('sel', x === b)); pintarVerificaciones();
+  }));
+  $('#btnMasSes').addEventListener('click', () => { TB.lim += 25; pintarVerificaciones(); });
+  $('#selEval').addEventListener('change', async e => {
+    lsSet(LS_EVAL, e.target.value);
+    TB.lim = 25;
+    try{ TB.st = await api('/api/tablero' + (e.target.value ? '?evaluador=' + encodeURIComponent(e.target.value) : '')); }catch(err){}
+    pintarIndicadores(); pintarCola(); pintarVerificaciones();
+  });
+}
+
 async function loadTablero(){
   go('vTablero');
+  enganchesTablero();
   try{
-    const [vs, ss] = await Promise.all([api('/api/vacancies'), api('/api/sessions')]);
-
-    $('#vacCount').textContent = vs.length ? `${vs.length} vacante${vs.length>1?'s':''}` : '';
-    $('#vacList').innerHTML = vs.length ? vs.map(v => `
-      <button class="row" data-vac="${v.id}" type="button">
-        <div class="rowmain">
-          <b>${esc(v.title)}</b>
-          <span>${esc(v.company_name||'sin empresa')}${v.seniority?' · '+esc(v.seniority):''}${v.city?' · '+esc(v.city):''}</span>
-        </div>
-        <div class="rowmeta">
-          <span class="tag acc">${v.req_count} excluyente${v.req_count===1?'':'s'}</span><br>
-          ${v.session_count?`${v.session_count} verificación${v.session_count>1?'es':''} · `:''}${fechaCorta(v.created_at)}
-        </div>
-      </button>`).join('')
-      : `<div class="empty">Todavía no hay vacantes. Empieza cargando el levantamiento de un cliente nuevo.</div>`;
-    $('#vacList').querySelectorAll('[data-vac]').forEach(b =>
-      b.addEventListener('click', () => verVacante(+b.dataset.vac)));
-
-    $('#sesCount').textContent = ss.length ? (ss.length>1 ? `${ss.length} sesiones` : '1 sesión') : '';
-    $('#sesList').innerHTML = ss.length ? ss.map(s => {
-      // Una sesión esperando transcripción no está "en curso": está esperando algo de afuera,
-      // y si no se distingue en el tablero se pierde entre las demás y nadie la retoma.
-      // El análisis corre en el servidor mientras el reclutador está en otra entrevista: el
-      // tablero es donde se entera de que terminó, así que el estado tiene que verse aquí.
-      const procesando = s.status !== 'issued' && s.transcript_status === 'procesando';
-      const fallo = s.status !== 'issued' && s.transcript_status === 'error';
-      const esperando = s.status === 'esperando' && !s.transcript_at && !procesando && !fallo;
-      const porConfirmar = s.status !== 'issued' && !!s.transcript_at && !procesando;
-      const semTag = procesando ? 'acc' : fallo ? 'r' : esperando ? 'a'
-        : s.semaforo==='verde'?'v':(s.semaforo==='amarillo'?'a':(s.semaforo==='rojo'?'r':'n'));
-      const semTx = procesando ? '⏳ ANALIZANDO' : fallo ? 'ANÁLISIS FALLÓ'
-        : esperando ? 'ESPERA TRANSCRIPCIÓN'
-        : porConfirmar ? 'LISTA PARA CALIFICAR'
-        : s.semaforo ? s.semaforo.toUpperCase() : 'EN CURSO';
-      return `<button class="row" data-ses="${s.id}" type="button">
-        <div class="rowmain">
-          <b>${esc(s.candidate)}</b>
-          <span>${esc(s.vacancy_title||'sin vacante')}${s.company_name?' · '+esc(s.company_name):''} · ${esc(s.evaluator||'sin evaluador')}</span>
-        </div>
-        <div class="rowmeta">
-          <span class="tag ${semTag}">${semTx}</span><br>
-          <span class="mono">${esc(s.report_code||'')}</span> · ${fechaCorta(s.issued_at||s.started_at)}
-        </div>
-      </button>`;
-    }).join('') : `<div class="empty">Ninguna verificación todavía.</div>`;
-    $('#sesList').querySelectorAll('[data-ses]').forEach(b =>
-      b.addEventListener('click', () => verSesion(+b.dataset.ses)));
+    const ev = evalActual();
+    const [vs, ss, st] = await Promise.all([api('/api/vacancies'), api('/api/sessions'),
+      api('/api/tablero' + (ev ? '?evaluador=' + encodeURIComponent(ev) : '')).catch(() => null)]);
+    TB.vs = vs; TB.ss = ss; TB.st = st;
+    // El selector se arma con los evaluadores que existen; si el guardado ya no existe, se limpia.
+    const sel = $('#selEval');
+    const evs = (st && st.evaluadores) || [];
+    sel.innerHTML = `<option value="">Todo el equipo</option>` + evs.map(e => `<option value="${esc(e.nombre)}">${esc(e.nombre)} · ${e.n}</option>`).join('');
+    if(ev && evs.some(e => e.clave === claveEval(ev))) sel.value = evs.find(e => e.clave === claveEval(ev)).nombre;
+    else if(ev){ lsSet(LS_EVAL, ''); sel.value = ''; if(st && st.filtro){ TB.st = await api('/api/tablero').catch(() => st); } }
+    pintarIndicadores(); pintarCola(); pintarVacantes(); pintarVerificaciones();
 
     // Mientras haya un análisis en curso, el tablero se refresca solo: es la forma de que el
     // reclutador vea "lista para calificar" sin recargar. Cuando no hay nada procesando, no
     // se pregunta más — un tablero que consulta cada cinco segundos sin motivo es ruido.
     clearTimeout(TABLERO_TIMER);
-    if(ss.some(s => s.status !== 'issued' && s.transcript_status === 'procesando')){
+    if(ss.some(s => estadoDe(s) === 'analizando')){
       TABLERO_TIMER = setTimeout(() => { if($('#vTablero').classList.contains('on')) loadTablero(); }, 6000);
     }
   }catch(e){
     $('#vacList').innerHTML = `<div class="empty">No se pudo cargar: ${esc(e.message)}</div>`;
     $('#sesList').innerHTML = '';
+    $('#colaList').innerHTML = '';
   }
 }
 let TABLERO_TIMER = null;
@@ -507,6 +760,7 @@ async function verSesion(id){
                   : {...(s.identidad || {}), didit_status: s.didit_status,
                      face_verdict: s.face_verdict, face_score: s.face_score},
       doc: (snap && snap.documento) || s.documento || null,
+      correcciones: (snap && Array.isArray(snap.correcciones)) ? snap.correcciones : [],
       // El idioma en que se dejó el informe y su traducción, si ya se pidió. Solo cuentan
       // en un informe emitido: antes de emitir el texto todavía cambia.
       idioma: (s.status === 'issued' && s.idioma === 'en') ? 'en' : 'es',
@@ -963,6 +1217,7 @@ async function verVacante(id){
       <div class="hero" style="padding-bottom:16px">
         <div class="herohd">
           <h1>${esc(v.title)}</h1>
+          <button class="tbtn" id="btnEstadoVac" type="button">${(v.status || 'activa') === 'cerrada' ? 'Reabrir vacante' : 'Cerrar vacante'}</button>
           <button class="tbtn" id="btnEditarVac" type="button">Editar vacante</button>
         </div>
         <p class="lede" style="margin-bottom:12px">${esc(v.company_name||'')}${v.seniority?' · '+esc(v.seniority):''}${v.modality?' · '+esc(v.modality):''}${v.city?' · '+esc(v.city):''}${v.salary_text?' · '+esc(v.salary_text):''}</p>
@@ -1010,6 +1265,17 @@ async function verVacante(id){
     $('#vacStage').querySelector('[data-home]').addEventListener('click', loadTablero);
     $('#btnNuevaSesion').addEventListener('click', () => setupSesion(v));
     $('#btnEditarVac').addEventListener('click', () => editarVacante(v));
+    // Cerrar una vacante la saca del tablero (queda en el filtro "Cerradas"); sus verificaciones
+    // e informes no se tocan. Es lo que evita que el tablero se llene de búsquedas terminadas.
+    $('#btnEstadoVac').addEventListener('click', async () => {
+      const cerrar = (v.status || 'activa') !== 'cerrada';
+      if(cerrar && !await preguntar('¿Cerrar esta vacante?', 'Sale del tablero y queda en el filtro “Cerradas”. Sus verificaciones e informes no cambian, y se puede reabrir.', 'Cerrar vacante', 'Cancelar')) return;
+      try{
+        await api('/api/vacancies/' + v.id, {method:'PATCH', body:{status: cerrar ? 'cerrada' : 'activa'}});
+        toast(cerrar ? 'Vacante cerrada' : 'Vacante reabierta');
+        verVacante(v.id);
+      }catch(e){ toast('No se pudo: ' + e.message); }
+    });
     go('vVacante');
   }catch(e){
     toast('No se pudo abrir: ' + e.message);
@@ -1311,7 +1577,7 @@ function setupSesion(v){
         <div class="fttl">Quién</div>
         <div class="frow">
           <div class="f"><label for="sCand">Nombre del candidato</label><input id="sCand" placeholder="Nombre y apellido"></div>
-          <div class="f"><label for="sEval">Evaluador</label><input id="sEval" placeholder="Tu nombre"></div>
+          <div class="f"><label for="sEval">Evaluador</label><input id="sEval" placeholder="Tu nombre" value="${esc(evalActual())}"></div>
         </div>
         <div class="frow one">
           <div class="f"><label for="sMail">Correo del candidato (opcional)</label><input id="sMail" placeholder="para cruzar con el reporte de identidad"></div>
@@ -1456,6 +1722,11 @@ function setupSesion(v){
           const cv = await api(`/api/sessions/${S.sid}/cv`, {method:'POST', body:{cvText: cvTexto}});
           S.cv = cv.analisis || null;
           S.tray = cv.trayectoria || [];
+          // El empleo a verificar arranca como el primero de la hoja de vida (el más reciente).
+          if(S.tray[0] && !(S.exp && (S.exp.empresa || S.exp.cargo))){
+            const t0 = S.tray[0];
+            S.exp = {empresa:t0.empresa||'', cargo:t0.cargo||'', periodo:t0.periodo||'', fuente:'cv', estado:null, verificada:false};
+          }
           saveLocal();
         }catch(e){
           toast('El CV no se pudo analizar: ' + e.message + '. La sesión sigue igual, con las preguntas del cargo.');
@@ -1483,9 +1754,9 @@ function fases(){
     S.reqs.forEach((r,i) => f.push({k:'guia', i, t:r.n || ('Requisito '+(i+1)), min:6}));
     if(S.ing && S.ing.requerido) f.push({k:'ing', t:'Inglés', min:4});
     if((S.pf || []).length) f.push({k:'perfil', t:'Conducta', min:4});
-    // La trayectoria aparece en los dos momentos, y no es lo mismo: durante la llamada son
-    // las preguntas que hay que hacer sobre cada tramo; después, marcar si los sostuvo.
-    if((S.tray || []).length) f.push({k:'tray', t:'Trayectoria', min:4});
+    // Se verifica UN empleo, el más reciente, y tiene su propio tramo en los dos momentos:
+    // durante la llamada, la pregunta y el ancla; después, marcarlo contra sus criterios.
+    f.push({k:'emp', t:'Último empleo', min:4});
     f.push({k:'fin', t:'Fin de la entrevista', min:2});
     return f;
   }
@@ -1493,7 +1764,7 @@ function fases(){
   S.reqs.forEach((r,i) => f.push({k:'req', i, t:r.n || ('Requisito '+(i+1)), min:2}));
   if(S.ing && S.ing.requerido) f.push({k:'ing', t:'Inglés', min:2});
   if((S.pf || []).length) f.push({k:'perfil', t:'Conducta', min:3});
-  if((S.tray || []).length) f.push({k:'tray', t:'Trayectoria', min:3});
+  f.push({k:'emp', t:'Último empleo', min:2});
   f.push({k:'ctx', t:'Contexto', min:3});
   f.push({k:'cierre', t:'Cierre', min:3});
   return f;
@@ -1504,7 +1775,7 @@ function drawNav(){
     const done = f.k==='id' ? idChecksDe(S.kind).every(c=>S.idc[c.id])
       : f.k==='guia' ? i < S.fase
       : f.k==='req' ? S.reqs[f.i].lvl>0
-      : f.k==='tray' ? (S.tray||[]).every(t => t.estado && t.estado !== 'sin_confirmar')
+      : f.k==='emp' ? (enEntrevista() ? !!(S.exp && (S.exp.empresa || S.exp.cargo)) : !!estadoExp(S.exp))
       : f.k==='ctx' ? !!(S.rec && S.rec.veredicto)
       : false;
     return `<button class="ph ${i===S.fase?'act':''} ${done?'done':''}" data-f="${i}" type="button"><span class="dot"></span>${esc(f.t.length>26?f.t.slice(0,26)+'…':f.t)}</button>`;
@@ -1569,17 +1840,48 @@ function beaconSesion(){
 
 /* Pregunta propia en la página (ver index.html: confirm() del navegador puede quedar
    silenciado y entonces el botón parece muerto). Resuelve true/false. */
-function preguntar(titulo, texto, si = 'Guardar y salir', no = 'Seguir aquí'){
+function preguntar(titulo, texto, si = 'Guardar y salir', no = 'Seguir aquí', campo = null){
+  // Con `campo` (un valor inicial) la pregunta lleva un cuadro de texto y resuelve con lo
+  // escrito (o null si cancela). Sin campo, resuelve true/false.
   return new Promise(ok => {
-    const box = $('#pregunta');
+    const box = $('#pregunta'), inp = $('#pgInput');
     $('#pgTitulo').textContent = titulo; $('#pgTexto').textContent = texto;
     $('#pgSi').textContent = si; $('#pgNo').textContent = no;
-    const cerrar = v => { box.classList.remove('on'); $('#pgSi').onclick = $('#pgNo').onclick = null; ok(v); };
-    $('#pgSi').onclick = () => cerrar(true);
-    $('#pgNo').onclick = () => cerrar(false);
+    const conCampo = campo !== null && campo !== undefined;
+    inp.style.display = conCampo ? 'block' : 'none';
+    if(conCampo) inp.value = String(campo);
+    const cerrar = v => { box.classList.remove('on'); $('#pgSi').onclick = $('#pgNo').onclick = null; inp.onkeydown = null; ok(v); };
+    $('#pgSi').onclick = () => cerrar(conCampo ? inp.value.trim() : true);
+    $('#pgNo').onclick = () => cerrar(conCampo ? null : false);
+    inp.onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); $('#pgSi').click(); } };
     box.classList.add('on');
-    $('#pgSi').focus();
+    (conCampo ? inp : $('#pgSi')).focus();
+    if(conCampo) inp.select();
   });
+}
+
+/* Corregir el nombre del candidato, en una sesión en curso o en un acta ya emitida. En un
+   acta emitida el servidor recalcula la firma y anota la corrección, y el informe la
+   imprime: no se corrige a escondidas un documento firmado. */
+async function corregirNombre(){
+  if(!S || !S.sid) return;
+  const nuevo = await preguntar('Corregir el nombre del candidato', S.fin
+    ? 'El informe ya está emitido: se vuelve a firmar con el nombre correcto y la corrección queda anotada al pie. El PDF anterior deja de corresponder a la firma vigente.'
+    : 'Se cambia en esta sesión y en todo lo que se emita de aquí en adelante.', 'Corregir', 'Cancelar', S.cand || '');
+  if(nuevo === null) return;
+  if(!nuevo){ toast('El nombre no puede quedar vacío'); return; }
+  if(nuevo === S.cand){ toast('Es el mismo nombre'); return; }
+  overlay(true, 'Corrigiendo el nombre…', '');
+  try{
+    const out = await api('/api/sessions/' + S.sid + '/candidato', {method:'POST', body:{candidate: nuevo}, tope: 15000});
+    S.cand = out.candidate;
+    if(out.integrity_hash) S.hash = out.integrity_hash;
+    if(out.correcciones) S.correcciones = out.correcciones;
+    saveLocal();
+    if($('#vActa').classList.contains('on') && S.fin) verActa(); else { render(); go($('#vActa').classList.contains('on') ? 'vActa' : 'vLive'); }
+    toast('Nombre corregido: ' + out.candidate);
+  }catch(e){ toast('No se pudo corregir: ' + e.message); }
+  finally{ overlay(false); }
 }
 
 /* Salir de la sesión en curso. Nunca se queda esperando al servidor: guarda con tope,
@@ -1893,34 +2195,43 @@ function render(){
     evNote();
   }
 
-  else if(f.k === 'tray'){
+  else if(f.k === 'emp'){
+    // UN empleo: el más reciente declarado. Durante la llamada se ancla y se pregunta; después
+    // se marca contra C1–C4. La trayectoria completa de la hoja de vida queda plegada y solo
+    // como contexto: los empleos anteriores no se verifican ni van al informe.
+    S.exp = S.exp || {empresa:'', cargo:'', periodo:'', fuente:'reclutador', estado:null, verificada:false};
+    const E = S.exp;
     const T = S.tray || [];
     const pts = (S.cv && S.cv.puntos_a_aclarar) || [];
-    st.innerHTML = `
-      <div class="card">
-        <h2>Trayectoria</h2>
-        <div class="cs" style="margin-bottom:16px">${enEntrevista()
-          ? 'Lo que el CV declara. Pregúntale por los tramos que importan — marcarlos viene después, con la transcripción.'
-          : 'Lo que el CV declara. Marca cada tramo según lo que el candidato sostuvo en la sesión.'}</div>
-        ${enEntrevista()
-          ? `<div class="say"><div class="lb">QUÉ PEDIR EN CADA TRAMO</div><p style="font-style:normal">Que aterrice el trabajo con escena propia: qué hacía un día normal, con quién, qué salió mal. Mencionar la empresa no es sostenerla.</p></div>`
-          : `<div class="say"><div class="lb">CÓMO SE MARCA</div><p style="font-style:normal"><b>Confirmado</b> es que narró ese trabajo con escena y detalle propios, no que lo mencionó. <b>Sin sostener</b> es que no logró aterrizarlo. <b>Contradice</b> es que lo que contó no cuadra con lo que dice el CV.</p></div>`}
-        ${T.map((t,i) => `
-          <div class="tray">
-            <div class="trayhd">
-              <div>
-                <b>${esc(t.cargo||'—')}</b>
-                <span>${esc(t.empresa||'')}${t.periodo?' · '+esc(t.periodo):''}</span>
-              </div>
-              ${enEntrevista() ? '' : `<div class="trayb">
-                ${[['confirmado','Confirmado','ok'],['sin_sostener','Sin sostener','par'],['contradice','Contradice','no']].map(([k,tx,c]) =>
-                  `<button class="tb ${t.estado===k?'sel '+c:''}" data-tray="${i}" data-est="${k}" type="button">${tx}</button>`).join('')}
-              </div>`}
-            </div>
-            ${t.resumen ? `<div class="aev">${esc(t.resumen)}</div>` : ''}
-          </div>`).join('')}
+    const est = estadoExp(E);
+    const crits = Array.isArray(E.criterios) ? E.criterios : [];
+    const trayHtml = T.length ? `<details class="guionbox" style="margin-top:12px">
+        <summary>Trayectoria declarada en la hoja de vida · ${T.length} empleo${T.length===1?'':'s'} — no se verifican en esta sesión</summary>
+        ${T.map(t => `<div class="tray"><div class="trayhd"><div><b>${esc(t.cargo||'—')}</b>
+          <span>${esc(t.empresa||'')}${t.periodo?' · '+esc(t.periodo):''}</span></div></div>
+          ${t.resumen ? `<div class="aev">${esc(t.resumen)}</div>` : ''}</div>`).join('')}
+      </details>` : '';
+    const campos = `<div class="frow">
+        <div class="f"><label>Empresa</label><input data-emp="empresa" value="${esc(E.empresa||'')}" placeholder="Donde trabaja o trabajó por última vez"></div>
+        <div class="f"><label>Cargo</label><input data-emp="cargo" value="${esc(E.cargo||'')}" placeholder="Su cargo ahí"></div>
       </div>
-
+      <div class="frow one"><div class="f"><label>Periodo</label><input data-emp="periodo" value="${esc(E.periodo||'')}" placeholder="2022 – actualidad"></div></div>`;
+    st.innerHTML = enEntrevista() ? `
+      <div class="card">
+        <h2>Último empleo</h2>
+        <div class="cs" style="margin-bottom:14px">Se verifica <b>un solo empleo: el más reciente</b>. Es el que va al informe; los anteriores no.
+          ${E.fuente === 'cv' && E.empresa ? ' Viene de la hoja de vida — corrígelo si el candidato dice otra cosa.' : ' Anótalo cuando el candidato lo diga: el análisis verifica este y no otro.'}</div>
+        ${campos}
+        <div class="preg" style="margin-top:12px">
+          <div class="pq"><div class="pn">1</div><div class="pb">
+            <div class="pt">Pregunta</div>
+            <p class="px" id="pregEmp">“${esc(preguntaEmpleo(E))}”</p>
+            <p class="crit"><b>Se da por buena si:</b> ${esc(CRIT_EMPLEO_TXT)}</p>
+          </div></div>
+        </div>
+        <p class="hint">Léela tal cual. Si en las respuestas de los requisitos ya contó casos de este empleo, también cuentan.</p>
+        ${trayHtml}
+      </div>
       ${pts.length ? `<div class="card">
         <div class="fttl">Puntos que el CV deja abiertos</div>
         ${pts.map(p => `<div class="gap"><span class="qm">?</span><div>
@@ -1930,16 +2241,51 @@ function render(){
           </div></div>`).join('')}
         <p class="hint">Casi siempre tienen una explicación normal. La pregunta busca la explicación, no la confesión.</p>
       </div>` : ''}
-
+      <div class="nav">
+        <button data-prev type="button">Atrás</button>
+        <button class="pri" data-next type="button">Continuar</button>
+      </div>` : `
+      <div class="card">
+        <h2>Último empleo</h2>
+        <div class="cs" style="margin-bottom:14px">Se verifica un solo empleo, el más reciente. Confirma o corrige lo que propuso el análisis.</div>
+        ${campos}
+        ${E.aviso === 'otro_empleo' ? `<div class="aviso malo" style="margin-top:10px"><b>El análisis verificó otro empleo${E.otro_empleo ? ' (' + esc(E.otro_empleo) + ')' : ''}, no el declarado.</b>No se toma en cuenta: los empleos anteriores no se verifican ni van al informe. Si el candidato sí narró el empleo de arriba, márcalo tú.</div>` : ''}
+        ${E.otro_mas_reciente ? `<div class="aviso" style="margin-top:10px"><b>El candidato mencionó un empleo más reciente: ${esc(E.otro_mas_reciente)}.</b> Si la hoja de vida está desactualizada, corrige el empleo arriba y márcalo según lo que contó de ese.</div>` : ''}
+        <div class="detbox" style="margin-top:12px"><div class="dt">Criterio por criterio</div>
+          <div class="dets">${['C1','C2','C3','C4'].map(id => {
+            const c = crits.find(x => String(x.id).toUpperCase() === id) || {};
+            const cl = c.cumplido === true ? 'ok' : (c.cumplido === false ? 'no' : '');
+            return `<div class="det ${cl}"><span class="dq">${id} · ${esc(CRIT_EMPLEO[id])}</span>
+              <span class="da">${c.cumplido === true ? '✓ ' : (c.cumplido === false ? '✗ ' : '— ')}${esc(c.como || (c.cumplido == null ? 'sin evidencia en la conversación' : ''))}</span></div>`;
+          }).join('')}</div></div>
+        ${E.que_falto && E.aviso !== 'otro_empleo' && est !== 'verificada' ? `<p class="hint"><b>Qué faltó, según el análisis:</b> ${esc(E.que_falto)}</p>` : ''}
+        <div class="lvlttl" style="margin-top:14px">${est ? 'El análisis propone: ' + esc(ESTADO_EXP[est][1].toLowerCase()) + '. Confirma o corrige' : 'Marca cómo quedó'}</div>
+        <div class="modes tres" id="setExp">
+          ${Object.entries(ESTADO_EXP).map(([k, [c, t, d]]) => `<button class="mode ${est===k?'sel':''}" data-expest="${k}" type="button"><b>${t}</b><span>${d}</span></button>`).join('')}
+        </div>
+        ${est === 'verificada' ? `<div class="f" style="margin-top:12px"><label>Por qué quedó verificada — se imprime en el informe</label>
+          <textarea class="notes" data-exppq rows="2" placeholder="Una frase: decisiones propias, detalles consistentes con lo declarado, alcance coherente con el cargo. No cuentes lo que hizo.">${esc(E.porque||'')}</textarea></div>`
+          : `<p class="hint">En el informe sale como <b>no verificada</b>, sin explicación: el porqué queda aquí, para ti.</p>`}
+        ${trayHtml}
+      </div>
       <div class="nav">
         <button data-prev type="button">Atrás</button>
         <button class="pri" data-next type="button">Continuar</button>
       </div>`;
-    st.querySelectorAll('[data-tray]').forEach(b => b.addEventListener('click', e => {
-      const i = +e.currentTarget.dataset.tray;
-      S.tray[i].estado = e.currentTarget.dataset.est;
+    st.querySelectorAll('[data-emp]').forEach(el => el.addEventListener('input', e => {
+      S.exp[el.dataset.emp] = e.target.value;
+      if(S.exp.fuente !== 'reclutador' && el.dataset.emp === 'empresa') S.exp.fuente = 'reclutador';
+      const pe = st.querySelector('#pregEmp'); if(pe) pe.textContent = '“' + preguntaEmpleo(S.exp) + '”';
+      touch();
+    }));
+    st.querySelectorAll('[data-expest]').forEach(b => b.addEventListener('click', e => {
+      const k = e.currentTarget.dataset.expest;
+      S.exp.estado = k; S.exp.verificada = k === 'verificada';
+      if(k !== 'verificada') S.exp.porque = '';
       touch(); render();
     }));
+    const tpq = st.querySelector('[data-exppq]');
+    if(tpq) tpq.addEventListener('input', e => { S.exp.porque = e.target.value; touch(); });
   }
 
   else if(f.k === 'ctx'){
@@ -2267,20 +2613,17 @@ function render(){
         </div>
       </div>` : '')}
 
-      ${(S.exp && !S.exp.verificada) ? `
+      ${(S.exp && (S.exp.empresa || S.exp.cargo) && estadoExp(S.exp) !== 'verificada') ? `
       <div class="card">
         <div class="aviso">
-          <b>La experiencia más reciente quedó sin verificar.</b>
-          ${esc([S.exp.cargo, S.exp.empresa].filter(Boolean).join(' en ') || 'El último empleo del candidato')}${S.exp.periodo ? ' (' + esc(S.exp.periodo) + ')' : ''}
-          no quedó narrado con alcance y resultado propios en la conversación.
-          Si emites así, en el informe aparece como <b>no verificada</b> — que es una lectura
-          válida y honesta, pero conviene que sea tu decisión y no una sorpresa.
+          <b>El último empleo queda como no verificado en el informe.</b>
+          ${esc([S.exp.cargo, S.exp.empresa].filter(Boolean).join(' en ') || 'El último empleo del candidato')}${S.exp.periodo ? ' (' + esc(S.exp.periodo) + ')' : ''}:
+          ${estadoExp(S.exp) === 'contradice' ? 'lo que contó no cuadra con lo declarado.' : (estadoExp(S.exp) ? 'no quedó narrado con lo que piden los criterios.' : 'todavía no lo marcaste.')}
+          Es una lectura válida y honesta, pero conviene que sea tu decisión y no una sorpresa.
         </div>
         <div class="tools" style="margin-top:12px">
-          <button class="pri" id="btnMarcarExp" type="button">Sí quedó verificada, márcala</button>
+          <button class="pri" id="btnIrExp" type="button">Revisar el último empleo</button>
         </div>
-        <p class="hint">Márcala solo si el candidato de verdad narró ese trabajo con su propio
-        alcance y su propio resultado. En 30 minutos se verifica un empleo, y es este.</p>
       </div>` : ''}
 
       <div class="card">
@@ -2356,12 +2699,8 @@ function render(){
       S.kind = 'cierre'; S.idc = {...S.idc}; touch(); render();
       toast('Ahora puedes generar el link — se cotejará contra la captura de la entrevista');
     });
-    const bme = st.querySelector('#btnMarcarExp');
-    if(bme) bme.addEventListener('click', () => {
-      S.exp = {...S.exp, verificada:true};
-      touch(); render();
-      toast('Marcada como verificada — va así al informe');
-    });
+    const bie = st.querySelector('#btnIrExp');
+    if(bie) bie.addEventListener('click', () => goFase(fases().findIndex(x => x.k === 'emp')));
     st.querySelector('#btnActa').addEventListener('click', emitirActa);
     st.querySelector('#btnJson').addEventListener('click', copiarJSON);
     if(S.kind === 'cierre'){
@@ -2870,7 +3209,9 @@ async function analizarTranscripcion(){
   const texto = $('#transText').value.trim();
   overlay(true, 'Enviando la transcripción…', 'Un momento.');
   try{
-    const out = await api(`/api/sessions/${S.sid}/transcript`, {method:'POST', body:{transcript: texto}});
+    const empleo = (S.exp && (S.exp.empresa || S.exp.cargo))
+      ? {empresa:S.exp.empresa||'', cargo:S.exp.cargo||'', periodo:S.exp.periodo||'', fuente:S.exp.fuente||'reclutador'} : null;
+    const out = await api(`/api/sessions/${S.sid}/transcript`, {method:'POST', body:{transcript: texto, empleo}});
     // Antes la respuesta traía el análisis y el navegador esperaba 30-40 segundos con un velo
     // encima. Ahora el servidor contesta enseguida y analiza en segundo plano: el reclutador
     // puede irse al tablero y empezar la siguiente entrevista. Si prefiere quedarse, la sala
@@ -2986,14 +3327,24 @@ function aplicarTranscripcion(an){
   }
   // La experiencia más reciente, tal como la narró en la conversación. Si no la narró, queda
   // marcada como no verificada y el reclutador lo ve en el cierre antes de emitir.
+  // El servidor ya concilió el resultado contra el empleo declarado (rules.js · conciliarEmpleo):
+  // si el análisis habló de otro empleo, llega como no verificada con el aviso.
   const ex = S.tran.experiencia_reciente;
-  if(ex && (ex.empresa || ex.cargo)){
-    S.exp = {empresa:ex.empresa||'', cargo:ex.cargo||'', periodo:ex.periodo||'',
-             porque: ex.por_que_verificada || ex.resumen || '', verificada: ex.verificada === true};
+  const prev = S.exp || {};
+  if(ex && (ex.empresa || ex.cargo || ex.estado)){
+    const e0 = estadoExp(ex) || 'no_verificada';
+    S.exp = {empresa: ex.empresa || prev.empresa || '', cargo: ex.cargo || prev.cargo || '', periodo: ex.periodo || prev.periodo || '',
+             fuente: ex.fuente || prev.fuente || 'transcripcion',
+             estado: e0, verificada: e0 === 'verificada',
+             porque: e0 === 'verificada' ? (ex.por_que_verificada || ex.resumen || '') : '',
+             criterios: Array.isArray(ex.criterios) ? ex.criterios : [],
+             que_falto: ex.que_falto || '', otro_mas_reciente: ex.otro_mas_reciente || '', aviso: ex.aviso || '', otro_empleo: ex.otro_empleo || ''};
+  } else if(prev.empresa || prev.cargo){
+    S.exp = {...prev, estado:'no_verificada', verificada:false};
   } else if((S.tray||[]).length){
     const t0 = S.tray[0];
-    S.exp = {empresa:t0.empresa||'', cargo:t0.cargo||'', periodo:t0.periodo||'',
-             resumen:'', verificada:false};
+    S.exp = {empresa:t0.empresa||'', cargo:t0.cargo||'', periodo:t0.periodo||'', fuente:'cv',
+             resumen:'', estado:'no_verificada', verificada:false};
   }
   if(Array.isArray(S.tran.impacto)){
     S.impacto = S.tran.impacto
@@ -3233,7 +3584,7 @@ function verActa(){
   const tray = (S.tray || []).filter(t => t.empresa || t.cargo);
   const ultima = (() => {
     const x = S.snapExp || S.exp;
-    if(x && (x.empresa || x.cargo)) return {...x, ok: !!x.verificada};
+    if(x && (x.empresa || x.cargo)) return {...x, ok: estadoExp(x) === 'verificada'};
     const t0 = tray[0];
     if(!t0) return null;
     return {empresa:t0.empresa, cargo:t0.cargo, periodo:t0.periodo, resumen:'',
@@ -3517,7 +3868,7 @@ function verActa(){
         <div class="abtx">
           <h4>${R('responde')}</h4>
           <p>${(doc.tipo === 'acta') ? R('garantia_acta') : R('garantia_sin_id')} ${R('verifique')} <b>${esc(urlVerificacion(S.id))}</b>.${doc.alcance ? ` <span class="alc">${esc(doc.alcance)}</span>` : ''}</p>
-          <span class="sig">${R('firma')} ${esc(firmaCorta())} · ${R('evaluo')} ${esc(S.eval||'—')} · ${R('revision')} · ${R('escala_anclada')} · ${R('grabada_archivada')}${(doc.tipo === 'acta') ? ' · ' + R('id_externa') : ''}</span>
+          <span class="sig">${R('firma')} ${esc(firmaCorta())} · ${R('evaluo')} ${esc(S.eval||'—')} · ${R('revision')} · ${R('escala_anclada')} · ${R('grabada_archivada')}${(doc.tipo === 'acta') ? ' · ' + R('id_externa') : ''}${(S.correcciones||[]).map(c => ` · ${R('corregido')} ${esc(fechaLarga(new Date(c.at), idiomaInforme()))}: ${R('corr_' + c.campo) || esc(c.campo)}`).join('')}</span>
         </div>
         ${S.id ? `<button class="abqr" type="button" title="${esc(urlVerificacionAbs(S.id))}">
           ${huecoQr(urlVerificacionAbs(S.id), 6, R('qr_alt'))}
@@ -3618,7 +3969,8 @@ function init(){
   $('#btnVerSesiones').addEventListener('click', () => {
     const c = document.getElementById('sesCard');
     if(!c) return;
-    c.scrollIntoView({behavior:'smooth', block:'center'});
+    c.scrollIntoView({behavior:'smooth', block:'start'});
+    setTimeout(() => { try{ $('#qSes').focus({preventScroll:true}); }catch(e){} }, 350);
     c.classList.remove('destacar');
     void c.offsetWidth;              // reinicia la animación si se hace clic dos veces seguidas
     c.classList.add('destacar');

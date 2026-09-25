@@ -49,23 +49,57 @@
 <div class="screen on" id="vTablero">
   <div class="wrap">
     <div class="stage">
-      <div class="hero">
-        <h1>Vacantes verificables</h1>
-        <p class="lede">Cada vacante nace del levantamiento con el cliente. De ahí salen los requisitos excluyentes, y contra esos requisitos se verifica al finalista.</p>
-        <div class="heroacts">
+      <!-- El tablero responde tres preguntas, en este orden: qué me toca hacer ahora, cómo
+           voy, y dónde está cada vacante con sus candidatos. Con decenas de verificaciones la
+           lista plana dejó de servir: lo pendiente va arriba, lo terminado se busca. -->
+      <div class="tabhd">
+        <div>
+          <h1 id="tabSaludo">Tablero</h1>
+          <p class="lede" id="tabLede">Lo que te toca hacer, cómo vas y dónde está cada vacante.</p>
+        </div>
+        <div class="tabacts">
+          <label class="quien"><span>Ver como</span>
+            <select id="selEval"><option value="">Todo el equipo</option></select>
+          </label>
           <button class="cta" id="btnNuevoIntake" type="button">Cargar un levantamiento</button>
-          <button class="cta ghost" id="btnVerSesiones" type="button">Ver verificaciones</button>
+          <button class="cta ghost" id="btnVerSesiones" type="button">Buscar una verificación</button>
         </div>
       </div>
 
-      <div class="card">
+      <div class="metacard" id="metaCard"></div>
+      <div class="kpis" id="kpis"></div>
+
+      <div class="card" id="colaCard">
+        <div class="cardhd"><h2>Para hacer ahora</h2><span class="cs" id="colaCount"></span></div>
+        <div class="colares" id="colaRes"></div>
+        <div id="colaList"><div class="empty">Cargando…</div></div>
+      </div>
+
+      <div class="card" id="vacCard">
         <div class="cardhd"><h2>Vacantes</h2><span class="cs" id="vacCount"></span></div>
+        <div class="filtros">
+          <input type="search" id="qVac" placeholder="Buscar vacante o empresa" autocomplete="off">
+          <div class="segf" id="segVac" role="group" aria-label="Qué vacantes ver">
+            <button type="button" data-fv="activas" class="sel">Activas</button>
+            <button type="button" data-fv="cerradas">Cerradas</button>
+            <button type="button" data-fv="todas">Todas</button>
+          </div>
+        </div>
         <div id="vacList"><div class="empty">Cargando…</div></div>
       </div>
 
       <div class="card" id="sesCard">
         <div class="cardhd"><h2>Verificaciones</h2><span class="cs" id="sesCount"></span></div>
+        <div class="filtros">
+          <input type="search" id="qSes" placeholder="Buscar candidato, vacante o código PKV" autocomplete="off">
+          <div class="segf" id="segSes" role="group" aria-label="Qué verificaciones ver">
+            <button type="button" data-fs="todas" class="sel">Todas</button>
+            <button type="button" data-fs="pendientes">Pendientes</button>
+            <button type="button" data-fs="emitidas">Emitidas</button>
+          </div>
+        </div>
         <div id="sesList"><div class="empty">Cargando…</div></div>
+        <button class="masbtn" id="btnMasSes" type="button" hidden>Ver más</button>
       </div>
     </div>
   </div>
@@ -186,6 +220,7 @@
   <div class="obox">
     <b id="pgTitulo"></b>
     <span id="pgTexto"></span>
+    <input id="pgInput" type="text" style="display:none;width:100%;margin-top:12px" autocomplete="off">
     <div class="tools" style="margin-top:18px">
       <button id="pgNo" type="button">Seguir aquí</button>
       <button class="pri" id="pgSi" type="button">Guardar y salir</button>

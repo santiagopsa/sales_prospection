@@ -11,7 +11,7 @@
 const express = require('express');
 const path = require('path');
 const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt, leerTraduccion } = require('./prompts');
-const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode } = require('./rules');
+const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero } = require('./rules');
 const didit = require('./didit');
 const { T, initSchema } = require('./schema');
 const { crearPedirJson } = require('./llm');
@@ -396,16 +396,23 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
           SELECT v.id, v.title, v.seniority, v.modality, v.city, v.status, v.suggested_mode,
                  v.recruiter, v.created_at, c.name AS company_name, c.id AS company_id,
                  (SELECT COUNT(*) FROM ${T.requirements} q WHERE q.vacancy_id=v.id)::int AS req_count,
-                 (SELECT COUNT(*) FROM ${T.sessions} s WHERE s.vacancy_id=v.id)::int AS session_count
+                 (SELECT COUNT(*) FROM ${T.sessions} s WHERE s.vacancy_id=v.id)::int AS session_count,
+                 (SELECT COUNT(*) FROM ${T.sessions} s WHERE s.vacancy_id=v.id AND s.status='issued')::int AS issued_count,
+                 (SELECT MAX(COALESCE(s.updated_at, s.created_at)) FROM ${T.sessions} s WHERE s.vacancy_id=v.id) AS ultima_actividad
           FROM ${T.vacancies} v LEFT JOIN ${T.companies} c ON c.id=v.company_id
-          ORDER BY v.created_at DESC LIMIT 200`);
+          ORDER BY v.created_at DESC LIMIT 500`);
         return res.json(q.rows);
       }
-      res.json(mem.vacancies.slice().reverse().map(v => ({
-        ...v,
-        req_count: mem.requirements.filter(q => q.vacancy_id === v.id).length,
-        session_count: mem.sessions.filter(s => s.vacancy_id === v.id).length,
-      })));
+      res.json(mem.vacancies.slice().reverse().map(v => {
+        const ss = mem.sessions.filter(s => s.vacancy_id === v.id);
+        return {
+          ...v,
+          req_count: mem.requirements.filter(q => q.vacancy_id === v.id).length,
+          session_count: ss.length,
+          issued_count: ss.filter(s => s.status === 'issued').length,
+          ultima_actividad: ss.map(s => s.updated_at || s.started_at).filter(Boolean).sort().pop() || null,
+        };
+      }));
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
@@ -638,6 +645,11 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
     try {
       const id = Number(req.params.id);
       const { transcript } = req.body || {};
+      // El empleo a verificar viene de la pantalla (lo que el reclutador tiene como último empleo);
+      // si no, de lo que la sesión ya guardó; si no, del primer tramo de la hoja de vida.
+      const empleoDe = x => (x && typeof x === 'object' && (clean(x.empresa) || clean(x.cargo)))
+        ? { empresa: clean(x.empresa), cargo: clean(x.cargo), periodo: clean(x.periodo), fuente: x.fuente === 'reclutador' ? 'reclutador' : 'cv' } : null;
+      let empleo = empleoDe(req.body && req.body.empleo);
       if (!transcript || transcript.trim().length < 400) {
         return res.status(400).json({ error: 'La transcripción está vacía o es demasiado corta. Una entrevista de 30 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.' });
       }
@@ -645,12 +657,13 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       let cargo = '', candidato = '', modo = 'B', excluyentes = [], perfil = [];
       if (pool) {
         const q = await pool.query(`
-          SELECT s.candidate, s.mode, v.id AS vid, v.title, v.perfil,
+          SELECT s.candidate, s.mode, s.experiencia, s.trayectoria, v.id AS vid, v.title, v.perfil,
                  v.ingles_requerido, v.ingles_nivel, v.ingles_uso
           FROM ${T.sessions} s LEFT JOIN ${T.vacancies} v ON v.id = s.vacancy_id
           WHERE s.id = $1`, [id]);
         if (!q.rows.length) return res.status(404).json({ error: 'not found' });
         cargo = q.rows[0].title || ''; candidato = q.rows[0].candidate || ''; modo = q.rows[0].mode || 'B';
+        empleo = empleo || empleoDe(q.rows[0].experiencia) || empleoDe((q.rows[0].trayectoria || [])[0]);
         perfil = Array.isArray(q.rows[0].perfil) ? q.rows[0].perfil : [];
         if (q.rows[0].vid) {
           const rq = await pool.query(
@@ -665,6 +678,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         cargo = (v && v.title) || ''; candidato = s.candidate || ''; modo = s.mode || 'B';
         perfil = (v && Array.isArray(v.perfil)) ? v.perfil : [];
         excluyentes = mem.requirements.filter(q => q.vacancy_id === (v && v.id)).sort((a, b) => a.ord - b.ord);
+        empleo = empleo || empleoDe(s.experiencia) || empleoDe((s.trayectoria || [])[0]);
       }
 
       // ---------------------------------------------------------------------------------
@@ -693,11 +707,15 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         let an = null, error = null;
         try {
           const out = await pedirJson(
-            buildTranscriptPrompt(textoTrans, { requisitos: excluyentes, candidato, cargo, modo, perfil }),
+            buildTranscriptPrompt(textoTrans, { requisitos: excluyentes, candidato, cargo, modo, perfil, empleo }),
             { etiqueta: 'transcripcion', maxTokens: 10000 });
           if (out.error) error = out;
           else {
             an = out.datos;
+            // El empleo se concilia contra el ancla ANTES de guardarse: si el modelo verificó
+            // otro empleo, no se le cree; y el estado sale de los criterios C1–C4.
+            an.experiencia_reciente = conciliarEmpleo(empleo, an.experiencia_reciente);
+            an._empleo = empleo || null;
             an._at = new Date().toISOString();
             an._chars = textoTrans.trim().length;
           }
@@ -1308,6 +1326,56 @@ ${!code ? `
   // la segunda vez que alguien lo abre en inglés no se vuelve a traducir, y el documento
   // no cambia de palabras entre una lectura y otra. Se invalida si cambian los textos
   // (huella), cosa que en un acta emitida no pasa.
+  // Corregir el nombre del candidato. Pasa: el reclutador escribe "Miguel" y era Juan Galindo,
+  // y se da cuenta con el acta ya emitida. El documento está congelado y firmado, así que la
+  // corrección no se hace a escondidas: se cambia el nombre en el snapshot, se recalcula la
+  // firma de integridad sobre el contenido corregido y queda anotada la corrección (qué campo,
+  // antes, después, cuándo), que el informe imprime en su pie. El PDF viejo, con el nombre
+  // equivocado, deja de corresponder a la firma vigente: es lo correcto, porque estaba mal.
+  r.post('/api/sessions/:id/candidato', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const nuevo = clean(req.body && req.body.candidate);
+      if (!nuevo) return res.status(400).json({ error: 'Falta el nombre del candidato' });
+      const ahora = new Date().toISOString();
+      const corregir = (s) => {
+        const antes = s.candidate || '';
+        if (s.status !== 'issued' || !s.snapshot) return { candidate: nuevo, snapshot: s.snapshot || null, hash: s.integrity_hash || null, correccion: null };
+        const snap = { ...s.snapshot, candidato: nuevo };
+        const correccion = { campo: 'candidato', antes, despues: nuevo, at: ahora };
+        snap.correcciones = [...(Array.isArray(snap.correcciones) ? snap.correcciones : []), correccion];
+        const hash = integrityHash({
+          candidate: nuevo,
+          ratings: (snap.ratings || []).map(x => ({ t: x.req_text, l: x.level })),
+          identity: snap.identity || {}, signals: snap.signals || {}, kind: snap.kind || s.kind,
+          identidad: snap.identidad && snap.identidad.estado, faceScore: snap.face_score ?? null, at: ahora,
+        });
+        snap.integrity_hash = hash;
+        return { candidate: nuevo, snapshot: snap, hash, correccion };
+      };
+      if (pool) {
+        const q = await pool.query(`SELECT id, candidate, status, kind, snapshot, integrity_hash FROM ${T.sessions} WHERE id=$1`, [id]);
+        if (!q.rows.length) return res.status(404).json({ error: 'not found' });
+        const out = corregir(q.rows[0]);
+        await pool.query(
+          `UPDATE ${T.sessions} SET candidate=$2, snapshot=COALESCE($3::jsonb, snapshot), integrity_hash=COALESCE($4, integrity_hash), updated_at=NOW() WHERE id=$1`,
+          [id, out.candidate, out.snapshot ? JSON.stringify(out.snapshot) : null, out.hash]);
+        return res.json({ ok: true, candidate: out.candidate, integrity_hash: out.hash, correccion: out.correccion,
+                          correcciones: (out.snapshot && out.snapshot.correcciones) || [] });
+      }
+      const s = mem.sessions.find(x => x.id === id);
+      if (!s) return res.status(404).json({ error: 'not found' });
+      const out = corregir(s);
+      s.candidate = out.candidate;
+      if (out.snapshot) { s.snapshot = out.snapshot; s.integrity_hash = out.hash; }
+      res.json({ ok: true, candidate: out.candidate, integrity_hash: out.hash, correccion: out.correccion,
+                 correcciones: (out.snapshot && out.snapshot.correcciones) || [] });
+    } catch (e) {
+      console.error('[verificacion/sessions.candidato]', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   r.post('/api/sessions/:id/traduccion', async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -1384,23 +1452,55 @@ ${!code ? `
   r.get('/api/sessions', async (_req, res) => {
     try {
       if (pool) {
+        // Con decenas de verificaciones el tablero agrupa por vacante y filtra en el navegador,
+        // así que la lista trae lo necesario para eso: la vacante, cuántos requisitos cumplió
+        // (para pintar el resultado sin abrir el acta) y el estado desde "qué me toca hacer".
         const q = await pool.query(`
-          SELECT s.id, s.report_code, s.candidate, s.evaluator, s.mode, s.kind, s.status, s.semaforo,
+          SELECT s.id, s.vacancy_id, s.report_code, s.candidate, s.evaluator, s.mode, s.kind, s.status, s.semaforo,
                  s.didit_status, s.face_verdict, s.face_score, s.id_note,
-                 s.started_at, s.issued_at, s.transcript_at, s.entrevista_at,
+                 s.started_at, s.issued_at, s.transcript_at, s.entrevista_at, s.updated_at,
                  s.transcript_status, s.transcript_started_at,
+                 (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
+                 (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple,
                  v.title AS vacancy_title, c.name AS company_name
           FROM ${T.sessions} s
           LEFT JOIN ${T.vacancies} v ON v.id=s.vacancy_id
           LEFT JOIN ${T.companies} c ON c.id=v.company_id
-          ORDER BY s.created_at DESC LIMIT 200`);
-        return res.json(q.rows.map(s => ({ ...s, transcript_status: estadoTranscripcion(s).estado })));
+          ORDER BY COALESCE(s.updated_at, s.created_at) DESC LIMIT 2000`);
+        return res.json(q.rows.map(s => ({ ...s, transcript_status: estadoTranscripcion(s).estado, estado_tablero: estadoTablero(s) })));
       }
       res.json(mem.sessions.slice().reverse().map(s => {
         const v = mem.vacancies.find(x => x.id === s.vacancy_id);
+        const rs = mem.ratings.filter(r => r.session_id === s.id);
         return { ...s, vacancy_title: v && v.title, company_name: v && v.company_name,
-                 transcript_status: estadoTranscripcion(s).estado };
+                 req_total: rs.length, req_cumple: rs.filter(r => r.level >= 4).length,
+                 transcript_status: estadoTranscripcion(s).estado, estado_tablero: estadoTablero(s) };
       }));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Cómo va la gestión: semana, rapidez, calidad, racha y lo pendiente. Se calcula sobre TODAS
+  // las verificaciones (no solo las que caben en la lista) con la misma función que usan el
+  // stub y las pruebas (rules.js · estadisticas).
+  r.get('/api/tablero', async (req, res) => {
+    try {
+      const evaluador = clean(req.query && req.query.evaluador);
+      let filas;
+      if (pool) {
+        const q = await pool.query(`
+          SELECT s.id, s.evaluator, s.status, s.started_at, s.entrevista_at, s.issued_at, s.transcript_at,
+                 s.transcript_status, s.transcript_started_at,
+                 (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
+                 (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple
+          FROM ${T.sessions} s`);
+        filas = q.rows;
+      } else {
+        filas = mem.sessions.map(s => {
+          const rs = mem.ratings.filter(r => r.session_id === s.id);
+          return { ...s, req_total: rs.length, req_cumple: rs.filter(r => r.level >= 4).length };
+        });
+      }
+      res.json(estadisticas(filas, { evaluador }));
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 

@@ -8,7 +8,7 @@ const crypto = require('crypto');
 
 const PUB = path.join(__dirname, '..', 'public');
 const MOUNT = '/verificacion'; // igual que en el servidor real
-const { LVLTXT, MAX_REQ, semaforo, bloqueos, estadoIdentidad, tipoDocumento } = require('../rules'); // reglas reales del servidor
+const { LVLTXT, MAX_REQ, semaforo, bloqueos, estadoIdentidad, tipoDocumento, conciliarEmpleo, estadisticas, estadoTablero } = require('../rules'); // reglas reales del servidor
 const A = require('../archivos'); // misma decisión de "qué es este archivo" que app.js
 
 // Lo que el stub devuelve al "leer" un .docx o .pdf, ya que no tiene mammoth ni pdf-parse.
@@ -21,6 +21,9 @@ const FAKE_TRANS = (
 ).repeat(8);
 const FORMATO_ACTA = 'v4-2026-09'; // igual que en app.js
 const db = { companies:[], vacancies:[], requirements:[], sessions:[], ratings:[], seq:1 };
+// Cuántos requisitos tiene y cuántos cumplió (nivel 4-5): lo que el tablero pinta sin abrir el acta.
+const conResultado = s => { const rs = db.ratings.filter(r=>r.session_id===s.id);
+  return {...s, req_total: rs.length, req_cumple: rs.filter(r=>r.level>=4).length}; };
 const nid = () => db.seq++;
 const clean = s => (s==null?'':String(s)).trim();
 
@@ -160,9 +163,40 @@ const server = http.createServer(async (req, res) => {
   }
 
   if(p === '/api/vacancies' && m==='GET'){
-    return json(res,200, db.vacancies.slice().reverse().map(v=>({...v,
-      req_count: db.requirements.filter(q=>q.vacancy_id===v.id).length,
-      session_count: db.sessions.filter(s=>s.vacancy_id===v.id).length})));
+    return json(res,200, db.vacancies.slice().reverse().map(v=>{
+      const ss = db.sessions.filter(s=>s.vacancy_id===v.id);
+      return {...v, status: v.status || 'activa',
+        req_count: db.requirements.filter(q=>q.vacancy_id===v.id).length,
+        session_count: ss.length, issued_count: ss.filter(s=>s.status==='issued').length,
+        ultima_actividad: ss.map(s=>s.updated_at||s.started_at).filter(Boolean).sort().pop() || null};
+    }));
+  }
+
+  // Cómo va la gestión: la misma función que el servidor real.
+  if(p === '/api/tablero' && m==='GET'){
+    const ev = new URL(req.url, 'http://x').searchParams.get('evaluador') || '';
+    return json(res,200, estadisticas(db.sessions.map(conResultado), {evaluador: ev}));
+  }
+
+  // Solo para pruebas: siembra verificaciones antiguas para ver el tablero con historia.
+  if(p === '/api/__sembrar' && m==='POST'){
+    const b = await body(req);
+    const vids = [];
+    for(const x of (b.vacantes||[])){
+      let c = db.companies.find(y=>y.name===x.company_name);
+      if(!c){ c = {id:nid(), name:x.company_name||'Empresa'}; db.companies.push(c); }
+      const v = {id:nid(), company_id:c.id, company_name:c.name, title:x.title||'Cargo', status:x.status||'activa',
+                 created_at:x.created_at||new Date().toISOString(), perfil:[]};
+      db.vacancies.push(v); vids.push(v.id);
+      (x.requisitos||['Requisito 1','Requisito 2']).forEach((t,i)=>db.requirements.push({id:nid(), vacancy_id:v.id, ord:i, text:t, detalles:[], senales:[]}));
+    }
+    for(const x of (b.sesiones||[])){
+      if(typeof x.vacante === 'number') x.vacancy_id = vids[x.vacante];
+      const id = nid();
+      db.sessions.push({id, report_code:'PKV-2026-'+String(100000+id), kind:'sondeo', mode:'B', status:'draft', ...x, vacancy_id: x.vacancy_id || null});
+      (x.ratings||[]).forEach((lvl,i)=>db.ratings.push({id:nid(), session_id:id, req_text:'R'+(i+1), ord:i, level:lvl}));
+    }
+    return json(res,200,{ok:true, n:(b.sesiones||[]).length, vacantes:vids});
   }
 
   let mm = p.match(/^\/api\/vacancies\/(\d+)$/);
@@ -241,8 +275,28 @@ const server = http.createServer(async (req, res) => {
   if(p === '/api/sessions' && m==='GET'){
     return json(res,200, db.sessions.slice().reverse().map(s=>{
       const v=db.vacancies.find(x=>x.id===s.vacancy_id);
-      return {...s, vacancy_title:v&&v.title, company_name:v&&v.company_name};
+      return {...conResultado(s), vacancy_title:v&&v.title, company_name:v&&v.company_name, estado_tablero: estadoTablero(s)};
     }));
+  }
+
+  // Corregir el nombre del candidato (misma regla que el servidor real: emitida → nueva firma
+  // y corrección anotada en el snapshot).
+  mm = p.match(/^\/api\/sessions\/(\d+)\/candidato$/);
+  if(mm && m==='POST'){
+    const b = await body(req);
+    const s = db.sessions.find(x=>x.id===+mm[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    const nuevo = clean(b.candidate);
+    if(!nuevo) return json(res,400,{error:'Falta el nombre del candidato'});
+    const antes = s.candidate; s.candidate = nuevo;
+    let correccion = null;
+    if(s.status === 'issued' && s.snapshot){
+      correccion = {campo:'candidato', antes, despues:nuevo, at:new Date().toISOString()};
+      s.snapshot = {...s.snapshot, candidato:nuevo, correcciones:[...(s.snapshot.correcciones||[]), correccion]};
+      s.integrity_hash = require('crypto').createHash('sha256').update(JSON.stringify([nuevo, s.snapshot.ratings, correccion.at])).digest('hex');
+      s.snapshot.integrity_hash = s.integrity_hash;
+    }
+    return json(res,200,{ok:true, candidate:nuevo, integrity_hash:s.integrity_hash||null, correccion, correcciones:(s.snapshot&&s.snapshot.correcciones)||[]});
   }
 
   // Traducción del informe: mismo contrato que el servidor real, con un traductor de
@@ -376,6 +430,10 @@ const server = http.createServer(async (req, res) => {
     const t = clean(b.transcript);
     if(t.length < 400) return json(res,400,{error:'La transcripción está vacía o es demasiado corta. Una entrevista de 30 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.'});
     const reqs = db.requirements.filter(q=>q.vacancy_id===s.vacancy_id).sort((a,b2)=>a.ord-b2.ord);
+    // El ancla del empleo: la pantalla, lo guardado en la sesión o el primer tramo del CV.
+    const empleoDe = x => (x && (clean(x.empresa) || clean(x.cargo))) ? {empresa:clean(x.empresa), cargo:clean(x.cargo), periodo:clean(x.periodo), fuente: x.fuente === 'reclutador' ? 'reclutador' : 'cv'} : null;
+    const empleo = empleoDe(b.empleo) || empleoDe(s.experiencia) || empleoDe((s.trayectoria||[])[0]);
+    s.__empleo_recibido = empleo;
     s.transcript_status = 'procesando'; s.transcript_error = null;
     s.transcript_started_at = new Date().toISOString();
     json(res,202,{ok:true, estado:'procesando'});
@@ -424,8 +482,26 @@ const server = http.createServer(async (req, res) => {
         {titulo:'Go-live de planta', sub:'Alcance manejado', texto:'Alpina 2023: llevó el arranque de producción y resolvió la caída del maestro de materiales.'},
         {titulo:'CS01 / CS02', sub:'Transacciones de uso diario', texto:'Respondió sin dudar y describió la pantalla real, no la definición.'}
       ],
-      experiencia_reciente:{empresa:'Alpina', cargo:'Consultor SAP PP', periodo:'2022 - 2024', verificada:true,
-        por_que_verificada:'Narró decisiones propias con fechas y alcance consistentes entre sí y con lo declarado en la hoja de vida.'},
+      // Lo que "devuelve el modelo" para el empleo. Marcadores para los casos que importan:
+      //   __OTRO_EMPLEO__  el modelo verifica un empleo anterior (Nutresa) en vez del declarado;
+      //   __SIN_EMPLEO__   del empleo declarado no se habló;
+      //   __CONTRADICE__   lo que contó no cuadra con lo declarado.
+      // Pasa por la misma conciliación que el servidor real.
+      experiencia_reciente: conciliarEmpleo(empleo, t.includes('__OTRO_EMPLEO__')
+        ? {empresa:'Nutresa', cargo:'Analista funcional', periodo:'2019 - 2022', estado:'verificada', verificada:true,
+           criterios:[{id:'C1',cumplido:true,como:'En Nutresa estuve tres años.'},{id:'C2',cumplido:true,como:'Yo configuraba las órdenes.'},{id:'C3',cumplido:true,como:'Bajamos el tiempo de cierre.'},{id:'C4',cumplido:true,como:''}],
+           por_que_verificada:'Narró decisiones propias en Nutresa.'}
+        : t.includes('__SIN_EMPLEO__')
+        ? {empresa:(empleo&&empleo.empresa)||'', estado:'no_verificada', verificada:false,
+           criterios:[{id:'C1',cumplido:null,como:''},{id:'C2',cumplido:null,como:''},{id:'C3',cumplido:null,como:''},{id:'C4',cumplido:null,como:''}],
+           que_falto:'Del empleo declarado no se habló en la conversación.'}
+        : t.includes('__CONTRADICE__')
+        ? {empresa:(empleo&&empleo.empresa)||'Alpina', estado:'verificada', verificada:true,
+           criterios:[{id:'C1',cumplido:true,como:'Trabajé en Alpina.'},{id:'C2',cumplido:true,como:'Llevaba el módulo.'},{id:'C3',cumplido:true,como:'El go-live.'},{id:'C4',cumplido:false,como:'Dijo que salió en 2021; el CV dice 2024.'}],
+           que_falto:'Las fechas que dio no cuadran con la hoja de vida.'}
+        : {empresa:(empleo&&empleo.empresa)||'Alpina', cargo:(empleo&&empleo.cargo)||'Consultor SAP PP', periodo:(empleo&&empleo.periodo)||'2022 - 2024', estado:'verificada', verificada:true,
+           criterios:[{id:'C1',cumplido:true,como:'En Alpina, entre marzo y noviembre de 2023, yo llevé el rollout de PP.'},{id:'C2',cumplido:true,como:'Yo configuraba las listas de materiales y las hojas de ruta.'},{id:'C3',cumplido:true,como:'Lo que se nos cayó fue el maestro de materiales la primera semana.'},{id:'C4',cumplido:true,como:''}],
+           por_que_verificada:'Narró decisiones propias con fechas y alcance consistentes entre sí y con lo declarado en la hoja de vida.'}),
       declara:{pretension:'12 millones, negociable', disponibilidad:'Dos semanas', procesos:'Ninguno', motivacion:'Busca autonomía en la decisión técnica', nogo:'Baja autonomía'},
       senales_generales:[],
       advertencias: t.includes('__CORTADA__') ? ['La transcripción parece cortada: termina a mitad de una frase.'] : [],
