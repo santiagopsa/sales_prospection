@@ -1336,3 +1336,81 @@ input,textarea,select{font:inherit;color:inherit}
 @media (max-width:760px){ .itasas{grid-template-columns:repeat(2,minmax(0,1fr))} }
 .inota{font-size:12.5px;color:var(--ink3);max-width:80ch;margin:-4px 0 10px;line-height:1.45}
 @media (max-width:520px){ .cardhd{flex-wrap:wrap} }
+
+/* ============ Operaciones (Procesos, SaaS, Evaluaciones) ============
+   Una hoja de cálculo sobria: celdas sin borde que se ven como texto hasta que se tocan, la
+   primera columna fija al hacer scroll lateral, lo calculado en gris y la salud con rótulo. */
+.navsep{width:1px;background:var(--line2);margin:6px 4px}
+.wrap.ancho{max-width:1440px}
+.opsres{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.ores{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 13px;display:flex;flex-direction:column;gap:1px;
+  text-align:left;min-width:0;box-shadow:var(--shadow)}
+button.ores{cursor:pointer;transition:border-color .12s,background .12s}
+button.ores:hover{border-color:var(--acc)}
+button.ores.sel{border-color:var(--acc);background:var(--acc-soft)}
+.ores b{font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:24px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums;color:var(--ink)}
+.ores.r b{color:var(--crit)} .ores.a b{color:var(--warn)} .ores.v b{color:var(--good)}
+.ores span{font-size:12px;color:var(--ink2);line-height:1.35}
+@media (max-width:900px){ .opsres{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (max-width:520px){ .opsres{grid-template-columns:repeat(2,minmax(0,1fr))} }
+.opsaviso{font-size:13px;color:var(--ink2);background:var(--acc-soft);border-radius:8px;padding:7px 11px;margin:-2px 0 10px}
+.opsaviso[hidden]{display:none}
+.opscard .filtros .cs{margin-left:auto;font-size:12.5px;color:var(--ink3)}
+
+.ogrid-env{overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.ogrid{border-collapse:separate;border-spacing:0;font-size:13px;min-width:100%}
+.ogrid th,.ogrid td{border-bottom:1px solid var(--line);padding:0;vertical-align:middle;background:var(--panel)}
+.ogrid td + td,.ogrid th + td{border-left:1px solid var(--line)}
+.ogrid thead th{position:sticky;top:0;z-index:2;background:var(--sunk);font-size:10.5px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--ink2);text-align:left;padding:8px 8px;line-height:1.25;cursor:pointer;user-select:none;
+  border-bottom:1.5px solid var(--line2);vertical-align:bottom}
+.ogrid thead th:hover{color:var(--acc-ink)}
+.ogrid thead th .ay{font-style:normal;display:inline-grid;place-items:center;width:13px;height:13px;border-radius:50%;
+  background:var(--line);color:var(--ink2);font-size:9px;margin-left:4px;vertical-align:1px}
+.ogrid .fijo{position:sticky;left:0;z-index:1;border-right:1.5px solid var(--line2)}
+.ogrid thead .fijo{z-index:3}
+.ogrid tbody tr:hover td,.ogrid tbody tr:hover th{background:var(--sunk)}
+.ogrid tbody tr.cerrada td,.ogrid tbody tr.cerrada th{color:var(--ink3)}
+.ogrid tbody tr.nueva td,.ogrid tbody tr.nueva th{animation:nuevaFila 2.2s ease-out}
+@keyframes nuevaFila{from{background:var(--acc-soft)}to{background:var(--panel)}}
+@media (prefers-reduced-motion:reduce){ .ogrid tbody tr.nueva td,.ogrid tbody tr.nueva th{animation:none} }
+.ogrid input,.ogrid select,.ogrid textarea{width:100%;border:0;background:transparent;color:inherit;font:inherit;padding:8px 8px;
+  border-radius:0;min-height:34px;outline:none}
+.ogrid input:hover,.ogrid select:hover,.ogrid textarea:hover{background:var(--acc-soft)}
+.ogrid input:focus,.ogrid select:focus,.ogrid textarea:focus{background:var(--panel);box-shadow:inset 0 0 0 2px var(--acc)}
+.ogrid input[type=checkbox]{width:18px;height:18px;min-height:0;margin:8px auto;display:block;accent-color:var(--acc)}
+.ogrid input[type=number]{text-align:right;font-variant-numeric:tabular-nums}
+.ogrid textarea{resize:none;line-height:1.35;display:block}
+.ogrid select{cursor:pointer;-webkit-appearance:none;appearance:none}
+.ogrid select.estr{color:var(--warn);letter-spacing:1px}
+.ogrid .fijo input{font-weight:700}
+.ogrid .w-xs{min-width:78px;width:78px} .ogrid .w-id{min-width:104px;width:104px} .ogrid .w-b{min-width:64px;width:64px} .ogrid .w-f{min-width:132px}
+.ogrid .w-s{min-width:150px} .ogrid .w-m{min-width:170px} .ogrid .w-l{min-width:220px} .ogrid .w-xl{min-width:280px}
+.ogrid td.calc{background:var(--sunk);color:var(--ink2);padding:0 8px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ogrid td.calc.num{text-align:right}
+.ogrid thead th.calc{background:var(--line)}
+.ogrid td .z,.ogrid td.calc .z{color:var(--line2)}
+.ogrid td.falta{box-shadow:inset 0 0 0 2px var(--warn)}
+.ogrid td.guardando,.ogrid th.guardando{box-shadow:inset 0 0 0 2px var(--line2)}
+.ogrid td.ok,.ogrid th.ok{box-shadow:inset 0 0 0 2px var(--good)}
+.ogrid td.error,.ogrid th.error{box-shadow:inset 0 0 0 2px var(--crit)}
+.ogrid .urlc{display:flex;align-items:center}
+.ogrid .urlc a{flex:none;padding:0 8px;color:var(--acc);font-weight:700;text-decoration:none}
+.ogrid td.acc{white-space:nowrap;padding:0 6px;text-align:right}
+.ogrid .mini{font-size:11.5px;font-weight:700;color:var(--acc);border:1px solid var(--line2);border-radius:6px;padding:4px 8px;margin:4px 2px;background:var(--panel)}
+.ogrid .mini:hover{border-color:var(--acc);background:var(--acc-soft)}
+.ogrid .mini.borrar{color:var(--ink3);border-color:transparent;background:transparent}
+.ogrid .mini.borrar:hover{color:var(--crit);border-color:var(--crit);background:var(--crit-soft)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+.opsnuevo[hidden]{display:none}
+.onform{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 12px;align-items:end}
+.onform .f span{display:block;font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:4px}
+.onform .f input,.onform .f select{width:100%;background:var(--bg);border:1px solid var(--line2);border-radius:7px;padding:8px 10px;font-size:14px}
+.onform .f.chk input{width:18px;height:18px;accent-color:var(--acc)}
+.onform .urlc{display:flex;gap:6px;align-items:center}
+.onform .urlc a{display:none}
+.onacc{grid-column:1 / -1;display:flex;gap:8px}
+.onacc .cta{width:auto;padding:9px 18px;font-size:14px}
+@media (max-width:760px){ .onform{grid-template-columns:1fr 1fr} }
+@media (max-width:640px){ .topnav{overflow-x:auto} .topnav button{flex:none} .navsep{display:none} }

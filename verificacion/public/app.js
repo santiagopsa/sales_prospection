@@ -408,7 +408,9 @@ function go(id){
   if(nav){
     nav.style.display = (live || id==='vActa') ? 'none' : '';
     nav.querySelectorAll('[data-nav]').forEach(b => b.classList.toggle('on',
-      b.dataset.nav === 'indicadores' ? id === 'vIndicadores' : (id === 'vTablero' || id === 'vVacante')));
+      b.dataset.nav === 'indicadores' ? id === 'vIndicadores'
+      : b.dataset.nav === 'tablero' ? (id === 'vTablero' || id === 'vVacante')
+      : (id === 'vOps' && OPSV.tipo === b.dataset.nav)));
   }
   const lectura = !!(S && S.soloLectura);
   $('#sigBar').style.display = (live && !lectura) ? 'block' : 'none';
@@ -944,7 +946,308 @@ async function navegar(dest){
     await salirDeSesion();
   }
   if(dest === 'indicadores'){ enganchesIndicadores(); loadIndicadores(null); }
+  else if(['procesos', 'saas', 'evaluaciones'].includes(dest)) loadOps(dest);
   else loadTablero();
+}
+
+/* ===================== operaciones: Procesos, SaaS, Evaluaciones =====================
+   Lo que Weimar llenaba en Airtable. Una tabla que se edita como una hoja de cálculo: cada
+   celda se guarda al salir de ella, Enter baja a la fila siguiente (para actualizar los números
+   del día de corrido) y lo calculado (salud, días, porcentajes) se repinta en la misma fila sin
+   perder el foco. Las columnas, sus opciones y su ayuda las manda el servidor (ops.js). */
+const OPSV = { tipo: null, esp: null, filas: [], hoy: null, filtro: 'abiertos', q: '', orden: null, dir: 1, extra: null };
+const SALUD = {
+  roja:      {tx: 'En riesgo', cls: 'r', orden: 0},
+  amarilla:  {tx: 'Atención',  cls: 'a', orden: 1},
+  sin_datos: {tx: 'Sin datos', cls: 'n', orden: 2},
+  verde:     {tx: 'Bien',      cls: 'v', orden: 3},
+};
+const ESTRELLAS = n => '★'.repeat(n) + '☆'.repeat(5 - n);
+const enlaceVacante = id => /^\d{3,9}$/.test(String(id || '').trim()) ? `https://peaku.co/es/empresas/vacantes/${String(id).trim()}` : '';
+
+async function loadOps(tipo){
+  const cambio = OPSV.tipo !== tipo;
+  OPSV.tipo = tipo;
+  if(cambio){ OPSV.filtro = 'abiertos'; OPSV.q = ''; OPSV.orden = null; OPSV.extra = null; $('#qOps').value = ''; $('#opsNuevo').hidden = true; }
+  go('vOps');
+  enganchesOps();
+  $('#opsGrid').innerHTML = `<div class="empty">Cargando…</div>`;
+  try{
+    const r = await api('/api/ops/' + tipo);
+    if(OPSV.tipo !== tipo) return;          // cambiaron de pestaña mientras cargaba
+    OPSV.esp = r.especificacion; OPSV.filas = r.filas; OPSV.hoy = r.hoy;
+    pintarOps();
+  }catch(e){
+    $('#opsGrid').innerHTML = `<div class="empty">No se pudo cargar: ${esc(e.message)}</div>`;
+  }
+}
+
+const opsCol = k => OPSV.esp.campos.find(c => c.k === k) || OPSV.esp.calc.find(c => c.k === k);
+const opsDias = f => f.dias_sin_movimiento ?? f.dias_sin_actualizar ?? f.dias_en_proceso ?? -1;
+
+function opsVisibles(){
+  const q = normTxt(OPSV.q.trim());
+  let fs = OPSV.filas.filter(f => OPSV.filtro === 'todos' || (OPSV.filtro === 'abiertos' ? f.abierto : !f.abierto));
+  if(OPSV.extra) fs = fs.filter(OPSV.extra.fn);
+  if(q) fs = fs.filter(f => normTxt(OPSV.esp.buscar.map(k => f[k] || '').join(' ')).includes(q));
+  if(OPSV.orden){
+    const k = OPSV.orden, c = opsCol(k);
+    const val = f => c && c.t === 'salud' ? (SALUD[f[k]] ? SALUD[f[k]].orden : 9) : f[k];
+    fs.sort((a, b) => {
+      const x = val(a), y = val(b);
+      if(x == null && y == null) return 0; if(x == null) return 1; if(y == null) return -1;
+      return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'es', {numeric: true})) * OPSV.dir;
+    });
+  } else {
+    // Lo que más urge arriba: salud roja, amarilla, sin datos; dentro, lo más quieto primero.
+    const so = f => SALUD[f.salud] ? SALUD[f.salud].orden : 5;
+    fs.sort((a, b) => (b.abierto - a.abierto) || so(a) - so(b) || opsDias(b) - opsDias(a) || b.id - a.id);
+  }
+  return fs;
+}
+
+// Lo que se ve arriba: cuántas hay y qué necesita atención. Cada cifra filtra la tabla.
+function opsResumen(){
+  const t = OPSV.tipo, F = OPSV.filas, ab = F.filter(f => f.abierto);
+  const suma = (xs, k) => xs.reduce((n, f) => n + (Number(f[k]) || 0), 0);
+  const cuenta = fn => ab.filter(fn).length;
+  if(t === 'procesos') return [
+    {id: 'ab', n: ab.length, l: 'procesos en curso'},
+    {id: 'roja', n: cuenta(f => f.salud === 'roja'), l: 'en riesgo (más de 5 días quietos)', cls: 'r', fn: f => f.salud === 'roja'},
+    {id: 'amar', n: cuenta(f => f.salud === 'amarilla'), l: 'para revisar (3 a 5 días)', cls: 'a', fn: f => f.salud === 'amarilla'},
+    {id: 'falt', n: suma(ab, 'faltan_terna'), l: `candidatos por enviar en ${cuenta(f => f.faltan_terna > 0)} procesos`, fn: f => f.faltan_terna > 0},
+    {id: 'causa', n: F.filter(f => f.falta_causa).length, l: 'cancelados o pausados sin causa', cls: F.some(f => f.falta_causa) ? 'a' : '', fn: f => f.falta_causa, todos: true},
+  ];
+  if(t === 'saas') return [
+    {id: 'ab', n: ab.length, l: 'vacantes activas'},
+    {id: 'hoy', n: cuenta(f => (f.dias_sin_actualizar ?? 9) >= 1), l: 'sin actualizar hoy', cls: cuenta(f => (f.dias_sin_actualizar ?? 9) >= 1) ? 'a' : '', fn: f => (f.dias_sin_actualizar ?? 9) >= 1},
+    {id: 'roja', n: cuenta(f => f.salud === 'roja'), l: 'en riesgo alto', cls: 'r', fn: f => f.salud === 'roja'},
+    {id: 'meta', n: cuenta(f => f.meta_cumplida), l: 'con la meta cumplida', cls: 'v', fn: f => f.meta_cumplida},
+    {id: 'falt', n: suma(ab, 'faltan'), l: 'destacados por conseguir', fn: f => f.faltan > 0},
+  ];
+  const conAp = ab.filter(f => f.pct_aprobacion != null);
+  const sat = F.filter(f => f.satisfaccion);
+  return [
+    {id: 'ab', n: ab.length, l: 'evaluaciones en curso'},
+    {id: 'sinap', n: cuenta(f => f.aprobados == null), l: 'sin aprobados registrados', cls: cuenta(f => f.aprobados == null) ? 'a' : '', fn: f => f.aprobados == null},
+    {id: 'roja', n: cuenta(f => f.salud === 'roja'), l: 'en riesgo', cls: 'r', fn: f => f.salud === 'roja'},
+    {id: 'apr', n: conAp.length ? Math.round(conAp.reduce((n, f) => n + f.pct_aprobacion, 0) / conAp.length) + '%' : '—', l: 'aprobación promedio'},
+    {id: 'sat', n: sat.length ? (sat.reduce((n, f) => n + f.satisfaccion, 0) / sat.length).toFixed(1) + ' ★' : '—', l: `satisfacción del cliente (${sat.length})`},
+  ];
+}
+
+function pintarOpsResumen(){
+  const rs = opsResumen();
+  $('#opsRes').innerHTML = rs.map(r => r.fn
+    ? `<button class="ores ${r.cls || ''} ${OPSV.extra && OPSV.extra.id === r.id ? 'sel' : ''}" data-extra="${r.id}" type="button" title="Ver solo estas filas"><b>${r.n}</b><span>${esc(r.l)}</span></button>`
+    : `<div class="ores ${r.cls || ''}"><b>${r.n}</b><span>${esc(r.l)}</span></div>`).join('');
+}
+
+function celdaOps(f, c){
+  const v = f[c.k];
+  const a = `data-c="${c.k}" aria-label="${esc(c.l)}"`;
+  if(c.t === 'bool') return `<input type="checkbox" ${a} ${v ? 'checked' : ''}>`;
+  if(c.t === 'sel') return `<select ${a}><option value="">—</option>${c.op.map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  if(c.t === 'estrellas') return `<select ${a} class="estr"><option value="">—</option>${[5, 4, 3, 2, 1].map(n => `<option value="${n}" ${n === v ? 'selected' : ''}>${ESTRELLAS(n)}</option>`).join('')}</select>`;
+  if(c.t === 'num') return `<input type="number" min="0" step="1" inputmode="numeric" ${a} value="${v ?? ''}">`;
+  if(c.t === 'fecha') return `<input type="date" ${a} value="${v ?? ''}">`;
+  if(c.t === 'largo') return `<textarea rows="1" ${a}>${esc(v ?? '')}</textarea>`;
+  if(c.t === 'url') return `<span class="urlc"><input type="url" ${a} value="${esc(v ?? '')}" placeholder="https://">${v ? `<a href="${esc(v)}" target="_blank" rel="noopener" title="Abrir">↗</a>` : ''}</span>`;
+  if(c.k === 'peaku_id'){ const u = enlaceVacante(v); return `<span class="urlc"><input type="text" ${a} value="${esc(v ?? '')}">${u ? `<a href="${u}" target="_blank" rel="noopener" title="Abrir la vacante en PeakU">↗</a>` : ''}</span>`; }
+  return `<input type="text" ${a} value="${esc(v ?? '')}">`;
+}
+function calcOps(f, c){
+  const v = f[c.k];
+  if(c.t === 'salud') return v && SALUD[v] ? `<span class="tag ${SALUD[v].cls}">${SALUD[v].tx.toUpperCase()}</span>` : '<span class="z">—</span>';
+  if(v == null || v === '') return '<span class="z">—</span>';
+  if(c.t === 'pct') return `${v}%`;
+  return esc(String(v));
+}
+const opsAncho = c => c.ancho ? 'w-' + c.ancho : (c.t === 'fecha' ? 'w-f' : c.t === 'num' ? 'w-xs' : c.t === 'bool' ? 'w-b' : c.t === 'sel' ? 'w-s' : 'w-m');
+
+function filaOps(f){
+  const E = OPSV.esp, fijo = E.campos.find(c => c.fijo), resto = E.campos.filter(c => !c.fijo);
+  const salud = E.calc.find(c => c.t === 'salud'), otros = E.calc.filter(c => c.t !== 'salud');
+  const td = c => `<td class="${opsAncho(c)} ${c.k === 'causa_cierre' && f.falta_causa ? 'falta' : ''}" data-k="${c.k}">${celdaOps(f, c)}</td>`;
+  return `<tr data-id="${f.id}" class="${f.abierto ? '' : 'cerrada'}">
+    <th scope="row" class="fijo ${opsAncho(fijo)}" data-k="${fijo.k}">${celdaOps(f, fijo)}</th>
+    <td class="calc" data-calc="${salud.k}">${calcOps(f, salud)}</td>
+    ${resto.map(td).join('')}
+    ${otros.map(c => `<td class="calc num" data-calc="${c.k}">${calcOps(f, c)}</td>`).join('')}
+    <td class="acc">
+      ${OPSV.tipo === 'saas' && f.abierto ? `<button class="mini" data-accion="revisado" type="button" title="Revisé hoy y los números no cambiaron">Sin cambios</button>` : ''}
+      <button class="mini borrar" data-accion="borrar" type="button" title="Eliminar esta fila" aria-label="Eliminar">✕</button>
+    </td>
+  </tr>`;
+}
+
+function pintarOps(){
+  const E = OPSV.esp;
+  $('#opsTitulo').textContent = E.titulo;
+  $('#opsLede').textContent = {
+    procesos: 'Procesos de reclutamiento completo: etapa, envíos, lo que falta para la terna y, al cerrar, por qué.',
+    saas: 'Vacantes publicadas en la plataforma: los destacados de hoy contra la meta. Se actualiza a diario.',
+    evaluaciones: 'Evaluaciones de candidatos para clientes: cuántos se evaluaron, cuántos aprobaron y cómo quedó el cliente.',
+  }[OPSV.tipo] || '';
+  $('#btnOpsNuevo').textContent = `+ ${OPSV.tipo === 'procesos' ? 'Nuevo' : 'Nueva'} ${E.singular}`;
+  const seg = $('#segOps').querySelectorAll('[data-fo]');
+  seg[0].textContent = E.abiertos; seg[1].textContent = E.cerrados;
+  seg.forEach(b => b.classList.toggle('sel', b.dataset.fo === OPSV.filtro));
+  pintarOpsResumen();
+  const fs = opsVisibles();
+  const tot = OPSV.filas.length;
+  $('#opsCount').textContent = `${fs.length} de ${tot}`;
+  const av = $('#opsAviso');
+  av.hidden = !OPSV.extra;
+  if(OPSV.extra) av.innerHTML = `Mostrando solo: <b>${esc(OPSV.extra.l)}</b> <button class="linkbtn" data-extra="" type="button">Quitar filtro</button>`;
+  const fijo = E.campos.find(c => c.fijo), resto = E.campos.filter(c => !c.fijo);
+  const salud = E.calc.find(c => c.t === 'salud'), otros = E.calc.filter(c => c.t !== 'salud');
+  const th = (c, cls = '') => `<th class="${cls} ${opsAncho(c)}" data-ord="${c.k}" title="${esc(c.ayuda || '')}" scope="col">${esc(c.l)}${c.ayuda ? '<i class="ay">?</i>' : ''}${OPSV.orden === c.k ? (OPSV.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
+  $('#opsGrid').innerHTML = fs.length ? `<table class="ogrid">
+    <thead><tr>${th(fijo, 'fijo')}${th(salud, 'calc')}${resto.map(c => th(c)).join('')}${otros.map(c => th(c, 'calc num')).join('')}<th class="acc" scope="col"><span class="sr">Acciones</span></th></tr></thead>
+    <tbody>${fs.map(filaOps).join('')}</tbody>
+  </table>` : `<div class="empty">${OPSV.filas.length ? 'Ninguna fila coincide.' : 'Todavía no hay filas.'}</div>`;
+}
+
+// Tras guardar: la fila en memoria, sus celdas calculadas y lo que el servidor llenó solo
+// (fecha de cierre, de terna, de meta). La celda con el foco no se toca.
+function refrescarFilaOps(f){
+  const i = OPSV.filas.findIndex(x => x.id === f.id);
+  if(i >= 0) OPSV.filas[i] = f;
+  const tr = $('#opsGrid').querySelector(`tr[data-id="${f.id}"]`);
+  if(!tr) return;
+  tr.classList.toggle('cerrada', !f.abierto);
+  tr.querySelectorAll('[data-calc]').forEach(td => { const c = opsCol(td.dataset.calc); if(c) td.innerHTML = calcOps(f, c); });
+  tr.querySelectorAll('[data-c]').forEach(el => {
+    if(el === document.activeElement) return;
+    const k = el.dataset.c, v = f[k];
+    if(el.type === 'checkbox') el.checked = !!v;
+    else if(el.value !== String(v ?? '')) el.value = v ?? '';
+  });
+  const causa = tr.querySelector('[data-k="causa_cierre"]'); if(causa) causa.classList.toggle('falta', !!f.falta_causa);
+  const acc = tr.querySelector('.acc');
+  if(acc && OPSV.tipo === 'saas'){
+    const b = acc.querySelector('[data-accion="revisado"]');
+    if(f.abierto && !b) acc.insertAdjacentHTML('afterbegin', `<button class="mini" data-accion="revisado" type="button" title="Revisé hoy y los números no cambiaron">Sin cambios</button>`);
+    if(!f.abierto && b) b.remove();
+  }
+  pintarOpsResumen();
+}
+
+async function guardarCeldaOps(el){
+  const tr = el.closest('tr[data-id]'), id = +tr.dataset.id, k = el.dataset.c;
+  const cel = el.closest('td,th');
+  const v = el.type === 'checkbox' ? el.checked : el.value;
+  const antes = (OPSV.filas.find(f => f.id === id) || {})[k];
+  cel.classList.remove('ok', 'error'); cel.classList.add('guardando');
+  try{
+    const r = await api(`/api/ops/${OPSV.tipo}/${id}`, {method: 'PATCH', body: {[k]: v}});
+    refrescarFilaOps(r.fila);
+    cel.classList.remove('guardando'); cel.classList.add('ok');
+    setTimeout(() => cel.classList.remove('ok'), 900);
+    if(r.tambien && r.tambien.length){
+      r.tambien.forEach(oid => {
+        const o = OPSV.filas.find(f => f.id === oid); if(!o) return;
+        o.tier = r.fila.tier;
+        const s = $('#opsGrid').querySelector(`tr[data-id="${oid}"] [data-c="tier"]`); if(s) s.value = r.fila.tier || '';
+      });
+      toast(`Tier aplicado también a ${r.tambien.length} proceso${r.tambien.length === 1 ? '' : 's'} más de ${r.fila.empresa}.`);
+    }
+  }catch(e){
+    cel.classList.remove('guardando'); cel.classList.add('error');
+    if(el.type === 'checkbox') el.checked = !!antes; else el.value = antes ?? '';
+    toast('No se guardó: ' + e.message);
+    setTimeout(() => cel.classList.remove('error'), 2500);
+  }
+}
+
+// El formulario de una fila nueva: solo lo necesario para empezar; lo demás se llena en la tabla.
+function abrirNuevoOps(){
+  const E = OPSV.esp, box = $('#opsNuevo');
+  if(!box.hidden){ box.hidden = true; return; }
+  const def = k => { const d = (E.defecto || {})[k]; return d === 'hoy' ? OPSV.hoy : d; };
+  const empresas = [...new Set(OPSV.filas.map(f => f.empresa || f.cliente).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+  box.innerHTML = `<div class="cardhd"><h2>${OPSV.tipo === 'procesos' ? 'Nuevo' : 'Nueva'} ${esc(E.singular)}</h2><span class="cs">Lo demás se llena en la tabla</span></div>
+    <form id="formOpsNuevo" class="onform" autocomplete="off">
+      ${E.nuevo.map(k => { const c = E.campos.find(x => x.k === k); const d = def(k);
+        const f = {[k]: d};
+        return `<label class="f ${c.t === 'bool' ? 'chk' : ''}"><span>${esc(c.l)}${c.req ? ' *' : ''}</span>${celdaOps(f, c).replace('data-c=', (c.fijo ? 'list="opsEmpresas" ' : '') + 'name="' + k + '" data-n=')}</label>`; }).join('')}
+      <datalist id="opsEmpresas">${empresas.map(e => `<option value="${esc(e)}">`).join('')}</datalist>
+      <div class="onacc"><button class="cta" type="submit">Crear</button><button class="cta ghost" type="button" id="btnOpsCancelar">Cancelar</button></div>
+    </form>`;
+  box.hidden = false;
+  const form = $('#formOpsNuevo');
+  form.querySelector('input,select').focus();
+  $('#btnOpsCancelar').addEventListener('click', () => { box.hidden = true; });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const cuerpo = {};
+    form.querySelectorAll('[name]').forEach(el => { cuerpo[el.name] = el.type === 'checkbox' ? el.checked : el.value; });
+    try{
+      const r = await api('/api/ops/' + OPSV.tipo, {method: 'POST', body: cuerpo});
+      OPSV.filas.unshift(r.fila);
+      box.hidden = true;
+      OPSV.filtro = r.fila.abierto ? 'abiertos' : 'todos'; OPSV.extra = null; OPSV.q = ''; $('#qOps').value = '';
+      pintarOps();
+      const tr = $('#opsGrid').querySelector(`tr[data-id="${r.fila.id}"]`);
+      if(tr){ tr.classList.add('nueva'); tr.scrollIntoView({block: 'center'}); }
+      toast('Creado.');
+    }catch(err){ toast('No se creó: ' + err.message); }
+  });
+}
+
+function enganchesOps(){
+  if(enganchesOps.hecho) return;
+  enganchesOps.hecho = true;
+  const g = $('#opsGrid');
+  g.addEventListener('change', e => { if(e.target.matches('[data-c]')) guardarCeldaOps(e.target); });
+  // Enter guarda y baja a la misma columna de la fila siguiente (en las notas, Enter es salto
+  // de línea; para guardar basta con salir de la celda).
+  g.addEventListener('keydown', e => {
+    const el = e.target;
+    if(e.key !== 'Enter' || !el.matches('input[data-c]')) return;
+    e.preventDefault();
+    const tr = el.closest('tr'), sig = tr && tr.nextElementSibling;
+    const otro = sig && sig.querySelector(`[data-c="${el.dataset.c}"]`);
+    if(otro){ otro.focus(); if(otro.select) otro.select(); } else el.blur();
+  });
+  g.addEventListener('focusin', e => { if(e.target.matches('textarea[data-c]')) e.target.rows = 4; });
+  g.addEventListener('focusout', e => { if(e.target.matches('textarea[data-c]')) e.target.rows = 1; });
+  g.addEventListener('click', async e => {
+    const th = e.target.closest('th[data-ord]');
+    if(th && th.closest('thead')){
+      const k = th.dataset.ord;
+      if(OPSV.orden === k) OPSV.dir = -OPSV.dir; else { OPSV.orden = k; OPSV.dir = 1; }
+      pintarOps(); return;
+    }
+    const b = e.target.closest('[data-accion]');
+    if(!b) return;
+    const id = +b.closest('tr').dataset.id;
+    const f = OPSV.filas.find(x => x.id === id);
+    if(b.dataset.accion === 'revisado'){
+      try{ const r = await api(`/api/ops/${OPSV.tipo}/${id}`, {method: 'PATCH', body: {revisado: true}}); refrescarFilaOps(r.fila); toast('Marcada como revisada hoy.'); }
+      catch(err){ toast('No se guardó: ' + err.message); }
+    }
+    if(b.dataset.accion === 'borrar'){
+      const nombre = [f.empresa || f.cliente, f.cargo].filter(Boolean).join(' · ');
+      if(!await preguntar('¿Eliminar esta fila?', `${nombre}. No se puede deshacer.`, 'Eliminar', 'Cancelar')) return;
+      try{ await api(`/api/ops/${OPSV.tipo}/${id}`, {method: 'DELETE'}); OPSV.filas = OPSV.filas.filter(x => x.id !== id); pintarOps(); toast('Eliminada.'); }
+      catch(err){ toast('No se eliminó: ' + err.message); }
+    }
+  });
+  const extra = e => {
+    const b = e.target.closest('[data-extra]'); if(!b) return;
+    const id = b.dataset.extra;
+    const r = opsResumen().find(x => x.id === id);
+    if(!id || (OPSV.extra && OPSV.extra.id === id)) OPSV.extra = null;
+    else { OPSV.extra = {id, l: `${r.n} ${r.l}`, fn: r.fn}; if(r.todos) OPSV.filtro = 'todos'; else if(OPSV.filtro === 'cerrados') OPSV.filtro = 'abiertos'; }
+    pintarOps();
+  };
+  $('#opsRes').addEventListener('click', extra);
+  $('#opsAviso').addEventListener('click', extra);
+  $('#qOps').addEventListener('input', e => { OPSV.q = e.target.value; pintarOps(); });
+  $('#segOps').querySelectorAll('[data-fo]').forEach(b => b.addEventListener('click', () => { OPSV.filtro = b.dataset.fo; pintarOps(); }));
+  $('#btnOpsNuevo').addEventListener('click', abrirNuevoOps);
 }
 
 /* ===================== abrir una verificación anterior =====================

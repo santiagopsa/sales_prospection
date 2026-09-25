@@ -13,7 +13,8 @@ const path = require('path');
 const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt, leerTraduccion } = require('./prompts');
 const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana } = require('./rules');
 const didit = require('./didit');
-const { T, initSchema } = require('./schema');
+const { T, SCHEMA, initSchema } = require('./schema');
+const OPS = require('./ops');
 const { crearPedirJson } = require('./llm');
 const A = require('./archivos');
 
@@ -161,6 +162,22 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
   // No toca el límite del servidor que lo monta.
   r.use(express.json({ limit: '12mb' }));
 
+  // Operaciones (Procesos completos, SaaS, Evaluaciones): lo que antes vivía en Airtable.
+  // Al arrancar crea sus tablas y, si están vacías, importa la foto de Airtable una sola vez.
+  const ops = OPS.crearOps({ pool, schema: SCHEMA });
+  const opsListo = ops.init().catch(e => console.error('[verificacion/ops] init:', e.message));
+  const rutaOps = metodo => async (req, res) => {
+    try {
+      await opsListo;
+      const r2 = await OPS.atender(ops, metodo, req.params.tipo, req.params.id == null ? null : req.params.id, req.body || {});
+      res.status(r2.status).json(r2.body);
+    } catch (e) { console.error('[verificacion/ops]', e.message); res.status(500).json({ error: e.message }); }
+  };
+  r.get('/api/ops/:tipo', rutaOps('GET'));
+  r.post('/api/ops/:tipo', rutaOps('POST'));
+  r.patch('/api/ops/:tipo/:id', rutaOps('PATCH'));
+  r.delete('/api/ops/:tipo/:id', rutaOps('DELETE'));
+
   // Con el mount point sin slash final, las rutas relativas del HTML resolverían
   // contra el nivel de arriba. Se fuerza el slash.
   r.get('/', (req, res, next) => {
@@ -191,7 +208,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
   const BUILD = (() => {
     try {
       const h = require('crypto').createHash('sha1');
-      for (const f of ['app.js', 'llm.js', 'json_llm.js', 'rules.js', 'prompts.js', 'schema.js', 'didit.js', 'archivos.js']) {
+      for (const f of ['app.js', 'llm.js', 'json_llm.js', 'rules.js', 'prompts.js', 'schema.js', 'didit.js', 'archivos.js', 'ops.js']) {
         try { h.update(require('fs').readFileSync(path.join(__dirname, f))); } catch (e) {}
       }
       h.update(VER);

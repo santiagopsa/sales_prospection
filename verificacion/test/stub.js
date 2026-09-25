@@ -20,6 +20,9 @@ const FAKE_TRANS = (
   'Candidato: CS01 para crear, CS02 para modificar.\n'
 ).repeat(8);
 const FORMATO_ACTA = 'v4-2026-09'; // igual que en app.js
+const OPS = require('../ops');
+// Sin semilla por defecto: las pruebas cargan la de Airtable con POST /api/__ops_semilla cuando la quieren.
+const OPS_STORE = OPS.crearOps({ semilla: process.env.OPS_SEMILLA === '1' });
 const db = { companies:[], vacancies:[], requirements:[], sessions:[], ratings:[], seq:1 };
 // Cuántos requisitos tiene y cuántos cumplió (nivel 4-5): lo que el tablero pinta sin abrir el acta.
 const conResultado = s => { const rs = db.ratings.filter(r=>r.session_id===s.id);
@@ -184,6 +187,15 @@ const server = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x').searchParams;
     return json(res,200, indicadoresSemana(db.sessions.map(conResultado), db.vacancies,
       {evaluador: u.get('evaluador') || '', fecha: u.get('fecha') || null}));
+  }
+
+  // Operaciones (Procesos completos, SaaS, Evaluaciones): mismas reglas que el servidor (ops.js).
+  if(p === '/api/__ops_semilla' && m==='POST') return json(res,200, await OPS_STORE.sembrar());
+  const mo = p.match(/^\/api\/ops\/(\w+)(?:\/(\d+))?$/);
+  if(mo){
+    const b = (m==='POST' || m==='PATCH') ? await body(req) : {};
+    const r = await OPS.atender(OPS_STORE, m, mo[1], mo[2] == null ? null : mo[2], b);
+    return json(res, r.status, r.body);
   }
 
   // Solo para pruebas: siembra verificaciones antiguas para ver el tablero con historia.

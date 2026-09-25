@@ -149,10 +149,13 @@ python3 verificacion/test/e2e_criterios.py # criterio por pregunta; demostró / 
 node verificacion/test/traduccion.test.js  # la ruta de traducción REAL con un modelo de mentira (express doblado)
 node verificacion/test/correccion.test.js  # corregir el nombre: en borrador cambia; emitida, vuelve a firmar y anota
 node verificacion/test/pulso.test.js       # el pulso, los candidatos por vacante y los indicadores en las rutas reales
+node verificacion/test/ops.test.js         # operaciones: cálculos, validación, lo que se llena solo, tier por empresa, importación
+PG_PRUEBA="host=/tmp/pgt port=5499 user=postgres" node verificacion/test/ops_pg.test.js  # el SQL de operaciones contra un Postgres local (se salta sin PG_PRUEBA)
 python3 verificacion/test/e2e_nombre.py    # el lápiz junto al nombre, en sesión y sobre el acta
 python3 verificacion/test/e2e_empleo.py    # se verifica el último empleo declarado y no otro
 python3 verificacion/test/e2e_tablero.py   # el pulso, la cola, la meta, cerrar/reabrir, candidatos por vacante y el buscador
 python3 verificacion/test/e2e_indicadores.py # la barra, los focos, empresas atendidas, día por día, navegar semanas, ver como, teléfono
+python3 verificacion/test/e2e_ops.py        # Procesos, SaaS y Evaluaciones con los datos de Airtable: editar, Enter, reglas, tier, validación, crear, borrar
 ```
 
 Y una herramienta que no afirma nada, solo deja mirar el resultado — capturas de cada pantalla y el PDF del informe:
@@ -499,6 +502,24 @@ La barra de arriba tiene dos secciones: **Tablero** (lo del día a día) e **Ind
 - **Últimas 8 semanas.** Informes, vacantes verificadas, empresas atendidas y % que cumple todo, en barras; un clic lleva a esa semana.
 
 Lo calcula `rules.js · indicadoresSemana` (`GET /api/indicadores?fecha=AAAA-MM-DD&evaluador=`), la misma función en el servidor, el stub y las pruebas.
+
+## Operaciones: Procesos completos, SaaS y Evaluaciones (antes, Airtable)
+
+Tres pestañas en la barra de arriba que reemplazan las tablas de la base **Ops** de Airtable. Se importaron una sola vez (`datos/ops_airtable_2026-09-25.json`, 87 procesos, 212 vacantes SaaS, 39 evaluaciones) y desde ahí se llenan aquí; Airtable queda como archivo. Al arrancar, `ops.js` crea sus tablas (`verificacion.ops_procesos`, `ops_saas`, `ops_evaluaciones`) y **solo si están vacías** importa ese archivo: un reinicio no duplica ni pisa nada.
+
+Se edita como una hoja de cálculo: cada celda se guarda al salir, **Enter** baja a la misma columna de la fila siguiente (para actualizar los números del día de corrido), lo calculado se repinta en la misma fila, y un dato inválido no se guarda, se avisa y la celda vuelve a su valor. Arriba, cifras que filtran la tabla con un clic (en riesgo, sin actualizar hoy, sin causa de cierre…). Encabezados con **?** explican cómo llenar la columna.
+
+**Lo calculado** (antes fórmulas de Airtable, ahora en `ops.js · calcular`, sin guardarse):
+
+- *Procesos*: salud por días sin movimiento (verde ≤ 2, amarilla 3–5, roja > 5; solo en Reclutamiento y Terna enviada), días sin enviar candidatos, duración (de la activación al cierre o a hoy) y responsabilidad (sale de la causa de cierre).
+- *SaaS*: faltan destacados, días publicada, días hasta la meta, % descartados, días sin actualizar y salud (verde con la meta cumplida; roja con más de 10 días sin cumplirla o 2+ días sin actualizar). **La meta se cumple solo con destacados**, sin contar descartados (en Airtable dos fórmulas se contradecían).
+- *Evaluaciones*: % de aprobación y salud (verde ≥ 70% y ≤ 14 días; roja < 40% o > 30 días). En Airtable estaban rotas porque apuntaban a una columna borrada; ahora existe **Aprobados**.
+
+**Lo que se llena solo**: al pasar un proceso a Contratado, Pausado o Cancelado, la fecha de cierre (y se marca si falta la causa); al reabrirlo se quita; al pasar a Terna enviada sin fecha de terna, la de hoy; en SaaS, la fecha de meta el día en que los destacados la alcanzan; "Sin cambios" marca una vacante SaaS como revisada hoy. El **tier** es de la empresa: cambiarlo en un proceso lo cambia en todos los de esa empresa, y un proceso nuevo de una empresa conocida lo hereda.
+
+**Columnas que cambiaron respecto a Airtable**: Procesos gana *Faltan para la terna* y *Garantía* (llenadas al importar desde las notas "Pendiente 1", "Garantía"; las notas se conservan) y pierde *Prioridad para el cliente* (repetía el tier). SaaS gana *Cargo* y pierde *Account Manager* y *Owner Ops* (eran siempre Luisa y Wei) y *¿Cliente activo?* (casi vacía). Evaluaciones gana *Aprobados*.
+
+Rutas: `GET/POST /api/ops/:tipo`, `PATCH/DELETE /api/ops/:tipo/:id` (`tipo` = procesos | saas | evaluaciones). La misma función (`ops.atender`) atiende el servidor y el stub.
 
 ## La entrevista y la calificación son dos momentos
 

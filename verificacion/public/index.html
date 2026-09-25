@@ -37,6 +37,10 @@
     <nav class="topnav" id="topNav" aria-label="Secciones">
       <button type="button" data-nav="tablero" class="on">Tablero</button>
       <button type="button" data-nav="indicadores">Indicadores</button>
+      <span class="navsep" aria-hidden="true"></span>
+      <button type="button" data-nav="procesos">Procesos</button>
+      <button type="button" data-nav="saas">SaaS</button>
+      <button type="button" data-nav="evaluaciones">Evaluaciones</button>
     </nav>
     <div class="spacer"></div>
     <div class="who" id="whoTop"></div>
@@ -189,6 +193,41 @@
         </div>
       </div>
       <div id="indCuerpo"><div class="empty">Cargando…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== OPERACIONES =====================
+     Procesos completos, SaaS y Evaluaciones: lo que antes se llenaba en Airtable. Una sola
+     pantalla que se arma con la especificación de columnas que manda el servidor (ops.js). -->
+<div class="screen" id="vOps">
+  <div class="wrap ancho">
+    <div class="stage">
+      <div class="tabhd">
+        <div>
+          <h1 id="opsTitulo">Operaciones</h1>
+          <p class="lede" id="opsLede"></p>
+        </div>
+        <div class="tabacts">
+          <button class="cta" id="btnOpsNuevo" type="button">+ Nuevo</button>
+        </div>
+      </div>
+      <div class="opsres" id="opsRes"></div>
+      <div class="card opsnuevo" id="opsNuevo" hidden></div>
+      <div class="card opscard">
+        <div class="filtros">
+          <input type="search" id="qOps" placeholder="Buscar empresa, cargo, ID o notas" autocomplete="off">
+          <div class="segf" id="segOps" role="group" aria-label="Qué filas ver">
+            <button type="button" data-fo="abiertos" class="sel">En curso</button>
+            <button type="button" data-fo="cerrados">Cerrados</button>
+            <button type="button" data-fo="todos">Todos</button>
+          </div>
+          <span class="cs" id="opsCount"></span>
+        </div>
+        <div class="opsaviso" id="opsAviso" hidden></div>
+        <div class="ogrid-env" id="opsGrid"><div class="empty">Cargando…</div></div>
+        <p class="hint">Cada celda se guarda sola al salir de ella (o con Enter, que baja a la fila siguiente). Las columnas grises se calculan solas. Pasa el mouse por un encabezado para ver cómo se llena.</p>
+      </div>
     </div>
   </div>
 </div>
