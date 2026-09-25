@@ -286,8 +286,102 @@ function estadisticas(sesiones, { evaluador = '', ahora = Date.now(), semanas = 
   };
 }
 
+// ---------------------------------------------------------------------------------------
+// PULSO DE LAS VACANTES: qué tan cerca está cada búsqueda de concretarse.
+// Una vacante está "en movimiento" si se creó en los últimos 14 días o si alguna de sus
+// verificaciones se movió en ese lapso. La señal de cierre sale de cuántos candidatos
+// validados (informe emitido) cumplen TODOS los requisitos, contra una terna de 3:
+//   alta  → ya hay terna: 3 o más cumplen todo;
+//   media → al menos 1 cumple todo, o hay 2+ candidatos en proceso que pueden completarla;
+//   baja  → ninguno cumple todo y casi nada en proceso.
+// Es una regla que se explica en una línea a propósito: el reclutador tiene que poder
+// decirle al cliente por qué una vacante está "alta" sin abrir una fórmula.
+// ---------------------------------------------------------------------------------------
+const TERNA = 3;
+const DIAS_RECIENTE = 14;
+const ms = x => { const n = x ? new Date(x).getTime() : NaN; return isNaN(n) ? null : n; };
+const actividadSesion = s => Math.max(0, ...[s.updated_at, s.issued_at, s.transcript_at, s.entrevista_at, s.started_at, s.created_at].map(ms).filter(n => n != null)) || null;
+function resultadoSesion(s) {
+  if (!s || s.status !== 'issued' || !(Number(s.req_total) > 0)) return null;
+  const c = Number(s.req_cumple) || 0, t = Number(s.req_total);
+  return c >= t ? 'ok' : (c > 0 ? 'par' : 'no');
+}
+const PROB_ORDEN = { alta: 0, media: 1, baja: 2 };
+
+function pulsoVacante(v, sesiones, { ahora = Date.now(), dias = DIAS_RECIENTE } = {}) {
+  const t = new Date(ahora).getTime(), desde = t - dias * 86400000;
+  const cs = (Array.isArray(sesiones) ? sesiones : []).filter(s => s.vacancy_id != null && Number(s.vacancy_id) === Number(v.id));
+  const validados = cs.filter(s => s.status === 'issued');
+  const res = validados.map(resultadoSesion);
+  const aptos = res.filter(r => r === 'ok').length;
+  const parciales = res.filter(r => r === 'par').length;
+  const no_cumplen = res.filter(r => r === 'no').length;
+  const en_proceso = cs.length - validados.length;
+  const acts = cs.map(actividadSesion).filter(Boolean);
+  const ultima = acts.length ? Math.max(...acts) : null;
+  const creada = ms(v.created_at);
+  const cerrada = (v.status || 'activa') === 'cerrada';
+  const nueva = creada != null && creada >= desde;
+  const movida = ultima != null && ultima >= desde;
+  const reciente = !cerrada && (nueva || movida);
+  const validados_recientes = validados.filter(s => (ms(s.issued_at) || 0) >= desde).length;
+  let probabilidad = null, razon = '';
+  const faltan = Math.max(0, TERNA - aptos);
+  const pl = (n, a, b) => (n === 1 ? a : b);
+  if (!cerrada) {
+    if (aptos >= TERNA) {
+      probabilidad = 'alta';
+      razon = `Terna lista: ${aptos} candidatos cumplen todos los requisitos.`;
+    } else if (aptos >= 1 || en_proceso >= 2) {
+      probabilidad = 'media';
+      razon = aptos
+        ? `${aptos} ${pl(aptos, 'cumple', 'cumplen')} todo; ${pl(faltan, 'falta 1', `faltan ${faltan}`)} para la terna${en_proceso ? ` y hay ${en_proceso} en proceso` : ''}.`
+        : `Ninguno cumple todo todavía, pero hay ${en_proceso} en proceso.`;
+    } else {
+      probabilidad = 'baja';
+      razon = validados.length
+        ? `Ninguno de ${pl(validados.length, 'el validado', `los ${validados.length} validados`)} cumple todo${en_proceso ? `; ${en_proceso} en proceso` : ''}.`
+        : (en_proceso ? 'Sin informes todavía; 1 candidato en proceso.' : 'Sin candidatos verificados todavía.');
+    }
+  }
+  return {
+    id: v.id, title: v.title || '', company_name: v.company_name || '', status: v.status || 'activa',
+    created_at: v.created_at || null,
+    validaciones: cs.length, validados: validados.length, aptos, parciales, no_cumplen, en_proceso,
+    validados_recientes, ultima_actividad: ultima ? new Date(ultima).toISOString() : null,
+    reciente, motivo: reciente ? (movida ? 'actividad' : 'nueva') : null,
+    probabilidad, faltan, terna: TERNA, razon,
+  };
+}
+
+// Todas las vacantes con su pulso, y un resumen de las que están en movimiento. El orden es el
+// de la pregunta "¿cuál se cierra primero?": probabilidad, luego cuántos cumplen todo, luego
+// cuántos validados, y al final la actividad más reciente.
+function pulsoVacantes(vacantes, sesiones, { ahora = Date.now(), dias = DIAS_RECIENTE } = {}) {
+  const lista = (Array.isArray(vacantes) ? vacantes : []).map(v => pulsoVacante(v, sesiones, { ahora, dias }));
+  const orden = (a, b) => (a.reciente === b.reciente ? 0 : a.reciente ? -1 : 1)
+    || (PROB_ORDEN[a.probabilidad] ?? 9) - (PROB_ORDEN[b.probabilidad] ?? 9)
+    || b.aptos - a.aptos || b.validados - a.validados || b.validaciones - a.validaciones
+    || (ms(b.ultima_actividad) || ms(b.created_at) || 0) - (ms(a.ultima_actividad) || ms(a.created_at) || 0);
+  lista.sort(orden);
+  const rec = lista.filter(p => p.reciente);
+  const suma = k => rec.reduce((n, p) => n + p[k], 0);
+  return {
+    dias, terna: TERNA, vacantes: lista,
+    resumen: {
+      recientes: rec.length,
+      validaciones: suma('validaciones'), validados: suma('validados'), aptos: suma('aptos'),
+      en_proceso: suma('en_proceso'), validados_recientes: suma('validados_recientes'),
+      alta: rec.filter(p => p.probabilidad === 'alta').length,
+      media: rec.filter(p => p.probabilidad === 'media').length,
+      baja: rec.filter(p => p.probabilidad === 'baja').length,
+    },
+  };
+}
+
 module.exports = {
   estadoTablero, claveEvaluador, estadisticas, diaLocal,
+  pulsoVacante, pulsoVacantes, resultadoSesion, TERNA, DIAS_RECIENTE,
   mismaEmpresa, conciliarEmpleo, ESTADOS_EMPLEO,
   LVLTXT, MAX_REQ, ID_ITEMS, itemsDe, KINDS, esCierre, clean, estadoTranscripcion, TRANSCRIPCION_STALE_MS,
   semaforo, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode,

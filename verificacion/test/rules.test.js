@@ -258,4 +258,69 @@ t('sin datos no se rompe', () => {
   assert.strictEqual(e.racha, 0); assert.strictEqual(e.cumplen.pct, null); assert.strictEqual(e.horas_a_informe.mediana, null);
 });
 
+console.log('pulso de las vacantes');
+{
+  const { pulsoVacante, pulsoVacantes } = require('../rules');
+  const AH = Date.parse('2026-09-24T15:00:00Z');
+  const d = n => new Date(AH - n * 86400000).toISOString();
+  const em = (vid, cumple, total, dias) => ({vacancy_id:vid, status:'issued', issued_at:d(dias), updated_at:d(dias), req_total:total, req_cumple:cumple});
+  const pr = (vid, dias) => ({vacancy_id:vid, status:'draft', started_at:d(dias), updated_at:d(dias)});
+  const V = [
+    {id:1, title:'Terna lista', created_at:d(40)},                  // vieja pero movida: 3 cumplen todo
+    {id:2, title:'Una apta',    created_at:d(5)},                   // nueva, 1 cumple, 1 en proceso
+    {id:3, title:'Nadie cumple', created_at:d(30)},                 // movida, 2 validados sin cumplir
+    {id:4, title:'Quieta',      created_at:d(60)},                  // sin movimiento en 14 días
+    {id:5, title:'Cerrada',     created_at:d(3), status:'cerrada'}, // cerrada: nunca en movimiento
+    {id:6, title:'Nueva vacía', created_at:d(2)},                   // nueva, sin candidatos
+  ];
+  const S = [em(1,3,3,2), em(1,2,2,20), em(1,3,3,25), em(1,1,3,4),
+             em(2,2,2,1), pr(2,0),
+             em(3,1,3,6), em(3,0,3,3),
+             em(4,3,3,30), em(4,3,3,31),
+             em(5,3,3,1)];
+  t('terna completa → alta, aunque la vacante sea vieja, si tuvo movimiento', () => {
+    const p = pulsoVacante(V[0], S, {ahora:AH});
+    assert.strictEqual(p.reciente, true); assert.strictEqual(p.motivo, 'actividad');
+    assert.strictEqual(p.validados, 4); assert.strictEqual(p.aptos, 3); assert.strictEqual(p.parciales, 1);
+    assert.strictEqual(p.probabilidad, 'alta'); assert.strictEqual(p.faltan, 0);
+    assert.match(p.razon, /Terna lista/);
+  });
+  t('una apta → media y dice cuántos faltan', () => {
+    const p = pulsoVacante(V[1], S, {ahora:AH});
+    assert.strictEqual(p.probabilidad, 'media'); assert.strictEqual(p.faltan, 2); assert.strictEqual(p.en_proceso, 1);
+    assert.match(p.razon, /1 cumple todo; faltan 2 para la terna y hay 1 en proceso/);
+  });
+  t('validados sin ninguno que cumpla todo → baja, con la razón', () => {
+    const p = pulsoVacante(V[2], S, {ahora:AH});
+    assert.strictEqual(p.probabilidad, 'baja'); assert.strictEqual(p.parciales, 1); assert.strictEqual(p.no_cumplen, 1);
+    assert.match(p.razon, /Ninguno de los 2 validados cumple todo/);
+  });
+  t('dos en proceso sin aptos → media: hay con qué completar la terna', () => {
+    const p = pulsoVacante({id:9, created_at:d(1)}, [pr(9,0), pr(9,1)], {ahora:AH});
+    assert.strictEqual(p.probabilidad, 'media'); assert.match(p.razon, /hay 2 en proceso/);
+  });
+  t('sin movimiento en 14 días no está en movimiento; cerrada nunca, y sin probabilidad', () => {
+    assert.strictEqual(pulsoVacante(V[3], S, {ahora:AH}).reciente, false);
+    const c = pulsoVacante(V[4], S, {ahora:AH});
+    assert.strictEqual(c.reciente, false); assert.strictEqual(c.probabilidad, null);
+  });
+  t('nueva y vacía: en movimiento por creación, probabilidad baja', () => {
+    const p = pulsoVacante(V[5], S, {ahora:AH});
+    assert.strictEqual(p.reciente, true); assert.strictEqual(p.motivo, 'nueva'); assert.strictEqual(p.probabilidad, 'baja');
+    assert.match(p.razon, /Sin candidatos verificados/);
+  });
+  t('lista ordenada por probabilidad y resumen solo de las que están en movimiento', () => {
+    const r = pulsoVacantes(V, S, {ahora:AH});
+    assert.deepStrictEqual(r.vacantes.filter(p => p.reciente).map(p => p.id), [1, 2, 3, 6]);
+    assert.strictEqual(r.resumen.recientes, 4);
+    assert.strictEqual(r.resumen.validados, 4 + 1 + 2);
+    assert.strictEqual(r.resumen.aptos, 3 + 1);
+    assert.deepStrictEqual([r.resumen.alta, r.resumen.media, r.resumen.baja], [1, 1, 2]);
+    assert.strictEqual(r.resumen.validados_recientes, 2 + 1 + 2);  // emitidos en 14 días
+  });
+  t('ids como texto (pg) cuadran con números', () => {
+    assert.strictEqual(pulsoVacante({id:'1', created_at:d(1)}, [{...em(1,3,3,1)}], {ahora:AH}).validados, 1);
+  });
+}
+
 console.log(`\n${n} pruebas · todo en verde`);

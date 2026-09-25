@@ -11,7 +11,7 @@
 const express = require('express');
 const path = require('path');
 const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt, leerTraduccion } = require('./prompts');
-const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero } = require('./rules');
+const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes } = require('./rules');
 const didit = require('./didit');
 const { T, initSchema } = require('./schema');
 const { crearPedirJson } = require('./llm');
@@ -427,14 +427,31 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
           FROM ${T.vacancies} v LEFT JOIN ${T.companies} c ON c.id=v.company_id WHERE v.id=$1`, [id]);
         if (!v.rows.length) return res.status(404).json({ error: 'not found' });
         const q = await pool.query(`SELECT * FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`, [id]);
-        return res.json({ ...v.rows[0], requirements: q.rows });
+        // Los candidatos de la vacante, con lo justo para la lista: estado, resultado por
+        // requisito y el código del informe. Sin transcripciones ni análisis: eso vive en la sesión.
+        const cs = await pool.query(`
+          SELECT s.id, s.vacancy_id, s.report_code, s.candidate, s.evaluator, s.kind, s.status, s.semaforo,
+                 s.started_at, s.issued_at, s.transcript_at, s.entrevista_at, s.updated_at, s.created_at,
+                 s.transcript_status, s.transcript_started_at,
+                 (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
+                 (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple
+          FROM ${T.sessions} s WHERE s.vacancy_id=$1
+          ORDER BY COALESCE(s.issued_at, s.updated_at, s.created_at) DESC LIMIT 500`, [id]);
+        const candidatos = cs.rows.map(s => ({ ...s, transcript_status: estadoTranscripcion(s).estado, estado_tablero: estadoTablero(s) }));
+        return res.json({ ...v.rows[0], requirements: q.rows, candidatos, pulso: pulsoVacante(v.rows[0], candidatos) });
       }
       const v = mem.vacancies.find(x => x.id === id);
       if (!v) return res.status(404).json({ error: 'not found' });
       const sesiones = mem.sessions.filter(s => s.vacancy_id === id);
+      const candidatos = sesiones.slice().reverse().map(s => {
+        const rs = mem.ratings.filter(r => r.session_id === s.id);
+        return { ...s, req_total: rs.length, req_cumple: rs.filter(r => r.level >= 4).length,
+                 transcript_status: estadoTranscripcion(s).estado, estado_tablero: estadoTablero(s) };
+      });
       res.json({ ...v, session_count: sesiones.length,
                  issued_count: sesiones.filter(s => s.status === 'issued').length,
-                 requirements: mem.requirements.filter(q => q.vacancy_id === id).sort((a, b) => a.ord - b.ord) });
+                 requirements: mem.requirements.filter(q => q.vacancy_id === id).sort((a, b) => a.ord - b.ord),
+                 candidatos, pulso: pulsoVacante(v, candidatos) });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
@@ -1485,22 +1502,29 @@ ${!code ? `
   r.get('/api/tablero', async (req, res) => {
     try {
       const evaluador = clean(req.query && req.query.evaluador);
-      let filas;
+      let filas, vacs;
       if (pool) {
         const q = await pool.query(`
-          SELECT s.id, s.evaluator, s.status, s.started_at, s.entrevista_at, s.issued_at, s.transcript_at,
-                 s.transcript_status, s.transcript_started_at,
+          SELECT s.id, s.vacancy_id, s.evaluator, s.status, s.started_at, s.entrevista_at, s.issued_at, s.transcript_at,
+                 s.transcript_status, s.transcript_started_at, s.updated_at, s.created_at,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple
           FROM ${T.sessions} s`);
         filas = q.rows;
+        const qv = await pool.query(`
+          SELECT v.id, v.title, v.status, v.created_at, c.name AS company_name
+          FROM ${T.vacancies} v LEFT JOIN ${T.companies} c ON c.id=v.company_id
+          ORDER BY v.created_at DESC LIMIT 500`);
+        vacs = qv.rows;
       } else {
         filas = mem.sessions.map(s => {
           const rs = mem.ratings.filter(r => r.session_id === s.id);
           return { ...s, req_total: rs.length, req_cumple: rs.filter(r => r.level >= 4).length };
         });
+        vacs = mem.vacancies;
       }
-      res.json(estadisticas(filas, { evaluador }));
+      // El pulso de las vacantes es del equipo: no se filtra por evaluador.
+      res.json({ ...estadisticas(filas, { evaluador }), pulso: pulsoVacantes(vacs, filas) });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 

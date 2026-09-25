@@ -66,8 +66,16 @@
         </div>
       </div>
 
+      <!-- El pulso: vacantes creadas o movidas en 14 días, cuántos validados tiene cada una y
+           qué tan cerca está de la terna. Es la señal de cuál se concreta pronto. -->
+      <div class="card pulsocard" id="pulsoCard">
+        <div class="cardhd"><h2>Vacantes en movimiento</h2><span class="cs" id="pulsoCount"></span></div>
+        <p class="pulsolede">Creadas o con verificaciones en las últimas dos semanas. La probabilidad de cierre sale de cuántos candidatos validados cumplen todos los requisitos, contra una terna de 3.</p>
+        <div class="pulsores" id="pulsoRes"></div>
+        <div id="pulsoList"><div class="empty">Cargando…</div></div>
+      </div>
+
       <div class="metacard" id="metaCard"></div>
-      <div class="kpis" id="kpis"></div>
 
       <div class="card" id="colaCard">
         <div class="cardhd"><h2>Para hacer ahora</h2><span class="cs" id="colaCount"></span></div>
@@ -76,11 +84,12 @@
       </div>
 
       <div class="card" id="vacCard">
-        <div class="cardhd"><h2>Vacantes</h2><span class="cs" id="vacCount"></span></div>
+        <div class="cardhd"><h2>Todas las vacantes</h2><span class="cs" id="vacCount"></span></div>
         <div class="filtros">
-          <input type="search" id="qVac" placeholder="Buscar vacante o empresa" autocomplete="off">
+          <input type="search" id="qVac" placeholder="Buscar cualquier vacante o empresa" autocomplete="off">
           <div class="segf" id="segVac" role="group" aria-label="Qué vacantes ver">
-            <button type="button" data-fv="activas" class="sel">Activas</button>
+            <button type="button" data-fv="quietas" class="sel">Sin movimiento</button>
+            <button type="button" data-fv="activas">Activas</button>
             <button type="button" data-fv="cerradas">Cerradas</button>
             <button type="button" data-fv="todas">Todas</button>
           </div>

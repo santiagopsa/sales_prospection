@@ -122,7 +122,7 @@ Aparte a propósito: son la parte que no puede fallar y la única con pruebas pr
 ## Pruebas
 
 ```bash
-node verificacion/test/rules.test.js       # 38 pruebas de las reglas, sin dependencias
+node verificacion/test/rules.test.js       # 60 pruebas de las reglas, sin dependencias
 node verificacion/test/assets.test.js      # que el versionado de estáticos siga enganchado
 node verificacion/test/json_llm.test.js    # leer el JSON del modelo venga como venga
 node verificacion/test/llm.test.js         # pedirJson contra un cliente falso, sin gastar tokens
@@ -148,9 +148,10 @@ python3 verificacion/test/e2e_una_hoja.py  # el caso de José cabe en UNA hoja d
 python3 verificacion/test/e2e_criterios.py # criterio por pregunta; demostró / para llegar a N; barras
 node verificacion/test/traduccion.test.js  # la ruta de traducción REAL con un modelo de mentira (express doblado)
 node verificacion/test/correccion.test.js  # corregir el nombre: en borrador cambia; emitida, vuelve a firmar y anota
+node verificacion/test/pulso.test.js       # el pulso y los candidatos por vacante en las rutas reales
 python3 verificacion/test/e2e_nombre.py    # el lápiz junto al nombre, en sesión y sobre el acta
 python3 verificacion/test/e2e_empleo.py    # se verifica el último empleo declarado y no otro
-python3 verificacion/test/e2e_tablero.py   # la cola, la meta, los indicadores, las vacantes y el buscador
+python3 verificacion/test/e2e_tablero.py   # el pulso, la cola, la meta, cerrar/reabrir, candidatos por vacante y el buscador
 ```
 
 Y una herramienta que no afirma nada, solo deja mirar el resultado — capturas de cada pantalla y el PDF del informe:
@@ -467,13 +468,20 @@ Sobre la empresa: si se cambia el nombre no se renombra la empresa existente, po
 
 ## El tablero
 
-Con decenas de verificaciones la lista plana dejó de servir: lo que el reclutador necesita primero es saber qué le toca hacer, después cómo va, y al final encontrar lo que ya está terminado. El tablero responde en ese orden.
+Con decenas de verificaciones la lista plana dejó de servir. El tablero responde, en este orden: qué vacantes están por concretarse, cómo voy, qué me toca hacer, y dónde encuentro lo demás.
+
+- **Vacantes en movimiento (el pulso).** Arriba de todo, las vacantes activas **creadas en los últimos 14 días o con alguna verificación que se movió en ese lapso**. Cada una muestra, en grande, cuántos candidatos **validados** tiene (informe emitido), los tres cupos de la **terna** llenos con los que cumplen todos los requisitos, y la **probabilidad de cierre** con su razón en una línea:
+  - **Alta**: ya hay terna, 3 o más cumplen todo.
+  - **Media**: al menos 1 cumple todo, o hay 2 o más en proceso que pueden completarla.
+  - **Baja**: ninguno cumple todo y casi nada en proceso.
+  Es una regla que se explica en una frase a propósito: el reclutador tiene que poder decirle al cliente por qué una vacante está "alta". Van de más a menos probable, y arriba un resumen: vacantes en movimiento, candidatos validados (y cuántos en 14 días), cuántos cumplen todo y la distribución alta/media/baja. Cada vacante se despliega para ver a sus candidatos, validados primero. Lo calcula `rules.js · pulsoVacantes` y viaja en `GET /api/tablero` (campo `pulso`); es del equipo, no se filtra por evaluador.
+- **Cerrar o reabrir desde el tablero.** Cada vacante tiene su botón *Cerrar vacante* (o *Reabrir*, en el filtro *Cerradas*) ahí mismo, sin entrar a ella: sale del tablero al instante y sus informes no cambian. También se puede desde la pantalla de la vacante.
 
 - **Ver como.** Un selector con los evaluadores que existen (agrupados aunque los hayan escrito distinto: "Weimar", "weimar ") filtra la cola, los indicadores y la lista. Se recuerda en el navegador y también rellena el campo *Evaluador* de las sesiones nuevas. No hay ranking entre personas: se compara cada uno consigo mismo, y cuando se ve a una persona aparece solo el total del equipo como referencia.
 - **Meta de la semana y racha.** Una barra de avance contra una meta que cada uno fija (10 por defecto, se guarda en su navegador), una frase que empuja hacia lo concreto —si hay verificaciones listas para calificar, lo dice: son informes casi hechos— y la racha de días hábiles seguidos emitiendo (hoy sin informe todavía no la rompe; sábados y domingos no cuentan).
-- **Cuatro indicadores.** Informes emitidos y entrevistas de la semana, con la comparación contra la semana pasada y las últimas 8 semanas en barras; la mediana de horas de la entrevista al informe (últimos 30 días contra los 30 anteriores; bajar es mejorar), y el porcentaje de informes en que el candidato cumplió todos los requisitos.
 - **Para hacer ahora.** Lo pendiente, ordenado por lo que más urge —análisis fallidos, listas para calificar, transcripciones que esperan (marcadas cuando llevan más de un día), sesiones a medias, análisis en curso—, cada uno con su acción.
-- **Vacantes.** Buscador, filtro *Activas / Cerradas / Todas*, orden por actividad reciente. Cada vacante muestra entrevistados, informes, cuántos cumplen todo y cuántos siguen en proceso, y un punto por candidato con el color de su resultado; se despliega para ver la lista. Una vacante se **cierra** desde su pantalla y sale del tablero sin tocar sus informes.
+- **Todas las vacantes.** Por defecto muestra solo las activas **sin movimiento** (las que no están en el pulso), para que cada vacante aparezca una sola vez y las que llevan semanas quietas queden a la vista con su botón de cerrar. Filtros *Sin movimiento / Activas / Cerradas / Todas*; el buscador, desde *Sin movimiento*, busca en todas las activas. Misma fila que el pulso: validados, terna, probabilidad y un punto por candidato con el color de su resultado.
+- **La pantalla de la vacante** abre con la tarjeta **Candidatos**: la probabilidad de cierre y la terna, y la lista completa — *Validados* primero (los que cumplen todo arriba), después *En proceso* —, con fecha del informe, evaluador, requisitos cumplidos y código PKV; un clic abre el informe. `GET /api/vacancies/:id` trae `candidatos` y `pulso`.
 - **Verificaciones.** Buscador por nombre, vacante, evaluador o código PKV, filtro *Todas / Pendientes / Emitidas*, de 25 en 25. Las emitidas muestran cuántos requisitos cumplió.
 
 Las cuentas las hace `rules.js · estadisticas` sobre todas las verificaciones (`GET /api/tablero?evaluador=`), con la hora de Colombia; el estado de cada verificación desde "qué me toca hacer" lo calcula `estadoTablero` y viaja en `GET /api/sessions` (que ahora trae la vacante y el resultado por requisitos, hasta 2.000 filas). La misma función la usan el servidor, el stub y las pruebas.

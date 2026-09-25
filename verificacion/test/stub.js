@@ -8,7 +8,7 @@ const crypto = require('crypto');
 
 const PUB = path.join(__dirname, '..', 'public');
 const MOUNT = '/verificacion'; // igual que en el servidor real
-const { LVLTXT, MAX_REQ, semaforo, bloqueos, estadoIdentidad, tipoDocumento, conciliarEmpleo, estadisticas, estadoTablero } = require('../rules'); // reglas reales del servidor
+const { LVLTXT, MAX_REQ, semaforo, bloqueos, estadoIdentidad, tipoDocumento, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes } = require('../rules'); // reglas reales del servidor
 const A = require('../archivos'); // misma decisión de "qué es este archivo" que app.js
 
 // Lo que el stub devuelve al "leer" un .docx o .pdf, ya que no tiene mammoth ni pdf-parse.
@@ -175,7 +175,9 @@ const server = http.createServer(async (req, res) => {
   // Cómo va la gestión: la misma función que el servidor real.
   if(p === '/api/tablero' && m==='GET'){
     const ev = new URL(req.url, 'http://x').searchParams.get('evaluador') || '';
-    return json(res,200, estadisticas(db.sessions.map(conResultado), {evaluador: ev}));
+    const filas = db.sessions.map(conResultado);
+    return json(res,200, {...estadisticas(filas, {evaluador: ev}),
+      pulso: pulsoVacantes(db.vacancies.map(v=>({...v, status: v.status || 'activa'})), filas)});
   }
 
   // Solo para pruebas: siembra verificaciones antiguas para ver el tablero con historia.
@@ -204,8 +206,10 @@ const server = http.createServer(async (req, res) => {
     const v = db.vacancies.find(x=>x.id===+mm[1]);
     if(!v) return json(res,404,{error:'not found'});
     const ses = db.sessions.filter(s=>s.vacancy_id===v.id);
+    const candidatos = ses.slice().reverse().map(s=>({...conResultado(s), vacancy_title:v.title, company_name:v.company_name, estado_tablero: estadoTablero(s)}));
     return json(res,200,{...v, session_count:ses.length, issued_count:ses.filter(s=>s.status==='issued').length,
-      requirements: db.requirements.filter(q=>q.vacancy_id===v.id).sort((a,b)=>a.ord-b.ord)});
+      requirements: db.requirements.filter(q=>q.vacancy_id===v.id).sort((a,b)=>a.ord-b.ord),
+      candidatos, pulso: pulsoVacante({...v, status: v.status || 'activa'}, candidatos)});
   }
 
   // Editar la vacante: mismos campos y mismas reglas que el servidor real.

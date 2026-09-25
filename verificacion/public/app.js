@@ -417,11 +417,12 @@ function go(id){
 }
 
 /* ===================== tablero ===================== */
-/* Tres preguntas, en este orden: qué me toca hacer ahora (la cola), cómo voy (meta, racha y
-   cuatro indicadores) y dónde está cada vacante con sus candidatos. La lista completa queda al
+/* Cuatro preguntas, en este orden: qué vacantes están por concretarse (el pulso, con sus
+   validados), cómo voy (meta y racha), qué me toca hacer ahora (la cola) y dónde está cada
+   vacante con sus candidatos. La lista completa queda al
    final, con buscador. El "ver como" filtra la cola, los indicadores y la lista por evaluador;
    las vacantes son del equipo y muestran a todos sus candidatos. */
-const TB = { vs: [], ss: [], st: null, fv: 'activas', fs: 'todas', qv: '', qs: '', lim: 25, abiertas: new Set() };
+const TB = { vs: [], ss: [], st: null, fv: 'quietas', fs: 'todas', qv: '', qs: '', lim: 25, abiertas: new Set(), pulsoTodas: false };
 const LS_EVAL = 'pkv_evaluador', LS_META = 'pkv_meta_semana';
 const lsGet = (k, d) => { try{ const v = localStorage.getItem(k); return v == null ? d : v; }catch(e){ return d; } };
 const lsSet = (k, v) => { try{ localStorage.setItem(k, v); }catch(e){} };
@@ -443,12 +444,6 @@ function haceCuanto(ts){
   if(dd < 14) return `hace ${dd} días`;
   return fechaCorta(ts);
 }
-function horasTexto(h){
-  if(h == null) return '—';
-  if(h < 1) return `${Math.max(1, Math.round(h * 60))} min`;
-  if(h < 48) return `${Math.round(h)} h`;
-  return `${Math.round(h / 24)} días`;
-}
 // Qué me toca hacer con esta verificación: la etiqueta, el color y la acción.
 const ESTADO_TB = {
   fallo:      {tag:'r',   tx:'ANÁLISIS FALLÓ',       cta:'Reintentar',          orden:0},
@@ -468,31 +463,14 @@ function sesionesDelEval(){
   return k ? TB.ss.filter(s => claveEval(s.evaluator) === k) : TB.ss;
 }
 
-// Barras de las últimas 8 semanas. La semana en curso en el color de acento; las demás apagadas.
-function barrasSemanas(sem, campo, rotulo){
-  const max = Math.max(1, ...sem.map(x => x[campo]));
-  const w = 12, g = 3, h = 30;
-  return `<svg class="spark" viewBox="0 0 ${sem.length * (w + g) - g} ${h}" role="img" aria-label="${esc(rotulo)} por semana, últimas ${sem.length} semanas">
-    ${sem.map((x, i) => { const bh = x[campo] ? Math.max(3, Math.round((x[campo] / max) * (h - 2))) : 2;
-      return `<rect x="${i * (w + g)}" y="${h - bh}" width="${w}" height="${bh}" rx="2" class="${i === sem.length - 1 ? 'hoy' : ''}${x[campo] ? '' : ' cero'}"><title>Semana del ${fechaCorta(x.inicio + 'T12:00:00')}: ${x[campo]} ${esc(rotulo.toLowerCase())}</title></rect>`; }).join('')}
-  </svg>`;
-}
-function deltaTexto(ahora, antes, mejorSiSube = true, fmt = n => String(n)){
-  if(antes == null || ahora == null) return '';
-  const d = ahora - antes;
-  if(Math.abs(d) < 0.5) return `<span class="delta">igual que la semana pasada</span>`;
-  const bueno = mejorSiSube ? d > 0 : d < 0;
-  return `<span class="delta ${bueno ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${fmt(Math.abs(d))} ${d > 0 ? 'más' : 'menos'} que la semana pasada</span>`;
-}
-
 function pintarIndicadores(){
   const st = TB.st;
-  if(!st){ $('#kpis').innerHTML = ''; $('#metaCard').innerHTML = ''; return; }
+  if(!st){ $('#metaCard').innerHTML = ''; return; }
   const ev = evalActual();
   const nombre = ev ? ((st.evaluadores.find(e => e.clave === claveEval(ev)) || {}).nombre || ev) : '';
   $('#tabSaludo').textContent = nombre ? `Hola, ${nombre.split(' ')[0]}` : 'Tablero del equipo';
-  $('#tabLede').textContent = nombre ? 'Lo que te toca hacer, cómo vas esta semana y dónde está cada vacante.'
-                                      : 'Lo pendiente, cómo va el equipo esta semana y dónde está cada vacante.';
+  $('#tabLede').textContent = nombre ? 'Qué vacantes están por cerrarse, lo que te toca hacer y cómo vas esta semana.'
+                                      : 'Qué vacantes están por cerrarse, lo pendiente y cómo va el equipo esta semana.';
 
   // Meta de la semana y racha: lo que motiva es ver el avance, no un ranking.
   const meta = metaSemana(), hechos = st.esta_semana.informes;
@@ -518,23 +496,6 @@ function pintarIndicadores(){
     if(v !== null && n > 0 && n < 500){ lsSet(LS_META, String(n)); pintarIndicadores(); }
   });
 
-  const hm = st.horas_a_informe || {};
-  const cu = st.cumplen || {};
-  const tiles = [
-    {l:'Informes emitidos', v:String(st.esta_semana.informes), sub:'esta semana', d:deltaTexto(st.esta_semana.informes, st.semana_pasada.informes), sp:barrasSemanas(st.semanas, 'informes', 'Informes')},
-    {l:'Entrevistas', v:String(st.esta_semana.entrevistas), sub:'esta semana', d:deltaTexto(st.esta_semana.entrevistas, st.semana_pasada.entrevistas), sp:barrasSemanas(st.semanas, 'entrevistas', 'Entrevistas')},
-    {l:'De la entrevista al informe', v:horasTexto(hm.mediana), sub: hm.n ? `mediana de ${hm.n} informe${hm.n === 1 ? '' : 's'}, 30 días` : 'sin informes en 30 días',
-     d: (hm.mediana != null && hm.previa != null && Math.abs(hm.mediana - hm.previa) >= 1)
-       ? `<span class="delta ${hm.mediana < hm.previa ? 'up' : 'down'}">${hm.mediana < hm.previa ? '▼' : '▲'} ${horasTexto(Math.abs(hm.mediana - hm.previa))} ${hm.mediana < hm.previa ? 'más rápido' : 'más lento'} que el mes anterior</span>` : '', sp:''},
-    {l:'Candidatos que cumplen todo', v: cu.pct == null ? '—' : cu.pct + '%', sub: cu.informes ? `${cu.cumplen} de ${cu.informes} informes, 30 días` : 'sin informes en 30 días', d:'', sp:''},
-  ];
-  $('#kpis').innerHTML = tiles.map(t => `<div class="kpi">
-      <div class="kl">${esc(t.l)}</div>
-      <div class="kv">${esc(t.v)}</div>
-      <div class="ks">${esc(t.sub)}</div>
-      ${t.d || ''}
-      ${t.sp || ''}
-    </div>`).join('');
 }
 
 function pintarCola(){
@@ -559,12 +520,114 @@ function pintarCola(){
     : `<div class="empty ok">Nada pendiente. Todo lo entrevistado ya tiene su informe.</div>`;
 }
 
+/* ---------- El pulso de las vacantes ----------
+   La pregunta es "¿cuál se cierra primero?". Una vacante está en movimiento si se creó en los
+   últimos 14 días o si alguna verificación suya se movió en ese lapso. La probabilidad sale de
+   cuántos candidatos validados cumplen TODO, contra una terna de 3 (rules.js · pulsoVacante):
+   se calcula en el servidor para que el número del tablero y el de la vacante sean el mismo. */
+const PROB = {
+  alta:  {tx:'Alta',  tag:'v'},
+  media: {tx:'Media', tag:'a'},
+  baja:  {tx:'Baja',  tag:'r'},
+};
+const pulsoDe = id => ((TB.st && TB.st.pulso && TB.st.pulso.vacantes) || []).find(p => Number(p.id) === Number(id)) || null;
+const candidatosDe = id => TB.ss.filter(s => Number(s.vacancy_id) === Number(id));
+const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+
+// Validados primero (los que cumplen todo arriba), luego lo que sigue en proceso.
+function ordenarCandidatos(cs){
+  const rk = s => ({ok:0, par:1, no:2})[resultadoDe(s)] ?? (s.status === 'issued' ? 3 : 4);
+  const t = s => new Date(s.issued_at || s.updated_at || s.started_at || 0).getTime();
+  return cs.slice().sort((a, b) => rk(a) - rk(b) || t(b) - t(a));
+}
+function listaCandidatos(cs, attr = 'data-abrir'){
+  const val = ordenarCandidatos(cs.filter(s => s.status === 'issued'));
+  const pro = ordenarCandidatos(cs.filter(s => s.status !== 'issued'));
+  if(!cs.length) return `<div class="empty">Todavía no hay candidatos verificados en esta vacante.</div>`;
+  return (val.length ? `<div class="vgh">Validados · ${val.length}</div>${val.map(s => filaSesion(s, attr, true)).join('')}` : '')
+       + (pro.length ? `<div class="vgh">En proceso · ${pro.length}</div>${pro.map(s => filaSesion(s, attr, true)).join('')}` : '');
+}
+
+// Los tres cupos de la terna: llenos los que ya cumplen todo.
+function ternaHtml(p){
+  const n = Math.min(p.aptos, p.terna);
+  return `<div class="vterna" title="Candidatos validados que cumplen todos los requisitos, contra una terna de ${p.terna}">
+    <span class="slots">${Array.from({length: p.terna}, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</span>
+    <small>${p.aptos > p.terna ? `terna + ${p.aptos - p.terna}` : `${n} de ${p.terna} para la terna`}</small>
+  </div>`;
+}
+
+function filaVacante(v, p, cs, clave){
+  const cerrada = (v.status || 'activa') === 'cerrada';
+  const abierta = TB.abiertas.has(clave);
+  const pr = p && p.probabilidad ? PROB[p.probabilidad] : null;
+  const val = p ? p.validados : cs.filter(s => s.status === 'issued').length;
+  const puntos = ordenarCandidatos(cs).slice(0, 16).map(s => {
+    const r = resultadoDe(s), e = estadoDe(s);
+    const cl = r || (e === 'emitido' ? 'nv' : 'proc');
+    const tt = `${s.candidate} · ${r === 'ok' ? 'cumple todo' : r === 'par' ? 'cumple en parte' : r === 'no' ? 'no cumple' : (ESTADO_TB[e] ? ESTADO_TB[e].tx.replace('⏳ ', '').toLowerCase() : 'emitido')}`;
+    return `<i class="pt ${cl}" title="${esc(tt)}"></i>`;
+  }).join('') + (cs.length > 16 ? `<span class="ptmas">+${cs.length - 16}</span>` : '');
+  const act = (p && p.ultima_actividad) || v.ultima_actividad;
+  return `<div class="vac ${cerrada ? 'cerrada' : ''} ${pr ? 'p-' + p.probabilidad : ''}">
+    <button class="row vrow" data-vac="${v.id}" type="button">
+      <div class="vcount"><b>${val}</b><span>${val === 1 ? 'validado' : 'validados'}</span></div>
+      <div class="rowmain">
+        <b>${esc(v.title)}${cerrada ? ' <span class="tag n">CERRADA</span>' : ''}</b>
+        <span>${esc(v.company_name || 'sin empresa')}${v.req_count != null ? ` · ${plural(v.req_count, 'excluyente', 'excluyentes')}` : ''}${act ? ' · actividad ' + esc(haceCuanto(act)) : (v.created_at ? ' · creada ' + fechaCorta(v.created_at) : '')}${p && p.motivo === 'nueva' && !cs.length ? ' · <em>nueva</em>' : ''}</span>
+        ${p && p.razon ? `<span class="razon">${esc(p.razon)}</span>` : ''}
+      </div>
+      ${p && !cerrada ? ternaHtml(p) : ''}
+      ${pr ? `<div class="vprob"><small>Cierre</small><span class="tag ${pr.tag}">${pr.tx.toUpperCase()}</span></div>` : ''}
+    </button>
+    <div class="vpipe">
+      ${cs.length ? `<div class="pts" aria-label="Candidatos de esta vacante">${puntos}</div>
+      <span class="vmini">${p ? `${p.aptos} cumple${p.aptos === 1 ? '' : 'n'} todo${p.parciales ? ` · ${p.parciales} en parte` : ''}${p.no_cumplen ? ` · ${p.no_cumplen} no` : ''}${p.en_proceso ? ` · ${p.en_proceso} en proceso` : ''}` : ''}</span>
+      <button class="linkbtn" data-vexp="${clave}" type="button" aria-expanded="${abierta}">${abierta ? 'Ocultar candidatos' : `Ver ${cs.length === 1 ? 'el candidato' : `los ${cs.length} candidatos`}`}</button>`
+      : `<span class="pts vacia">Sin candidatos todavía</span>`}
+      <button class="linkbtn vestado" data-vestado="${v.id}" data-cerrar="${cerrada ? '0' : '1'}" type="button"
+        title="${cerrada ? 'Vuelve al tablero con sus candidatos' : 'Sale del tablero; sus informes no cambian y se puede reabrir'}">${cerrada ? 'Reabrir' : 'Cerrar vacante'}</button>
+    </div>
+    ${abierta ? `<div class="vcands">${listaCandidatos(cs)}</div>` : ''}
+  </div>`;
+}
+
+function pintarPulso(){
+  const pu = TB.st && TB.st.pulso;
+  if(!pu){ $('#pulsoCard').hidden = true; return; }
+  $('#pulsoCard').hidden = false;
+  const r = pu.resumen;
+  const rec = pu.vacantes.filter(p => p.reciente);
+  $('#pulsoCount').textContent = `últimos ${pu.dias} días`;
+  const tot = Math.max(1, r.alta + r.media + r.baja);
+  $('#pulsoRes').innerHTML = rec.length ? `
+    <div class="pnum"><b>${r.recientes}</b><span>${r.recientes === 1 ? 'vacante en movimiento' : 'vacantes en movimiento'}</span></div>
+    <div class="pnum"><b>${r.validados}</b><span>${r.validados === 1 ? 'candidato validado' : 'candidatos validados'}${r.validados_recientes ? ` · ${r.validados_recientes} en ${pu.dias} días` : ''}</span></div>
+    <div class="pnum ok"><b>${r.aptos}</b><span>${r.aptos === 1 ? 'cumple' : 'cumplen'} todos los requisitos</span></div>
+    <div class="pdist">
+      <div class="pbar" role="img" aria-label="Probabilidad de cierre: ${r.alta} alta, ${r.media} media, ${r.baja} baja">
+        ${r.alta ? `<i class="alta" style="flex:${r.alta}"></i>` : ''}${r.media ? `<i class="media" style="flex:${r.media}"></i>` : ''}${r.baja ? `<i class="baja" style="flex:${r.baja}"></i>` : ''}
+      </div>
+      <div class="pley"><span><i class="alta"></i>${r.alta} alta</span><span><i class="media"></i>${r.media} media</span><span><i class="baja"></i>${r.baja} baja</span></div>
+    </div>` : '';
+  const lim = TB.pulsoTodas ? rec.length : 8;
+  const porId = {}; TB.vs.forEach(v => { porId[v.id] = v; });
+  $('#pulsoList').innerHTML = rec.length
+    ? rec.slice(0, lim).map(p => filaVacante(porId[p.id] || p, p, candidatosDe(p.id), 'p' + p.id)).join('')
+      + (rec.length > 8 ? `<button class="masbtn" id="btnMasPulso" type="button">${TB.pulsoTodas ? 'Ver solo las 8 primeras' : `Ver las ${rec.length - 8} restantes`}</button>` : '')
+    : `<div class="empty">Ninguna vacante se creó ni se movió en los últimos ${pu.dias} días. Carga un levantamiento o retoma una vacante de la lista de abajo.</div>`;
+}
+
 function pintarVacantes(){
   const q = normTxt(TB.qv.trim());
-  const porVac = {};
-  TB.ss.forEach(s => { if(s.vacancy_id != null) (porVac[s.vacancy_id] = porVac[s.vacancy_id] || []).push(s); });
   const cerrada = v => (v.status || 'activa') === 'cerrada';
-  let vs = TB.vs.filter(v => TB.fv === 'todas' || (TB.fv === 'cerradas' ? cerrada(v) : !cerrada(v)));
+  const quieta = v => { const p = pulsoDe(v.id); return !cerrada(v) && p && !p.reciente; };
+  // Por defecto, solo las activas que NO están en el pulso de arriba: cada vacante aparece una
+  // sola vez, y las que llevan semanas quietas quedan a la vista con su botón de cerrar. Al
+  // buscar, "Sin movimiento" busca en todas las activas: nadie espera que el filtro le esconda
+  // la vacante que está escribiendo.
+  const fv = TB.fv === 'quietas' && q ? 'activas' : TB.fv;
+  let vs = TB.vs.filter(v => fv === 'todas' || (fv === 'cerradas' ? cerrada(v) : fv === 'quietas' ? quieta(v) : !cerrada(v)));
   if(q) vs = vs.filter(v => normTxt(v.title + ' ' + (v.company_name || '')).includes(q));
   const act = v => new Date(v.ultima_actividad || v.created_at || 0).getTime();
   vs.sort((a, b) => act(b) - act(a));
@@ -574,43 +637,13 @@ function pintarVacantes(){
     $('#vacList').innerHTML = `<div class="empty">Todavía no hay vacantes. Empieza cargando el levantamiento de un cliente nuevo.</div>`;
     return;
   }
-  $('#vacList').innerHTML = vs.length ? vs.map(v => {
-    const cs = (porVac[v.id] || []).slice().sort((a, b) => new Date(b.updated_at || b.started_at) - new Date(a.updated_at || a.started_at));
-    const emit = cs.filter(s => s.status === 'issued');
-    const cumplen = emit.filter(s => resultadoDe(s) === 'ok').length;
-    const pend = cs.filter(s => s.status !== 'issued').length;
-    const abierta = TB.abiertas.has(v.id);
-    const puntos = cs.slice(0, 14).map(s => {
-      const r = resultadoDe(s), e = estadoDe(s);
-      const cl = r || (e === 'emitido' ? 'nv' : 'proc');
-      const tt = `${s.candidate} · ${r === 'ok' ? 'cumple todo' : r === 'par' ? 'cumple en parte' : r === 'no' ? 'no cumple' : (ESTADO_TB[e] ? ESTADO_TB[e].tx.replace('⏳ ', '').toLowerCase() : 'emitido')}`;
-      return `<i class="pt ${cl}" title="${esc(tt)}"></i>`;
-    }).join('') + (cs.length > 14 ? `<span class="ptmas">+${cs.length - 14}</span>` : '');
-    return `<div class="vac ${cerrada(v) ? 'cerrada' : ''}">
-      <button class="row vrow" data-vac="${v.id}" type="button">
-        <div class="rowmain">
-          <b>${esc(v.title)}${cerrada(v) ? ' <span class="tag n">CERRADA</span>' : ''}</b>
-          <span>${esc(v.company_name || 'sin empresa')} · ${v.req_count} excluyente${v.req_count === 1 ? '' : 's'}${v.ultima_actividad ? ' · actividad ' + esc(haceCuanto(v.ultima_actividad)) : ' · creada ' + fechaCorta(v.created_at)}</span>
-        </div>
-        <div class="vnums">
-          <span><b>${cs.length}</b> entrevistado${cs.length === 1 ? '' : 's'}</span>
-          <span><b>${emit.length}</b> informe${emit.length === 1 ? '' : 's'}</span>
-          <span class="${cumplen ? 'okc' : ''}"><b>${cumplen}</b> cumple${cumplen === 1 ? '' : 'n'} todo</span>
-          ${pend ? `<span class="penc"><b>${pend}</b> en proceso</span>` : ''}
-        </div>
-      </button>
-      ${cs.length ? `<div class="vpipe">
-        <div class="pts" aria-label="Candidatos de esta vacante">${puntos}</div>
-        <button class="linkbtn" data-vexp="${v.id}" type="button" aria-expanded="${abierta}">${abierta ? 'Ocultar candidatos' : `Ver ${cs.length === 1 ? 'el candidato' : `los ${cs.length} candidatos`}`}</button>
-      </div>` : ''}
-      ${abierta ? `<div class="vcands">${cs.map(s => filaSesion(s, 'data-abrir')).join('')}</div>` : ''}
-    </div>`;
-  }).join('') : `<div class="empty">Ninguna vacante coincide.</div>`;
+  $('#vacList').innerHTML = vs.length ? vs.map(v => filaVacante(v, pulsoDe(v.id), candidatosDe(v.id), 'd' + v.id)).join('')
+    : `<div class="empty">${fv === 'quietas' ? 'Todas las vacantes activas tuvieron movimiento en las últimas dos semanas: están arriba, en “Vacantes en movimiento”.' : 'Ninguna vacante coincide con este filtro.'}</div>`;
 }
 
 // Una fila de verificación. `attr` separa las filas de la lista principal (data-ses) de las
 // que se repiten dentro de una vacante (data-abrir): hacen lo mismo, pero se cuentan aparte.
-function filaSesion(s, attr = 'data-ses'){
+function filaSesion(s, attr = 'data-ses', enVacante = false){
   const e = estadoDe(s), E = ESTADO_TB[e];
   const semTag = E ? E.tag : (s.semaforo === 'verde' ? 'v' : (s.semaforo === 'amarillo' ? 'a' : (s.semaforo === 'rojo' ? 'r' : 'n')));
   const semTx = E ? E.tx : (s.semaforo ? s.semaforo.toUpperCase() : 'EMITIDO');
@@ -618,7 +651,8 @@ function filaSesion(s, attr = 'data-ses'){
   return `<button class="row" ${attr}="${s.id}" type="button">
     <div class="rowmain">
       <b>${esc(s.candidate)}</b>
-      <span>${esc(s.vacancy_title || 'sin vacante')}${s.company_name ? ' · ' + esc(s.company_name) : ''} · ${esc(s.evaluator || 'sin evaluador')}</span>
+      <span>${enVacante ? `${s.status === 'issued' ? 'Informe del ' + fechaCorta(s.issued_at || s.updated_at) : 'Entrevista ' + haceCuanto(s.entrevista_at || s.started_at)} · ${esc(s.evaluator || 'sin evaluador')}`
+                        : `${esc(s.vacancy_title || 'sin vacante')}${s.company_name ? ' · ' + esc(s.company_name) : ''} · ${esc(s.evaluator || 'sin evaluador')}`}</span>
     </div>
     ${r ? `<div class="res3 ${r}" title="Cumplió ${s.req_cumple} de ${s.req_total} requisitos"><span class="rq">${Array.from({length: Number(s.req_total)}, (_, i) => `<i class="${i < s.req_cumple ? 'on' : ''}"></i>`).join('')}</span><span>${s.req_cumple}/${s.req_total}</span></div>` : ''}
     <div class="rowmeta">
@@ -648,13 +682,16 @@ function enganchesTablero(){
   if(enganchesTablero.hecho) return;
   enganchesTablero.hecho = true;
   const abrir = e => {
+    if(e.target.closest('#btnMasPulso')){ TB.pulsoTodas = !TB.pulsoTodas; pintarPulso(); return; }
+    const ve = e.target.closest('[data-vestado]');
+    if(ve){ cambiarEstadoVacante(+ve.dataset.vestado, ve.dataset.cerrar === '1'); return; }
     const x = e.target.closest('[data-abrir],[data-ses],[data-vac],[data-vexp]');
     if(!x) return;
-    if(x.dataset.vexp){ const id = +x.dataset.vexp; TB.abiertas.has(id) ? TB.abiertas.delete(id) : TB.abiertas.add(id); pintarVacantes(); return; }
+    if(x.dataset.vexp){ const k = x.dataset.vexp; TB.abiertas.has(k) ? TB.abiertas.delete(k) : TB.abiertas.add(k); k[0] === 'p' ? pintarPulso() : pintarVacantes(); return; }
     if(x.dataset.vac){ verVacante(+x.dataset.vac); return; }
     verSesion(+(x.dataset.abrir || x.dataset.ses));
   };
-  ['#colaList', '#vacList', '#sesList'].forEach(sel => {
+  ['#pulsoList', '#colaList', '#vacList', '#sesList'].forEach(sel => {
     $(sel).addEventListener('click', abrir);
     $(sel).addEventListener('keydown', e => { if((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-abrir]')){ e.preventDefault(); abrir(e); } });
   });
@@ -675,6 +712,26 @@ function enganchesTablero(){
   });
 }
 
+// Cerrar o reabrir desde el tablero, sin entrar a la vacante: es lo que mantiene limpio el
+// tablero. Se aplica de inmediato en pantalla (sin confirmación: reabrir es un clic) y luego
+// se recarga lo que diga el servidor, que es el que recalcula el pulso.
+async function cambiarEstadoVacante(id, cerrar){
+  const v = TB.vs.find(x => Number(x.id) === Number(id));
+  const antes = v ? v.status : null;
+  if(v) v.status = cerrar ? 'cerrada' : 'activa';
+  const p = pulsoDe(id); if(p && cerrar){ p.reciente = false; p.probabilidad = null; }
+  pintarPulso(); pintarVacantes();
+  try{
+    await api('/api/vacancies/' + id, {method:'PATCH', body:{status: cerrar ? 'cerrada' : 'activa'}});
+    toast(cerrar ? `Vacante cerrada${v ? ': ' + v.title : ''}. Queda en el filtro “Cerradas”.` : `Vacante reabierta${v ? ': ' + v.title : ''}.`);
+    loadTablero();
+  }catch(e){
+    if(v) v.status = antes;
+    toast('No se pudo: ' + e.message);
+    loadTablero();
+  }
+}
+
 async function loadTablero(){
   go('vTablero');
   enganchesTablero();
@@ -689,7 +746,7 @@ async function loadTablero(){
     sel.innerHTML = `<option value="">Todo el equipo</option>` + evs.map(e => `<option value="${esc(e.nombre)}">${esc(e.nombre)} · ${e.n}</option>`).join('');
     if(ev && evs.some(e => e.clave === claveEval(ev))) sel.value = evs.find(e => e.clave === claveEval(ev)).nombre;
     else if(ev){ lsSet(LS_EVAL, ''); sel.value = ''; if(st && st.filtro){ TB.st = await api('/api/tablero').catch(() => st); } }
-    pintarIndicadores(); pintarCola(); pintarVacantes(); pintarVerificaciones();
+    pintarPulso(); pintarIndicadores(); pintarCola(); pintarVacantes(); pintarVerificaciones();
 
     // Mientras haya un análisis en curso, el tablero se refresca solo: es la forma de que el
     // reclutador vea "lista para calificar" sin recargar. Cuando no hay nada procesando, no
@@ -1206,6 +1263,26 @@ async function guardarVacante(){
 }
 
 /* ===================== detalle de vacante ===================== */
+// Los candidatos de la vacante: el pulso (validados, cuántos cumplen todo, la terna) y la
+// lista, validados primero. Es donde el reclutador arma lo que le manda al cliente.
+function candidatosVacante(v){
+  const cs = v.candidatos || [], p = v.pulso;
+  const pr = p && p.probabilidad ? PROB[p.probabilidad] : null;
+  return `<div class="card" id="vacCands">
+    <div class="cardhd">
+      <h2>Candidatos</h2>
+      <span class="cs">${p ? `${plural(p.validados, 'validado', 'validados')}${p.en_proceso ? ` · ${p.en_proceso} en proceso` : ''}` : ''}</span>
+    </div>
+    ${p && (v.status || 'activa') !== 'cerrada' ? `<div class="vcpulso">
+      ${pr ? `<div class="vprob"><small>Cierre</small><span class="tag ${pr.tag}">${pr.tx.toUpperCase()}</span></div>` : ''}
+      <p>${esc(p.razon)}</p>
+      ${ternaHtml(p)}
+    </div>` : ''}
+    <div class="vcands solo">${listaCandidatos(cs)}</div>
+    ${cs.length ? '' : `<button class="cta ghost" id="btnVerificarArriba" type="button" style="margin-top:10px">Verificar al primer candidato</button>`}
+  </div>`;
+}
+
 async function verVacante(id){
   overlay(true, 'Abriendo la vacante…', '');
   try{
@@ -1223,6 +1300,8 @@ async function verVacante(id){
         <p class="lede" style="margin-bottom:12px">${esc(v.company_name||'')}${v.seniority?' · '+esc(v.seniority):''}${v.modality?' · '+esc(v.modality):''}${v.city?' · '+esc(v.city):''}${v.salary_text?' · '+esc(v.salary_text):''}</p>
         ${v.context ? `<p style="color:var(--ink2);max-width:64ch">${esc(v.context)}</p>` : ''}
       </div>
+
+      ${candidatosVacante(v)}
 
       <div class="card">
         <div class="cardhd">
@@ -1263,7 +1342,10 @@ async function verVacante(id){
       <p class="hint">Se abre una sesión guiada de 30 minutos con estos requisitos ya cargados.</p>
     `;
     $('#vacStage').querySelector('[data-home]').addEventListener('click', loadTablero);
+    $('#vacStage').querySelectorAll('#vacCands [data-abrir]').forEach(b => b.addEventListener('click', () => verSesion(+b.dataset.abrir)));
     $('#btnNuevaSesion').addEventListener('click', () => setupSesion(v));
+    const arriba = $('#btnVerificarArriba');
+    if(arriba) arriba.addEventListener('click', () => setupSesion(v));
     $('#btnEditarVac').addEventListener('click', () => editarVacante(v));
     // Cerrar una vacante la saca del tablero (queda en el filtro "Cerradas"); sus verificaciones
     // e informes no se tocan. Es lo que evita que el tablero se llene de búsquedas terminadas.
