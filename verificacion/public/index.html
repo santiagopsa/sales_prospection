@@ -34,6 +34,10 @@
         <div class="sub">PeakU Verificado · piloto</div>
       </div>
     </button>
+    <nav class="topnav" id="topNav" aria-label="Secciones">
+      <button type="button" data-nav="tablero" class="on">Tablero</button>
+      <button type="button" data-nav="indicadores">Indicadores</button>
+    </nav>
     <div class="spacer"></div>
     <div class="who" id="whoTop"></div>
     <div class="clock" id="clockWrap" style="display:none">
@@ -167,6 +171,28 @@
 </div>
 
 <!-- ===================== DETALLE DE VACANTE ===================== -->
+<!-- ===================== INDICADORES DE LA SEMANA =====================
+     El cuadro semanal: vacantes verificadas, calidad y empresas atendidas arriba; debajo, día
+     por día, empresa por empresa, las tasas de 28 días y las últimas 8 semanas. -->
+<div class="screen" id="vIndicadores">
+  <div class="wrap">
+    <div class="stage">
+      <div class="tabhd">
+        <div>
+          <h1 id="indTitulo">Semana</h1>
+          <p class="lede" id="indRango"></p>
+        </div>
+        <div class="tabacts">
+          <label class="quien"><span>Ver como</span>
+            <select id="selEvalInd"><option value="">Todo el equipo</option></select>
+          </label>
+        </div>
+      </div>
+      <div id="indCuerpo"><div class="empty">Cargando…</div></div>
+    </div>
+  </div>
+</div>
+
 <div class="screen" id="vVacante">
   <div class="wrap"><div class="stage" id="vacStage"></div></div>
 </div>

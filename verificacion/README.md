@@ -122,7 +122,7 @@ Aparte a propósito: son la parte que no puede fallar y la única con pruebas pr
 ## Pruebas
 
 ```bash
-node verificacion/test/rules.test.js       # 60 pruebas de las reglas, sin dependencias
+node verificacion/test/rules.test.js       # 67 pruebas de las reglas, sin dependencias
 node verificacion/test/assets.test.js      # que el versionado de estáticos siga enganchado
 node verificacion/test/json_llm.test.js    # leer el JSON del modelo venga como venga
 node verificacion/test/llm.test.js         # pedirJson contra un cliente falso, sin gastar tokens
@@ -148,10 +148,11 @@ python3 verificacion/test/e2e_una_hoja.py  # el caso de José cabe en UNA hoja d
 python3 verificacion/test/e2e_criterios.py # criterio por pregunta; demostró / para llegar a N; barras
 node verificacion/test/traduccion.test.js  # la ruta de traducción REAL con un modelo de mentira (express doblado)
 node verificacion/test/correccion.test.js  # corregir el nombre: en borrador cambia; emitida, vuelve a firmar y anota
-node verificacion/test/pulso.test.js       # el pulso y los candidatos por vacante en las rutas reales
+node verificacion/test/pulso.test.js       # el pulso, los candidatos por vacante y los indicadores en las rutas reales
 python3 verificacion/test/e2e_nombre.py    # el lápiz junto al nombre, en sesión y sobre el acta
 python3 verificacion/test/e2e_empleo.py    # se verifica el último empleo declarado y no otro
 python3 verificacion/test/e2e_tablero.py   # el pulso, la cola, la meta, cerrar/reabrir, candidatos por vacante y el buscador
+python3 verificacion/test/e2e_indicadores.py # la barra, los focos, empresas atendidas, día por día, navegar semanas, ver como, teléfono
 ```
 
 Y una herramienta que no afirma nada, solo deja mirar el resultado — capturas de cada pantalla y el PDF del informe:
@@ -485,6 +486,19 @@ Con decenas de verificaciones la lista plana dejó de servir. El tablero respond
 - **Verificaciones.** Buscador por nombre, vacante, evaluador o código PKV, filtro *Todas / Pendientes / Emitidas*, de 25 en 25. Las emitidas muestran cuántos requisitos cumplió.
 
 Las cuentas las hace `rules.js · estadisticas` sobre todas las verificaciones (`GET /api/tablero?evaluador=`), con la hora de Colombia; el estado de cada verificación desde "qué me toca hacer" lo calcula `estadoTablero` y viaja en `GET /api/sessions` (que ahora trae la vacante y el resultado por requisitos, hasta 2.000 filas). La misma función la usan el servidor, el stub y las pruebas.
+
+## Los indicadores de la semana
+
+La barra de arriba tiene dos secciones: **Tablero** (lo del día a día) e **Indicadores** (el cuadro de la semana, con la misma lógica que la vista *Semana* de prospección). Se llega también desde la meta del tablero, con *Ver los indicadores de la semana →*. La semana va de lunes a domingo en hora de Colombia; se navega a la anterior, a la siguiente y de vuelta a esta, y *Ver como* filtra por evaluador (lo mismo que en el tablero, y se recuerda).
+
+- **Cuatro focos.** *Vacantes verificadas*: vacantes con al menos un informe emitido en la semana, de cuántas se trabajaron. *Calidad*: % de informes en que el candidato cumple todos los requisitos, con cuántos salieron en verde. *Empresas atendidas*: una empresa está atendida si se trabajó al menos una de sus vacantes (entrevista o informe) — trabajarle 3 de sus 10 vacantes ya es atenderla —, contra las empresas con vacantes. *Informes emitidos* contra la meta semanal. Cada uno se compara con la semana pasada.
+- **Datos de apoyo.** Entrevistas, ternas completadas (la semana en que una vacante llegó a 3 candidatos que cumplen todo), vacantes nuevas (levantamientos cargados), mediana de la entrevista al informe y la racha. Ternas y vacantes nuevas son de la vacante, no de quien entrevista: con un evaluador elegido se siguen contando para el equipo, y lo dice.
+- **Día por día.** Entrevistas, informes, cumplen todo, vacantes trabajadas, empresas atendidas y vacantes nuevas, con hoy resaltado y la meta del día (la semanal entre 5): cumplida, no, o en curso. La fila de la semana cuenta vacantes y empresas una sola vez.
+- **Empresas atendidas.** Cada empresa con "x de y" vacantes trabajadas en barra, sus informes, cuántos cumplen todo y su estado (atendida / sin atender). Las sin atender van al final.
+- **Tasas de 28 días.** Entrevistas que ya tienen informe, informes que cumplen todo, informes en verde, y vacantes trabajadas con al menos un candidato que cumple todo.
+- **Últimas 8 semanas.** Informes, vacantes verificadas, empresas atendidas y % que cumple todo, en barras; un clic lleva a esa semana.
+
+Lo calcula `rules.js · indicadoresSemana` (`GET /api/indicadores?fecha=AAAA-MM-DD&evaluador=`), la misma función en el servidor, el stub y las pruebas.
 
 ## La entrevista y la calificación son dos momentos
 

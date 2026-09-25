@@ -379,9 +379,126 @@ function pulsoVacantes(vacantes, sesiones, { ahora = Date.now(), dias = DIAS_REC
   };
 }
 
+// ---------------------------------------------------------------------------------------
+// INDICADORES DE LA SEMANA (el "cuadro" semanal, como el de prospección): lunes a domingo en
+// hora de Colombia, con el mismo corte por día. Tres focos:
+//   · vacantes verificadas: vacantes con al menos un informe emitido en el periodo;
+//   · calidad: de esos informes, cuántos cumplen TODOS los requisitos y cuántos salen en verde;
+//   · empresas atendidas: una empresa está atendida si al menos una de sus vacantes se trabajó
+//     (entrevista o informe) en el periodo — trabajarle 3 de sus 10 vacantes ya es atenderla.
+// Lo que es de la vacante y no de quien entrevista (vacantes nuevas, ternas completadas) se
+// cuenta siempre para el equipo, aunque se filtre por evaluador.
+// ---------------------------------------------------------------------------------------
+const claveEmpresa = v => clean(v && v.company_name).toLowerCase() || (v && v.company_id != null ? 'id:' + v.company_id : 'sin empresa');
+const esFecha = f => /^\d{4}-\d{2}-\d{2}$/.test(String(f || ''));
+const pct = (a, b) => (b ? Math.round(100 * a / b) : null);
+
+function indicadoresSemana(sesiones, vacantes, { fecha = null, evaluador = '', ahora = Date.now(), semanas = 8, diasTasas = 28 } = {}) {
+  const todas = Array.isArray(sesiones) ? sesiones : [];
+  const vacs = Array.isArray(vacantes) ? vacantes : [];
+  const hoy = diaLocal(ahora);
+  const lunes = lunesDe(esFecha(fecha) && fecha <= hoy ? fecha : hoy);
+  const domingo = sumarDias(lunes, 6);
+  const filtro = claveEvaluador(evaluador) || null;
+  const mias = filtro ? todas.filter(s => claveEvaluador(s.evaluator) === filtro) : todas;
+  const vacPorId = {}; vacs.forEach(v => { vacPorId[Number(v.id)] = v; });
+  const cuando = s => s.entrevista_at || s.started_at || null;
+  const dEnt = s => (cuando(s) ? diaLocal(cuando(s)) : null);
+  const dInf = s => (s.status === 'issued' && s.issued_at ? diaLocal(s.issued_at) : null);
+  const vid = s => (s.vacancy_id == null ? null : Number(s.vacancy_id));
+
+  // Día en que cada vacante completó su terna (el tercer informe que cumple todo). Del equipo.
+  const ternaEl = {};
+  const aptosPorVac = {};
+  todas.filter(s => resultadoSesion(s) === 'ok' && s.issued_at && vid(s) != null)
+    .forEach(s => { (aptosPorVac[vid(s)] = aptosPorVac[vid(s)] || []).push(diaLocal(s.issued_at)); });
+  Object.entries(aptosPorVac).forEach(([id, ds]) => { ds.sort(); if (ds.length >= TERNA) ternaEl[id] = ds[TERNA - 1]; });
+
+  function resumen(desde, hasta) {
+    const en = d => d && d >= desde && d <= hasta;
+    const ents = mias.filter(s => en(dEnt(s)));
+    const infs = mias.filter(s => en(dInf(s)));
+    const conReq = infs.filter(s => Number(s.req_total) > 0);
+    const cumplen = conReq.filter(s => resultadoSesion(s) === 'ok').length;
+    const verdes = infs.filter(s => s.semaforo === 'verde').length;
+    const trab = new Set(ents.concat(infs).map(vid).filter(x => x != null));
+    const verif = new Set(infs.map(vid).filter(x => x != null));
+    const emp = new Set([...trab].map(id => vacPorId[id]).filter(Boolean).map(claveEmpresa));
+    const horas = infs.filter(cuando).map(s => (new Date(s.issued_at) - new Date(cuando(s))) / 3600000).filter(h => h >= 0);
+    return {
+      entrevistas: ents.length, informes: infs.length,
+      cumplen, con_requisitos: conReq.length, pct_cumplen: pct(cumplen, conReq.length),
+      verdes, pct_verdes: pct(verdes, infs.length),
+      vacantes_trabajadas: trab.size, vacantes_verificadas: verif.size, empresas_atendidas: emp.size,
+      nuevas_vacantes: vacs.filter(v => v.created_at && en(diaLocal(v.created_at))).length,
+      ternas: Object.values(ternaEl).filter(en).length,
+      horas_mediana: mediana(horas),
+      _trab: trab, _infs: infs,
+    };
+  }
+  const limpiar = r => { const { _trab, _infs, ...x } = r; return x; };
+
+  const sem = resumen(lunes, domingo);
+  const previa = resumen(sumarDias(lunes, -7), sumarDias(lunes, -1));
+
+  const dias = [];
+  for (let i = 0; i < 7; i++) {
+    const f = sumarDias(lunes, i);
+    const r = resumen(f, f);
+    dias.push({ fecha: f, habil: i < 5, futuro: f > hoy, ...limpiar(r) });
+  }
+
+  // Empresas: las que tienen vacantes activas, más las que se atendieron aunque su vacante ya
+  // esté cerrada. "x de y" = vacantes trabajadas en la semana de las que tiene (activas o trabajadas).
+  const empresas = {};
+  const emp = v => {
+    const k = claveEmpresa(v);
+    return empresas[k] || (empresas[k] = { empresa: clean(v.company_name) || 'Sin empresa', vacantes: new Set(), activas: 0, trabajadas: new Set(), informes: 0, cumplen: 0 });
+  };
+  vacs.filter(v => (v.status || 'activa') !== 'cerrada').forEach(v => { const e = emp(v); e.vacantes.add(Number(v.id)); e.activas++; });
+  sem._trab.forEach(id => { const v = vacPorId[id]; if (!v) return; const e = emp(v); e.vacantes.add(id); e.trabajadas.add(id); });
+  sem._infs.forEach(s => { const v = vacPorId[vid(s)]; if (!v) return; const e = emp(v); e.informes++; if (resultadoSesion(s) === 'ok') e.cumplen++; });
+  const listaEmp = Object.values(empresas).map(e => ({
+    empresa: e.empresa, vacantes: e.vacantes.size, activas: e.activas, trabajadas: e.trabajadas.size,
+    informes: e.informes, cumplen: e.cumplen, atendida: e.trabajadas.size > 0,
+  })).sort((a, b) => (b.atendida - a.atendida) || (b.trabajadas - a.trabajadas) || (b.informes - a.informes) || (b.vacantes - a.vacantes) || a.empresa.localeCompare(b.empresa));
+
+  // Tasas de los últimos 28 días hasta el cierre de la semana (o hoy, si la semana está en curso).
+  const hasta = domingo < hoy ? domingo : hoy, desde = sumarDias(hasta, -(diasTasas - 1));
+  const enT = d => d && d >= desde && d <= hasta;
+  const entT = mias.filter(s => enT(dEnt(s)));
+  const infT = mias.filter(s => enT(dInf(s)));
+  const conReqT = infT.filter(s => Number(s.req_total) > 0);
+  const vacT = [...new Set(entT.concat(infT).map(vid).filter(x => x != null))];
+  const conApto = vacT.filter(id => (aptosPorVac[id] || []).some(d => d <= hasta)).length;
+  const tasa = (num, den) => ({ pct: pct(num, den), num, den });
+  const tasas = {
+    desde, hasta, dias: diasTasas,
+    entrevista_a_informe: tasa(entT.filter(s => s.status === 'issued').length, entT.length),
+    cumplen_todo: tasa(conReqT.filter(s => resultadoSesion(s) === 'ok').length, conReqT.length),
+    semaforo_verde: tasa(infT.filter(s => s.semaforo === 'verde').length, infT.length),
+    vacantes_con_apto: tasa(conApto, vacT.length),
+  };
+
+  const tendencia = [];
+  for (let i = semanas - 1; i >= 0; i--) {
+    const ini = sumarDias(lunes, -7 * i);
+    const r = resumen(ini, sumarDias(ini, 6));
+    tendencia.push({ inicio: ini, informes: r.informes, vacantes_verificadas: r.vacantes_verificadas, empresas_atendidas: r.empresas_atendidas, pct_cumplen: r.pct_cumplen });
+  }
+
+  const est = estadisticas(todas, { evaluador, ahora });
+  return {
+    lunes, domingo, hoy, filtro, evaluadores: est.evaluadores, racha: est.racha,
+    semana: limpiar(sem), previa: limpiar(previa),
+    empresas_con_vacantes: listaEmp.length,
+    dias, empresas: listaEmp, tasas, tendencia,
+  };
+}
+
 module.exports = {
   estadoTablero, claveEvaluador, estadisticas, diaLocal,
-  pulsoVacante, pulsoVacantes, resultadoSesion, TERNA, DIAS_RECIENTE,
+  pulsoVacante, pulsoVacantes, resultadoSesion, TERNA, DIAS_RECIENTE, indicadoresSemana,
   mismaEmpresa, conciliarEmpleo, ESTADOS_EMPLEO,
   LVLTXT, MAX_REQ, ID_ITEMS, itemsDe, KINDS, esCierre, clean, estadoTranscripcion, TRANSCRIPCION_STALE_MS,
   semaforo, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode,

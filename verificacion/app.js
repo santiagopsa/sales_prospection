@@ -11,7 +11,7 @@
 const express = require('express');
 const path = require('path');
 const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt, leerTraduccion } = require('./prompts');
-const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes } = require('./rules');
+const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana } = require('./rules');
 const didit = require('./didit');
 const { T, initSchema } = require('./schema');
 const { crearPedirJson } = require('./llm');
@@ -1499,32 +1499,48 @@ ${!code ? `
   // Cómo va la gestión: semana, rapidez, calidad, racha y lo pendiente. Se calcula sobre TODAS
   // las verificaciones (no solo las que caben en la lista) con la misma función que usan el
   // stub y las pruebas (rules.js · estadisticas).
+  // Filas mínimas para las cuentas del tablero y de los indicadores: sin transcripciones ni
+  // análisis, solo fechas, estado, resultado por requisitos y la vacante con su empresa.
+  async function filasTablero() {
+    if (pool) {
+      const q = await pool.query(`
+        SELECT s.id, s.vacancy_id, s.evaluator, s.status, s.semaforo, s.started_at, s.entrevista_at, s.issued_at, s.transcript_at,
+               s.transcript_status, s.transcript_started_at, s.updated_at, s.created_at,
+               (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
+               (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple
+        FROM ${T.sessions} s`);
+      const qv = await pool.query(`
+        SELECT v.id, v.title, v.status, v.created_at, v.company_id, c.name AS company_name
+        FROM ${T.vacancies} v LEFT JOIN ${T.companies} c ON c.id=v.company_id
+        ORDER BY v.created_at DESC LIMIT 2000`);
+      return { filas: q.rows, vacs: qv.rows };
+    }
+    const filas = mem.sessions.map(s => {
+      const rs = mem.ratings.filter(r => r.session_id === s.id);
+      return { ...s, req_total: rs.length, req_cumple: rs.filter(r => r.level >= 4).length };
+    });
+    return { filas, vacs: mem.vacancies };
+  }
+
+  // Cómo va la gestión: semana, rapidez, calidad, racha y lo pendiente, más el pulso de las
+  // vacantes. Se calcula sobre TODAS las verificaciones con las mismas funciones que usan el
+  // stub y las pruebas (rules.js · estadisticas, pulsoVacantes).
   r.get('/api/tablero', async (req, res) => {
     try {
       const evaluador = clean(req.query && req.query.evaluador);
-      let filas, vacs;
-      if (pool) {
-        const q = await pool.query(`
-          SELECT s.id, s.vacancy_id, s.evaluator, s.status, s.started_at, s.entrevista_at, s.issued_at, s.transcript_at,
-                 s.transcript_status, s.transcript_started_at, s.updated_at, s.created_at,
-                 (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
-                 (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple
-          FROM ${T.sessions} s`);
-        filas = q.rows;
-        const qv = await pool.query(`
-          SELECT v.id, v.title, v.status, v.created_at, c.name AS company_name
-          FROM ${T.vacancies} v LEFT JOIN ${T.companies} c ON c.id=v.company_id
-          ORDER BY v.created_at DESC LIMIT 500`);
-        vacs = qv.rows;
-      } else {
-        filas = mem.sessions.map(s => {
-          const rs = mem.ratings.filter(r => r.session_id === s.id);
-          return { ...s, req_total: rs.length, req_cumple: rs.filter(r => r.level >= 4).length };
-        });
-        vacs = mem.vacancies;
-      }
+      const { filas, vacs } = await filasTablero();
       // El pulso de las vacantes es del equipo: no se filtra por evaluador.
       res.json({ ...estadisticas(filas, { evaluador }), pulso: pulsoVacantes(vacs, filas) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // El cuadro de la semana: vacantes verificadas, calidad, empresas atendidas, por día y por
+  // empresa, tasas de 28 días y 8 semanas de tendencia (rules.js · indicadoresSemana).
+  r.get('/api/indicadores', async (req, res) => {
+    try {
+      const q = req.query || {};
+      const { filas, vacs } = await filasTablero();
+      res.json(indicadoresSemana(filas, vacs, { evaluador: clean(q.evaluador), fecha: clean(q.fecha) || null }));
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 

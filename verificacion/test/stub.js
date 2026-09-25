@@ -8,7 +8,7 @@ const crypto = require('crypto');
 
 const PUB = path.join(__dirname, '..', 'public');
 const MOUNT = '/verificacion'; // igual que en el servidor real
-const { LVLTXT, MAX_REQ, semaforo, bloqueos, estadoIdentidad, tipoDocumento, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes } = require('../rules'); // reglas reales del servidor
+const { LVLTXT, MAX_REQ, semaforo, bloqueos, estadoIdentidad, tipoDocumento, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana } = require('../rules'); // reglas reales del servidor
 const A = require('../archivos'); // misma decisión de "qué es este archivo" que app.js
 
 // Lo que el stub devuelve al "leer" un .docx o .pdf, ya que no tiene mammoth ni pdf-parse.
@@ -178,6 +178,12 @@ const server = http.createServer(async (req, res) => {
     const filas = db.sessions.map(conResultado);
     return json(res,200, {...estadisticas(filas, {evaluador: ev}),
       pulso: pulsoVacantes(db.vacancies.map(v=>({...v, status: v.status || 'activa'})), filas)});
+  }
+
+  if(p === '/api/indicadores' && m==='GET'){
+    const u = new URL(req.url, 'http://x').searchParams;
+    return json(res,200, indicadoresSemana(db.sessions.map(conResultado), db.vacancies,
+      {evaluador: u.get('evaluador') || '', fecha: u.get('fecha') || null}));
   }
 
   // Solo para pruebas: siembra verificaciones antiguas para ver el tablero con historia.

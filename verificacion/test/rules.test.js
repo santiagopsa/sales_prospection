@@ -323,4 +323,81 @@ console.log('pulso de las vacantes');
   });
 }
 
+console.log('indicadores de la semana');
+{
+  const { indicadoresSemana } = require('../rules');
+  const AH = Date.parse('2026-09-24T15:00:00Z');          // jueves 24, 10 a. m. en Colombia
+  const V = [
+    {id:1, title:'SAP PP', company_name:'IDOM', created_at:'2026-08-01T15:00:00Z'},
+    {id:2, title:'SAP MM', company_name:'idom ', created_at:'2026-09-22T15:00:00Z'},   // nueva esta semana; misma empresa escrita distinto
+    {id:3, title:'Data', company_name:'Movizzon', created_at:'2026-08-01T15:00:00Z'},
+    {id:4, title:'BI', company_name:'Rappi', created_at:'2026-08-01T15:00:00Z'},        // activa, sin trabajar
+    {id:5, title:'Vieja', company_name:'Alpina', created_at:'2026-07-01T15:00:00Z', status:'cerrada'},
+    {id:6, title:'SAP FI', company_name:'IDOM', created_at:'2026-08-01T15:00:00Z'},
+  ];
+  const inf = (vid, ev, dia, cumple, total, sem='verde') => ({vacancy_id:vid, evaluator:ev, status:'issued', semaforo:sem,
+    entrevista_at:`2026-09-${dia}T14:00:00Z`, issued_at:`2026-09-${dia}T20:00:00Z`, req_total:total, req_cumple:cumple});
+  const S = [
+    inf(1,'Weimar','21',3,3), inf(1,'Weimar','22',3,3), inf(1,'Laura','23',2,3,'amarillo'),
+    inf(3,'Weimar','23',2,2),
+    {vacancy_id:2, evaluator:'Weimar', status:'draft', entrevista_at:'2026-09-24T14:00:00Z'},   // entrevista hoy, sin informe
+    inf(1,'Weimar','15',3,3), inf(1,'Weimar','16',3,3),                                          // semana pasada: la terna se completa el 21
+    inf(5,'Laura','22',1,1),                                                                     // vacante cerrada, pero se trabajó
+  ];
+  t('semana: vacantes verificadas, calidad y empresas atendidas', () => {
+    const r = indicadoresSemana(S, V, {ahora:AH});
+    assert.strictEqual(r.lunes, '2026-09-21'); assert.strictEqual(r.domingo, '2026-09-27');
+    const w = r.semana;
+    assert.strictEqual(w.informes, 5); assert.strictEqual(w.entrevistas, 6);
+    assert.strictEqual(w.vacantes_verificadas, 3);           // 1, 3 y 5
+    assert.strictEqual(w.vacantes_trabajadas, 4);            // + la 2 (solo entrevista)
+    assert.strictEqual(w.empresas_atendidas, 3);             // IDOM (una sola, aunque escrita distinto), Movizzon, Alpina
+    assert.strictEqual(w.cumplen, 4); assert.strictEqual(w.pct_cumplen, 80);
+    assert.strictEqual(w.pct_verdes, 80);
+    assert.strictEqual(w.nuevas_vacantes, 1);
+    assert.strictEqual(w.ternas, 1);                         // SAP PP: 15, 16 y 21
+    assert.strictEqual(r.previa.informes, 2);
+  });
+  t('empresas: IDOM atendida con 2 de sus 3 vacantes; Rappi sin atender', () => {
+    const r = indicadoresSemana(S, V, {ahora:AH});
+    const idom = r.empresas.find(e => e.empresa.toLowerCase().trim() === 'idom');
+    assert.strictEqual(idom.vacantes, 3); assert.strictEqual(idom.trabajadas, 2); assert.strictEqual(idom.atendida, true);
+    const rappi = r.empresas.find(e => e.empresa === 'Rappi');
+    assert.strictEqual(rappi.atendida, false); assert.strictEqual(rappi.trabajadas, 0);
+    assert.strictEqual(r.empresas[r.empresas.length - 1].empresa, 'Rappi');   // las sin atender al final
+    assert.strictEqual(r.empresas_con_vacantes, 4);
+  });
+  t('por día, de lunes a domingo, con hoy y lo que falta marcado', () => {
+    const r = indicadoresSemana(S, V, {ahora:AH});
+    assert.strictEqual(r.dias.length, 7);
+    const mar = r.dias[1];
+    assert.strictEqual(mar.fecha, '2026-09-22'); assert.strictEqual(mar.informes, 2); assert.strictEqual(mar.nuevas_vacantes, 1);
+    assert.strictEqual(mar.empresas_atendidas, 2);
+    assert.strictEqual(r.dias[3].entrevistas, 1); assert.strictEqual(r.dias[3].futuro, false);
+    assert.strictEqual(r.dias[4].futuro, true); assert.strictEqual(r.dias[5].habil, false);
+  });
+  t('filtrado por evaluador: sus números, pero ternas y vacantes nuevas del equipo', () => {
+    const r = indicadoresSemana(S, V, {ahora:AH, evaluador:'weimar'});
+    assert.strictEqual(r.semana.informes, 3); assert.strictEqual(r.semana.empresas_atendidas, 2);
+    assert.strictEqual(r.semana.ternas, 1); assert.strictEqual(r.semana.nuevas_vacantes, 1);
+  });
+  t('otra semana y fechas inválidas o futuras', () => {
+    assert.strictEqual(indicadoresSemana(S, V, {ahora:AH, fecha:'2026-09-16'}).semana.informes, 2);
+    assert.strictEqual(indicadoresSemana(S, V, {ahora:AH, fecha:'2027-01-01'}).lunes, '2026-09-21');
+    assert.strictEqual(indicadoresSemana(S, V, {ahora:AH, fecha:'basura'}).lunes, '2026-09-21');
+  });
+  t('tasas de 28 días y tendencia de 8 semanas', () => {
+    const r = indicadoresSemana(S, V, {ahora:AH});
+    assert.strictEqual(r.tasas.hasta, '2026-09-24');
+    assert.strictEqual(r.tasas.entrevista_a_informe.num, 7); assert.strictEqual(r.tasas.entrevista_a_informe.den, 8);
+    assert.strictEqual(r.tasas.cumplen_todo.pct, 86);        // 6 de 7
+    assert.strictEqual(r.tasas.vacantes_con_apto.num, 3); assert.strictEqual(r.tasas.vacantes_con_apto.den, 4);
+    assert.strictEqual(r.tendencia.length, 8); assert.strictEqual(r.tendencia[7].informes, 5); assert.strictEqual(r.tendencia[6].informes, 2);
+  });
+  t('sin datos no se rompe', () => {
+    const r = indicadoresSemana([], [], {ahora:AH});
+    assert.strictEqual(r.semana.pct_cumplen, null); assert.strictEqual(r.empresas.length, 0); assert.strictEqual(r.tasas.cumplen_todo.pct, null);
+  });
+}
+
 console.log(`\n${n} pruebas · todo en verde`);

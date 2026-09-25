@@ -1,5 +1,6 @@
 // El pulso de las vacantes en las rutas REALES: /api/tablero trae las vacantes en movimiento con
-// sus validados, y /api/vacancies/:id trae la lista de candidatos con el mismo pulso.
+// sus validados, /api/vacancies/:id trae la lista de candidatos con el mismo pulso, y
+// /api/indicadores arma la semana.
 const assert = require('assert');
 const Module = require('module');
 const rutas = {};
@@ -58,6 +59,20 @@ const t = async (nombre, fn) => { await fn(); n++; console.log('  ✓', nombre);
     assert.strictEqual(ana.req_total, 1); assert.strictEqual(ana.req_cumple, 1); assert.strictEqual(ana.estado_tablero, 'emitido');
     assert.ok(ana.report_code, 'sin código de informe');
     assert.strictEqual(r.body.pulso.probabilidad, 'media'); assert.strictEqual(r.body.pulso.aptos, 1);
+  });
+
+  await t('/api/indicadores trae la semana con vacantes verificadas, calidad y empresas atendidas', async () => {
+    const r = await new Promise((ok) => {
+      const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(j) { ok({ status: this.statusCode, body: j }); } };
+      Promise.resolve(rutas['GET /api/indicadores']({ params: {}, body: {}, query: {} }, res));
+    });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+    const w = r.body.semana;
+    assert.strictEqual(w.informes, 2); assert.strictEqual(w.vacantes_verificadas, 1); assert.strictEqual(w.empresas_atendidas, 1);
+    assert.strictEqual(w.cumplen, 1); assert.strictEqual(w.pct_cumplen, 50);
+    assert.strictEqual(r.body.dias.length, 7);
+    const mov = r.body.empresas.find(e => e.empresa === 'Movizzon');
+    assert.ok(mov && mov.atendida && mov.trabajadas === 1 && mov.vacantes === 1, JSON.stringify(r.body.empresas));
   });
 
   await t('cerrada: sale del movimiento y no tiene probabilidad', async () => {

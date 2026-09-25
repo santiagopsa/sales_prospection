@@ -404,6 +404,12 @@ function clearLocal(){ try{ localStorage.removeItem(KEY); }catch(e){} }
 function go(id){
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id===id));
   const live = (id==='vLive');
+  const nav = $('#topNav');
+  if(nav){
+    nav.style.display = (live || id==='vActa') ? 'none' : '';
+    nav.querySelectorAll('[data-nav]').forEach(b => b.classList.toggle('on',
+      b.dataset.nav === 'indicadores' ? id === 'vIndicadores' : (id === 'vTablero' || id === 'vVacante')));
+  }
   const lectura = !!(S && S.soloLectura);
   $('#sigBar').style.display = (live && !lectura) ? 'block' : 'none';
   // En modo lectura no hay cronómetro que correr: la sesión ya pasó.
@@ -485,11 +491,13 @@ function pintarIndicadores(){
       <div class="metatop"><b>Meta de la semana</b><span><b class="metanum">${hechos}</b> de ${meta} informes</span>
         <button class="linkbtn" id="btnMeta" type="button">cambiar</button></div>
       <div class="meter" role="progressbar" aria-valuemin="0" aria-valuemax="${meta}" aria-valuenow="${hechos}"><i style="width:${pct}%"></i></div>
-      <p class="nudge">${esc(nudge)}${ev && st.equipo_semana ? ` <span class="equipo">El equipo lleva ${st.equipo_semana} esta semana.</span>` : ''}</p>
+      <p class="nudge">${esc(nudge)}${ev && st.equipo_semana ? ` <span class="equipo">El equipo lleva ${st.equipo_semana} esta semana.</span>` : ''}
+        <button class="linkbtn" id="btnVerSemana" type="button">Ver los indicadores de la semana →</button></p>
     </div>
     <div class="racha ${st.racha ? 'on' : ''}" title="Días hábiles seguidos con al menos un informe emitido">
       <b>${st.racha ? '🔥 ' + st.racha : '0'}</b><span>${st.racha === 1 ? 'día hábil seguido' : 'días hábiles seguidos'} emitiendo</span>
     </div>`;
+  $('#btnVerSemana').addEventListener('click', () => navegar('indicadores'));
   $('#btnMeta').addEventListener('click', async () => {
     const v = await preguntar('Meta de informes por semana', 'Cuántos informes quieres emitir cada semana. Se guarda en este navegador.', 'Guardar', 'Cancelar', String(meta));
     const n = parseInt(v, 10);
@@ -762,6 +770,182 @@ async function loadTablero(){
   }
 }
 let TABLERO_TIMER = null;
+
+/* ===================== indicadores de la semana =====================
+   El cuadro semanal, como el de prospección: arriba los cuatro focos (vacantes verificadas,
+   calidad, empresas atendidas, informes contra la meta), debajo lo mismo día por día, la
+   cobertura por empresa, las tasas de 28 días y las últimas 8 semanas. Lo calcula el servidor
+   (rules.js · indicadoresSemana); aquí solo se dibuja. */
+const IND = { fecha: null, d: null };
+const MES_LARGO = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const DIA_CORTO = ['dom','lun','mar','mié','jue','vie','sáb'];
+const fechaDia = f => new Date(f + 'T12:00:00Z');
+const diaTxt = f => { const d = fechaDia(f); return `${DIA_CORTO[d.getUTCDay()]} ${d.getUTCDate()}`; };
+const sumaDias = (f, n) => { const d = fechaDia(f); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+function rangoSemana(l, dom){
+  const a = fechaDia(l), b = fechaDia(dom);
+  return a.getUTCMonth() === b.getUTCMonth()
+    ? `${a.getUTCDate()} al ${b.getUTCDate()} de ${MES_LARGO[b.getUTCMonth()]}`
+    : `${a.getUTCDate()} de ${MES_LARGO[a.getUTCMonth()]} al ${b.getUTCDate()} de ${MES_LARGO[b.getUTCMonth()]}`;
+}
+function horasTxt(h){
+  if(h == null) return '—';
+  if(h < 1) return `${Math.max(1, Math.round(h * 60))} min`;
+  if(h < 48) return `${Math.round(h)} h`;
+  return `${Math.round(h / 24)} días`;
+}
+// Comparación contra la semana anterior, con palabras: "▲ 2 más que la semana pasada".
+function contra(ahora, antes, {unidad = '', mejorSiSube = true, pts = false} = {}){
+  if(ahora == null || antes == null) return `<span class="delta">sin comparación</span>`;
+  const d = Math.round(ahora - antes);
+  if(!d) return `<span class="delta">igual que la semana pasada</span>`;
+  const bueno = mejorSiSube ? d > 0 : d < 0;
+  return `<span class="delta ${bueno ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)}${pts ? ' pts' : unidad} ${d > 0 ? 'más' : 'menos'} que la semana pasada</span>`;
+}
+const medidor = (v, max) => `<div class="meter"><i style="width:${max ? Math.min(100, Math.round(100 * v / max)) : 0}%"></i></div>`;
+
+async function loadIndicadores(fecha){
+  if(fecha !== undefined) IND.fecha = fecha;
+  go('vIndicadores');
+  const ev = evalActual();
+  const qs = new URLSearchParams();
+  if(IND.fecha) qs.set('fecha', IND.fecha);
+  if(ev) qs.set('evaluador', ev);
+  try{
+    IND.d = await api('/api/indicadores' + (qs.toString() ? '?' + qs : ''));
+    const sel = $('#selEvalInd'), evs = IND.d.evaluadores || [];
+    sel.innerHTML = `<option value="">Todo el equipo</option>` + evs.map(e => `<option value="${esc(e.nombre)}">${esc(e.nombre)} · ${e.n}</option>`).join('');
+    sel.value = ev && evs.some(e => e.clave === claveEval(ev)) ? evs.find(e => e.clave === claveEval(ev)).nombre : '';
+    pintarSemana();
+  }catch(e){
+    $('#indCuerpo').innerHTML = `<div class="empty">No se pudieron cargar los indicadores: ${esc(e.message)}</div>`;
+  }
+}
+
+function pintarSemana(){
+  const d = IND.d, w = d.semana, p = d.previa;
+  const actual = d.domingo >= d.hoy;
+  const meta = metaSemana(), metaDia = Math.max(1, Math.ceil(meta / 5));
+  const quien = d.filtro ? ((d.evaluadores.find(e => e.clave === d.filtro) || {}).nombre || '') : '';
+  $('#indTitulo').textContent = `Semana del ${rangoSemana(d.lunes, d.domingo)}`;
+  $('#indRango').innerHTML = `${quien ? `De <b>${esc(quien)}</b> · ` : 'Todo el equipo · '}
+    <button class="linkbtn" data-sem="${sumaDias(d.lunes, -7)}" type="button">← Semana anterior</button>
+    ${actual ? '<span class="tag acc">EN CURSO</span>' : `<button class="linkbtn" data-sem="${sumaDias(d.lunes, 7)}" type="button">Semana siguiente →</button>
+    <button class="linkbtn" data-sem="" type="button">Ir a esta semana</button>`}`;
+  const soloEquipo = d.filtro ? ' <span class="eq" title="Es un dato de la vacante, no de quien entrevista">del equipo</span>' : '';
+
+  const focos = [
+    {k:'vv', l:'Vacantes verificadas', v:w.vacantes_verificadas, sub:`con al menos un informe · de ${plural(w.vacantes_trabajadas, 'vacante trabajada', 'vacantes trabajadas')}`,
+     d:contra(w.vacantes_verificadas, p.vacantes_verificadas)},
+    {k:'ca', l:'Calidad', v: w.pct_cumplen == null ? '—' : w.pct_cumplen + '%', cls: w.pct_cumplen == null ? '' : (w.pct_cumplen >= 60 ? 'ok' : w.pct_cumplen >= 30 ? 'par' : 'no'),
+     sub: w.con_requisitos ? `cumplen todos los requisitos · ${w.cumplen} de ${w.con_requisitos} informes${w.pct_verdes != null ? ` · ${w.pct_verdes}% en verde` : ''}` : 'sin informes esta semana',
+     d:contra(w.pct_cumplen, p.pct_cumplen, {pts:true})},
+    {k:'ea', l:'Empresas atendidas', v:w.empresas_atendidas, de:d.empresas_con_vacantes, sub:'con al menos una vacante trabajada',
+     d:contra(w.empresas_atendidas, p.empresas_atendidas), m:medidor(w.empresas_atendidas, d.empresas_con_vacantes)},
+    {k:'in', l:'Informes emitidos', v:w.informes, de:meta, sub:`meta de la semana: ${meta}`, d:contra(w.informes, p.informes), m:medidor(w.informes, meta)},
+  ];
+  const sec = [
+    {l:'Entrevistas', v:w.entrevistas, sub:contra(w.entrevistas, p.entrevistas)},
+    {l:'Ternas completadas', v:w.ternas, sub:`3 candidatos que cumplen todo en una vacante${soloEquipo}`},
+    {l:'Vacantes nuevas', v:w.nuevas_vacantes, sub:`levantamientos cargados${soloEquipo}`},
+    {l:'De la entrevista al informe', v:horasTxt(w.horas_mediana), sub:`mediana${w.horas_mediana != null && p.horas_mediana != null ? ` · la semana pasada ${horasTxt(p.horas_mediana)}` : ''}`},
+    {l:'Racha', v: d.racha ? '🔥 ' + d.racha : '0', sub:'días hábiles seguidos emitiendo'},
+  ];
+
+  const hoyCls = x => [x.fecha === d.hoy ? 'hoy' : '', !x.habil || x.futuro ? 'suave' : ''].join(' ');
+  const metaChip = x => x.futuro ? '' : x.informes >= metaDia ? `<span class="tag v">CUMPLIDA</span>`
+    : !x.habil ? '' : x.fecha === d.hoy ? `<span class="tag acc">EN CURSO</span>` : `<span class="tag n">NO</span>`;
+  const cero = n => n ? n : '<span class="z">0</span>';
+  const t = d.tasas;
+  const tasa = (x, l) => `<div class="itasa"><b>${x.pct == null ? '—' : x.pct + '%'}</b><span>${l}</span><small>${x.num} de ${x.den}</small></div>`;
+  const maxT = k => Math.max(1, ...d.tendencia.map(x => x[k] || 0));
+  const barra = (v, max, cls = '') => `<span class="ibar ${cls}"><i style="width:${Math.round(100 * (v || 0) / max)}%"></i></span>`;
+  const atendidas = d.empresas.filter(e => e.atendida).length;
+
+  $('#indCuerpo').innerHTML = `
+    <div class="ifocos">${focos.map(f => `<div class="ifoco ${f.k}">
+      <div class="kl">${f.l}</div>
+      <div class="kv ${f.cls || ''}">${f.v}${f.de != null ? `<small> / ${f.de}</small>` : ''}</div>
+      ${f.m || ''}
+      <div class="ks">${esc(f.sub)}</div>
+      ${f.d}
+    </div>`).join('')}</div>
+
+    <div class="isec">${sec.map(x => `<div class="isc"><b>${x.v}</b><span>${x.l}</span><small>${x.sub}</small></div>`).join('')}</div>
+
+    <div class="card">
+      <div class="cardhd"><h2>Día por día</h2><span class="cs">meta del día: ${metaDia} informe${metaDia === 1 ? '' : 's'} (la semanal entre 5)</span></div>
+      <div class="tabla-env"><table class="itabla">
+        <thead><tr><th>Día</th><th class="num">Entrevistas</th><th class="num">Informes</th><th class="num">Cumplen todo</th><th class="num">Vacantes trabajadas</th><th class="num">Empresas atendidas</th><th class="num">Vacantes nuevas</th><th>Meta</th></tr></thead>
+        <tbody>${d.dias.map(x => `<tr class="${hoyCls(x)}">
+          <td>${diaTxt(x.fecha)}${x.fecha === d.hoy ? ' <span class="hoyt">hoy</span>' : ''}</td>
+          <td class="num">${cero(x.entrevistas)}</td><td class="num"><b>${cero(x.informes)}</b></td><td class="num">${cero(x.cumplen)}</td>
+          <td class="num">${cero(x.vacantes_trabajadas)}</td><td class="num">${cero(x.empresas_atendidas)}</td><td class="num">${cero(x.nuevas_vacantes)}</td>
+          <td>${metaChip(x)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><td>Semana</td><td class="num">${w.entrevistas}</td><td class="num"><b>${w.informes}</b></td><td class="num">${w.cumplen}</td>
+          <td class="num">${w.vacantes_trabajadas}</td><td class="num">${w.empresas_atendidas}</td><td class="num">${w.nuevas_vacantes}</td>
+          <td>${d.dias.filter(x => !x.futuro && x.informes >= metaDia).length} de ${d.dias.filter(x => x.habil && !x.futuro).length}</td></tr></tfoot>
+      </table></div>
+      <p class="hint">En la fila de la semana, vacantes y empresas se cuentan una vez aunque se hayan trabajado varios días.</p>
+    </div>
+
+    <div class="card" id="indEmpresas">
+      <div class="cardhd"><h2>Empresas atendidas</h2><span class="cs">${atendidas} de ${d.empresas.length} esta semana</span></div>
+      <p class="inota">Una empresa está atendida si esta semana se trabajó al menos una de sus vacantes (entrevista o informe). “2 de 10” quiere decir que se trabajaron 2 de sus 10 vacantes.</p>
+      ${d.empresas.length ? `<div class="tabla-env"><table class="itabla emp">
+        <thead><tr><th>Empresa</th><th>Vacantes trabajadas</th><th class="num">Informes</th><th class="num">Cumplen todo</th><th>Estado</th></tr></thead>
+        <tbody>${d.empresas.map(e => `<tr class="${e.atendida ? '' : 'suave'}">
+          <td><b>${esc(e.empresa)}</b></td>
+          <td><span class="cob">${barra(e.trabajadas, Math.max(1, e.vacantes), 'ok')}<span>${e.trabajadas} de ${e.vacantes}</span></span></td>
+          <td class="num">${cero(e.informes)}</td><td class="num">${cero(e.cumplen)}</td>
+          <td>${e.atendida ? '<span class="tag v">ATENDIDA</span>' : '<span class="tag n">SIN ATENDER</span>'}</td></tr>`).join('')}</tbody>
+      </table></div>` : `<div class="empty">Todavía no hay empresas con vacantes.</div>`}
+    </div>
+
+    <div class="card">
+      <div class="cardhd"><h2>Tasas</h2><span class="cs">últimos ${t.dias} días · ${fechaCorta(t.desde + 'T12:00:00')} a ${fechaCorta(t.hasta + 'T12:00:00')}</span></div>
+      <div class="itasas">
+        ${tasa(t.entrevista_a_informe, 'Entrevistas que ya tienen informe')}
+        ${tasa(t.cumplen_todo, 'Informes en que el candidato cumple todo')}
+        ${tasa(t.semaforo_verde, 'Informes en verde (sin señales de alerta)')}
+        ${tasa(t.vacantes_con_apto, 'Vacantes trabajadas con al menos un candidato que cumple todo')}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardhd"><h2>Últimas 8 semanas</h2><span class="cs">clic en una semana para verla</span></div>
+      <div class="tabla-env"><table class="itabla tend">
+        <thead><tr><th>Semana del</th><th>Informes</th><th>Vacantes verificadas</th><th>Empresas atendidas</th><th>Cumplen todo</th></tr></thead>
+        <tbody>${d.tendencia.slice().reverse().map(x => `<tr data-sem="${x.inicio}" class="${x.inicio === d.lunes ? 'hoy' : ''}" tabindex="0" role="button">
+          <td>${fechaCorta(x.inicio + 'T12:00:00')}${x.inicio === d.lunes ? ' <span class="hoyt">viendo</span>' : ''}</td>
+          <td><span class="cob">${barra(x.informes, maxT('informes'))}<span>${x.informes}</span></span></td>
+          <td><span class="cob">${barra(x.vacantes_verificadas, maxT('vacantes_verificadas'))}<span>${x.vacantes_verificadas}</span></span></td>
+          <td><span class="cob">${barra(x.empresas_atendidas, maxT('empresas_atendidas'))}<span>${x.empresas_atendidas}</span></span></td>
+          <td><span class="cob">${barra(x.pct_cumplen, 100, 'ok')}<span>${x.pct_cumplen == null ? '—' : x.pct_cumplen + '%'}</span></span></td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </div>`;
+}
+
+function enganchesIndicadores(){
+  if(enganchesIndicadores.hecho) return;
+  enganchesIndicadores.hecho = true;
+  const ir = e => { const x = e.target.closest('[data-sem]'); if(x) loadIndicadores(x.dataset.sem || null); };
+  $('#vIndicadores').addEventListener('click', ir);
+  $('#vIndicadores').addEventListener('keydown', e => { if((e.key === 'Enter' || e.key === ' ') && e.target.matches('tr[data-sem]')){ e.preventDefault(); ir(e); } });
+  $('#selEvalInd').addEventListener('change', e => { lsSet(LS_EVAL, e.target.value); loadIndicadores(); });
+}
+
+// La barra de arriba: Tablero e Indicadores. Si hay una sesión en curso, se pregunta antes,
+// igual que el logo.
+async function navegar(dest){
+  if(S && S.sid && !S.fin && !S.soloLectura && ($('#vLive').classList.contains('on'))){
+    if(!await preguntar('Hay una sesión en curso', 'Queda guardada en el tablero y puedes retomarla después.')) return;
+    await salirDeSesion();
+  }
+  if(dest === 'indicadores'){ enganchesIndicadores(); loadIndicadores(null); }
+  else loadTablero();
+}
 
 /* ===================== abrir una verificación anterior =====================
    El acta se reconstruye desde la base de datos con el mismo render que la generó,
@@ -4045,6 +4229,7 @@ function init(){
     loadTablero();
   });
   $('#btnNuevoIntake').addEventListener('click', () => go('vIntake'));
+  $('#topNav').querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', () => navegar(b.dataset.nav)));
   // Ojo: esto era solo un scrollIntoView, y en un tablero corto la página no tiene scroll,
   // así que el botón no hacía absolutamente nada visible. Un botón que no da señal de haber
   // funcionado es, para quien lo usa, un botón roto. Ahora además resalta la tarjeta.
