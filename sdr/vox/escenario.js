@@ -166,6 +166,16 @@ VoxEngine.addEventListener(AppEvents.CallAlerting, function (e) {
     esteIntento.addEventListener(CallEvents.Disconnected, function () { if (esteIntento === prospecto) terminar('colgada'); });
   }
 
+  // Teclado: Angie marca opciones del conmutador (IVR, extensiones) durante la llamada. El navegador
+  // manda { dtmf: "1" } por mensaje y aquí se envía como tonos DTMF al prospecto.
+  angie.addEventListener(CallEvents.MessageReceived, function (ev) {
+    let m = {};
+    try { m = JSON.parse(ev.text || '{}'); } catch (err) { return; }
+    const d = String(m.dtmf || '').replace(/[^0-9*#]/g, '');
+    if (!d || !prospecto || cerrado) return;
+    try { prospecto.sendDigits(d); } catch (err) {}
+  });
+
   angie.addEventListener(CallEvents.Connected, function () {
     if (angieLista) return;
     angieLista = true;

@@ -312,3 +312,13 @@ div.llamada .txt b { white-space: nowrap; }
 .buscar-resultados a.res.sub { padding: 6px 12px 6px 22px; border-bottom: 0; font-size: 13px; }
 .buscar-resultados a.res u { text-decoration: none; color: var(--azul-osc); font-weight: 600; }
 #conexion { margin-top: 10px; }
+
+/* Teclado (DTMF) durante la llamada */
+div.llamada .teclado-btn { padding: 6px 10px; font-size: 15px; }
+div.llamada .teclado-btn.activo { background: #e6f9ff; border-color: var(--azul-osc); }
+.teclado { border: 1px solid var(--linea); border-radius: 10px; padding: 10px; margin: -2px 0 8px; background: var(--panel); max-width: 260px; }
+.teclado-pantalla { font-size: 18px; min-height: 26px; padding: 2px 6px; margin-bottom: 8px; border-bottom: 1px solid var(--linea); letter-spacing: .1em; }
+.teclado-pantalla .suave { font-size: 12px; letter-spacing: 0; }
+.teclado-teclas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.teclado .tecla { font-size: 18px; padding: 8px 0; }
+.teclado .tecla.pulsada { background: var(--azul-osc); color: #fff; }

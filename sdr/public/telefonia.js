@@ -168,5 +168,14 @@
     if (llamadaActual) { try { llamadaActual.hangup(); } catch (_) { /* nada */ } }
   }
 
-  window.SDR_TELEFONIA = { disponible, motivo, llamar, colgar, bitacora: () => bitacora.slice() };
+  // Teclado (DTMF) para los conmutadores: "marque 1 para…", extensiones. Va al escenario por mensaje
+  // y el escenario lo envía como tonos al prospecto. Devuelve false si no hay llamada.
+  function teclear(digitos) {
+    const d = String(digitos || '').replace(/[^0-9*#]/g, '');
+    if (!d || !llamadaActual) return false;
+    try { llamadaActual.sendMessage(JSON.stringify({ dtmf: d })); anotar('teclado: ' + d); return true; }
+    catch (e) { anotar('teclado falló: ' + (e.message || e)); return false; }
+  }
+
+  window.SDR_TELEFONIA = { disponible, motivo, llamar, colgar, teclear, bitacora: () => bitacora.slice() };
 })();

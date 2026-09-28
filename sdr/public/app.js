@@ -979,8 +979,21 @@
     function iniciarLlamada(numero) {
       const $estado = document.getElementById('llamada-estado');
       const uuid = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
-      let enCurso = true, inicio = null, reloj = null, ultimo = ['conectando', ''];
+      let enCurso = true, inicio = null, reloj = null, ultimo = ['conectando', ''], teclado = false, tecleado = '';
       delete reservasEnLlamada[l.id];
+      const pulsar = k => {
+        if (!enCurso || !tel.teclear || !tel.teclear(k)) return;
+        tecleado = (tecleado + k).slice(-20);
+        const $p = document.getElementById('tecleado'); if ($p) $p.textContent = tecleado;
+        const b = $estado.querySelector(`[data-tecla="${k}"]`); if (b) { b.classList.add('pulsada'); setTimeout(() => b.classList.remove('pulsada'), 150); }
+      };
+      // Con el teclado abierto, los números del computador también marcan (si no se está escribiendo en un campo).
+      const teclaFisica = e => {
+        if (!enCurso) return document.removeEventListener('keydown', teclaFisica);
+        if (!teclado || /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')) return;
+        if (/^[0-9*#]$/.test(e.key)) { e.preventDefault(); pulsar(e.key); }
+      };
+      document.addEventListener('keydown', teclaFisica);
       const mmss = ms => { const t = Math.floor(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
       const pintar = (fase, texto) => {
         // fase: conectando | timbrando | activa
@@ -990,13 +1003,21 @@
           ? (reserva ? `<span class="agendada">✅ Reunión agendada${reserva.reunion_at ? ' · ' + esc(fechaHora(new Date(reserva.reunion_at).getTime())) : ''}</span>`
             : `<button class="btn agendar" type="button" id="agendar-llamada" title="Abre el Calendly de ${esc(meta.calendly.ejecutiva)} sin colgar">📅 Agendar</button>`)
           : '';
+        const conTeclado = (fase === 'activa' || fase === 'timbrando') && tel.teclear;
         $estado.innerHTML = `<div class="llamada ${fase}">
           <span class="punto"></span>
           <div class="txt"><b>${esc(texto)}</b><span class="num" id="reloj">${inicio ? mmss(Date.now() - inicio) : ''}</span></div>
+          ${conTeclado ? `<button class="btn teclado-btn ${teclado ? 'activo' : ''}" type="button" id="teclado-btn" title="Teclado para conmutadores (marque 1, extensión…)">⌨️</button>` : ''}
           ${agendar}
           <button class="btn colgar" type="button" id="colgar">Colgar</button></div>
+          ${conTeclado && teclado ? `<div class="teclado"><div class="teclado-pantalla num" id="tecleado">${esc(tecleado) || '<span class="suave">Marca la opción o la extensión</span>'}</div>
+            <div class="teclado-teclas">${['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'].map(k => `<button type="button" class="btn tecla" data-tecla="${k}">${k}</button>`).join('')}</div>
+            <div class="suave" style="font-size:11px;margin-top:4px">También puedes usar los números del teclado del computador.</div></div>` : ''}
           ${fase === 'activa' && meta.recordatorioGrabacion ? `<div class="recordatorio">🎙 ${esc(meta.recordatorioGrabacion)}</div>` : ''}`;
         document.getElementById('colgar').addEventListener('click', () => { if (enCurso) tel.colgar(); });
+        const $tb = document.getElementById('teclado-btn');
+        if ($tb) $tb.addEventListener('click', () => { teclado = !teclado; pintar(...ultimo); });
+        $estado.querySelectorAll('[data-tecla]').forEach(b => b.addEventListener('click', () => pulsar(b.dataset.tecla)));
         const $ag = document.getElementById('agendar-llamada');
         if ($ag) $ag.addEventListener('click', async () => {
           $ag.disabled = true;
@@ -1309,6 +1330,19 @@
       try {
         const r = await api(ruta, { method: 'POST', body });
         delete reservasEnLlamada[l.id];
+      const pulsar = k => {
+        if (!enCurso || !tel.teclear || !tel.teclear(k)) return;
+        tecleado = (tecleado + k).slice(-20);
+        const $p = document.getElementById('tecleado'); if ($p) $p.textContent = tecleado;
+        const b = $estado.querySelector(`[data-tecla="${k}"]`); if (b) { b.classList.add('pulsada'); setTimeout(() => b.classList.remove('pulsada'), 150); }
+      };
+      // Con el teclado abierto, los números del computador también marcan (si no se está escribiendo en un campo).
+      const teclaFisica = e => {
+        if (!enCurso) return document.removeEventListener('keydown', teclaFisica);
+        if (!teclado || /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')) return;
+        if (/^[0-9*#]$/.test(e.key)) { e.preventDefault(); pulsar(e.key); }
+      };
+      document.addEventListener('keydown', teclaFisica);
         // El compromiso que quedó pactado en la llamada, si lo llenó.
         if (f.get('c_titulo') && f.get('c_fecha') && resultado !== 'descartado') {
           try { const rc = await api('tareas', { method: 'POST', body: { lead_id: l.id, tipo: f.get('c_tipo') || 'seguimiento', titulo: f.get('c_titulo'), fecha: f.get('c_fecha'), hora: f.get('c_hora') || null } }); (r.avisos = r.avisos || []).push(rc.calendario && rc.calendario.ok ? 'Compromiso anotado y en el calendario.' : 'Compromiso anotado.'); }

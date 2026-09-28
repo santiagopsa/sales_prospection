@@ -44,6 +44,27 @@ test('escenario: incrusta caller id, aviso y webhook, y es JS válido', () => {
   assert.ok(s2.includes(cfg.MENSAJES_LLAMADA.numero_invalido.slice(0, 20)));
 });
 
+test('escenario: el teclado de Angie llega como DTMF al prospecto', () => {
+  const s = generarEscenario({ callerId: '+573009138048', webhookUrl: 'u', secreto: 's', aviso: '', voz: 'x' });
+  // VoxEngine falso: registra listeners y lo que se le manda al prospecto.
+  const oyentes = obj => { obj.l = {}; obj.addEventListener = (ev, f) => { (obj.l[ev] = obj.l[ev] || []).push(f); }; obj.fire = (ev, x) => (obj.l[ev] || []).forEach(f => f(x || {})); return obj; };
+  const CallEvents = { Connected: 'Connected', Disconnected: 'Disconnected', Failed: 'Failed', MessageReceived: 'MessageReceived', AudioStarted: 'AudioStarted', PlaybackFinished: 'PlaybackFinished' };
+  const digitos = [];
+  const prospecto = oyentes({ id: () => 'P1', sendDigits: d => digitos.push(d), sendMediaTo() {}, say() {}, hangup() {} });
+  const angie = oyentes({ answer() {}, say() {}, sendMessage() {}, sendMediaTo() {}, hangup() {}, reject() {} });
+  let alerta = null;
+  const VoxEngine = { addEventListener: (ev, f) => { alerta = f; }, callPSTN: () => prospecto, createRecorder: () => oyentes({}), sendMediaBetween() {}, terminate() {} };
+  new Function('VoxEngine', 'AppEvents', 'CallEvents', 'RecorderEvents', 'Net', 'require', 'Modules', 'VoiceList', s)(VoxEngine, { CallAlerting: 'CallAlerting' }, CallEvents, { Started: 'S', Stopped: 'T' }, { httpRequestAsync: () => ({ then() {} }) }, () => ({}), { Recorder: 'rec' }, {});
+  alerta({ call: angie, destination: '+573001112233', customData: '{}' });
+  angie.fire('MessageReceived', { text: JSON.stringify({ dtmf: '1' }) });   // aún no hay prospecto: se ignora
+  angie.fire('Connected');
+  prospecto.fire('Connected');
+  angie.fire('MessageReceived', { text: JSON.stringify({ dtmf: '2' }) });
+  angie.fire('MessageReceived', { text: JSON.stringify({ dtmf: '#; rm -rf' }) });
+  angie.fire('MessageReceived', { text: 'no es json' });
+  assert.deepStrictEqual(digitos, ['2', '#']);
+});
+
 test('escenario: clasificar códigos SIP del operador', () => {
   const s = generarEscenario({ callerId: '+57', webhookUrl: 'u', secreto: 's', aviso: '', voz: 'x' });
   const fn = new Function(s.slice(s.indexOf('function clasificar'), s.indexOf('VoxEngine.addEventListener')) + '; return clasificar;')();

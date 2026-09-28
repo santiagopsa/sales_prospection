@@ -76,6 +76,13 @@ entra al asistente con la ficha prellenada y, al guardar, se actualiza ese mismo
 y un segundo teléfono (con su propio botón de llamar). Los teléfonos se normalizan igual que en la carga; si
 el principal ya es de otro lead, lo dice. Cada edición queda en el historial.
 
+### Teclado durante la llamada (conmutadores)
+Con la llamada timbrando o en curso aparece **⌨️** en la barra: abre un teclado 0-9, * y # para los
+conmutadores ("marque 1 para…", extensiones). También marcan los números del teclado del computador mientras
+el teclado está abierto. El navegador manda el dígito al escenario (`{ dtmf }` por mensaje) y el escenario lo
+envía como tono DTMF al prospecto (`sendDigits`). **Requiere volver a subir el escenario**: `node sdr/cli.js
+vox:setup`.
+
 ## Transcripción y métricas (pipeline de audio)
 
 Al colgar, dos cosas llegan en cualquier orden: el resultado que pone Angie y el webhook de Voximplant con la
