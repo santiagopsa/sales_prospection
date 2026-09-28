@@ -92,6 +92,19 @@ const t = async (nombre, fn) => { await fn(); n++; console.log('  ✓', nombre);
     assert.strictEqual(p.en_proceso, 1); assert.strictEqual(p.descartados, 0);
   });
 
+  await t('qué dijo el cliente: solo en un emitido, con una lista cerrada, y se borra', async () => {
+    const ses = (await llamar('GET /api/sessions', {}, {})).body;
+    const ana = ses.find(s => s.candidate === 'Ana Apta'), carla = ses.find(s => s.candidate === 'Carla Proceso');
+    assert.strictEqual((await llamar('POST /api/sessions/:id/cliente', { id: String(carla.id) }, { resultado: 'Lo entrevistó' })).status, 409);
+    assert.strictEqual((await llamar('POST /api/sessions/:id/cliente', { id: String(ana.id) }, { resultado: 'Tal vez' })).status, 400);
+    const r = await llamar('POST /api/sessions/:id/cliente', { id: String(ana.id) }, { resultado: 'Lo contrató' });
+    assert.strictEqual(r.status, 200); assert.strictEqual(r.body.cliente_resultado, 'Lo contrató'); assert.ok(r.body.cliente_resultado_at);
+    const d = (await llamar('GET /api/sessions/:id', { id: String(ana.id) })).body;
+    assert.strictEqual(d.cliente_resultado, 'Lo contrató');
+    const b = await llamar('POST /api/sessions/:id/cliente', { id: String(ana.id) }, { resultado: '' });
+    assert.strictEqual(b.body.cliente_resultado, null);
+  });
+
   await t('cerrada: sale del movimiento y no tiene probabilidad', async () => {
     await llamar('PATCH /api/vacancies/:id', { id: String(vid) }, { status: 'cerrada' });
     const r = await llamar('GET /api/tablero', {}, {});

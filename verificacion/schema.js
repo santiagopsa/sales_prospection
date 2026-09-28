@@ -201,6 +201,9 @@ async function initSchema(pool) {
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS descartado_at TIMESTAMPTZ`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS descarte_motivo TEXT`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS descarte_nota TEXT`,
+    // Qué pasó con el candidato en el cliente después del informe (entrevista, contratación).
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS cliente_resultado TEXT`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS cliente_resultado_at TIMESTAMPTZ`,
     `CREATE INDEX IF NOT EXISTS idx_v_req_vacancy ON ${T.requirements}(vacancy_id)`,
     `CREATE INDEX IF NOT EXISTS idx_v_sess_vacancy ON ${T.sessions}(vacancy_id)`,
     `CREATE INDEX IF NOT EXISTS idx_v_rat_session ON ${T.ratings}(session_id)`,

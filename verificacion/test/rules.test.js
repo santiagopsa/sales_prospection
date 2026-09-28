@@ -221,7 +221,9 @@ const S = [
   {evaluator:'Laura M.', status:'issued', entrevista_at:hace(2), issued_at:hace(2, -4), req_total:3, req_cumple:3},
 ];
 t('el estado del tablero sale de la sesión', () => {
-  assert.strictEqual(estadoTablero(S[0]), 'emitido');
+  assert.strictEqual(estadoTablero(S[0], AHORA), 'emitido');
+  assert.strictEqual(estadoTablero(S[2], AHORA), 'seguimiento');                 // enviado hace 7 días sin respuesta
+  assert.strictEqual(estadoTablero({...S[2], cliente_resultado:'No sabemos'}, AHORA), 'emitido');
   assert.strictEqual(estadoTablero(S[3]), 'calificar');
   assert.strictEqual(estadoTablero(S[4]), 'espera');
   assert.strictEqual(estadoTablero({status:'draft', transcript_status:'procesando', transcript_started_at:new Date().toISOString()}), 'analizando');

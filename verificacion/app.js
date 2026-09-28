@@ -11,7 +11,7 @@
 const express = require('express');
 const path = require('path');
 const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt, leerTraduccion } = require('./prompts');
-const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana, MOTIVOS_DESCARTE } = require('./rules');
+const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana, MOTIVOS_DESCARTE, RESULTADOS_CLIENTE } = require('./rules');
 const didit = require('./didit');
 const { T, SCHEMA, initSchema } = require('./schema');
 const OPS = require('./ops');
@@ -449,7 +449,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         const cs = await pool.query(`
           SELECT s.id, s.vacancy_id, s.report_code, s.candidate, s.evaluator, s.kind, s.status, s.semaforo,
                  s.started_at, s.issued_at, s.transcript_at, s.entrevista_at, s.updated_at, s.created_at,
-                 s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo,
+                 s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo, s.cliente_resultado, s.cliente_resultado_at,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple
           FROM ${T.sessions} s WHERE s.vacancy_id=$1
@@ -1388,6 +1388,28 @@ ${!code ? `
       res.json({ ok: true, descartado_at: s.descartado_at, descarte_motivo: motivo, descarte_nota: nota });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
+  // Qué dijo el cliente de un candidato enviado. Solo informes emitidos; no toca la firma.
+  r.post('/api/sessions/:id/cliente', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const resultado = clean(req.body && req.body.resultado) || null;
+      if (resultado && !RESULTADOS_CLIENTE.includes(resultado)) return res.status(400).json({ error: 'Esa respuesta no es una opción.' });
+      if (pool) {
+        const q = await pool.query(`SELECT id, status FROM ${T.sessions} WHERE id=$1`, [id]);
+        if (!q.rows.length) return res.status(404).json({ error: 'not found' });
+        if (q.rows[0].status !== 'issued') return res.status(409).json({ error: 'Solo se anota en un informe emitido.' });
+        const u = await pool.query(`UPDATE ${T.sessions} SET cliente_resultado=$2, cliente_resultado_at=CASE WHEN $2::text IS NULL THEN NULL ELSE NOW() END, updated_at=NOW()
+                                    WHERE id=$1 RETURNING cliente_resultado, cliente_resultado_at`, [id, resultado]);
+        return res.json({ ok: true, ...u.rows[0] });
+      }
+      const s = mem.sessions.find(x => x.id === id);
+      if (!s) return res.status(404).json({ error: 'not found' });
+      if (s.status !== 'issued') return res.status(409).json({ error: 'Solo se anota en un informe emitido.' });
+      Object.assign(s, { cliente_resultado: resultado, cliente_resultado_at: resultado ? new Date().toISOString() : null, updated_at: new Date().toISOString() });
+      res.json({ ok: true, cliente_resultado: s.cliente_resultado, cliente_resultado_at: s.cliente_resultado_at });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   r.post('/api/sessions/:id/recuperar', async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -1531,7 +1553,7 @@ ${!code ? `
           SELECT s.id, s.vacancy_id, s.report_code, s.candidate, s.evaluator, s.mode, s.kind, s.status, s.semaforo,
                  s.didit_status, s.face_verdict, s.face_score, s.id_note,
                  s.started_at, s.issued_at, s.transcript_at, s.entrevista_at, s.updated_at,
-                 s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo,
+                 s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo, s.cliente_resultado, s.cliente_resultado_at,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple,
                  v.title AS vacancy_title, c.name AS company_name
@@ -1560,7 +1582,7 @@ ${!code ? `
     if (pool) {
       const q = await pool.query(`
         SELECT s.id, s.vacancy_id, s.evaluator, s.status, s.semaforo, s.started_at, s.entrevista_at, s.issued_at, s.transcript_at,
-               s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo, s.updated_at, s.created_at,
+               s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo, s.cliente_resultado, s.cliente_resultado_at, s.updated_at, s.created_at,
                (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
                (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple
         FROM ${T.sessions} s`);
@@ -1595,7 +1617,12 @@ ${!code ? `
     try {
       const q = req.query || {};
       const { filas, vacs } = await filasTablero();
-      res.json(indicadoresSemana(filas, vacs, { evaluador: clean(q.evaluador), fecha: clean(q.fecha) || null }));
+      const base = indicadoresSemana(filas, vacs, { evaluador: clean(q.evaluador), fecha: clean(q.fecha) || null });
+      // Headhunting y SaaS: lo de operaciones más los enviados (informes) y qué dijo el cliente.
+      await opsListo;
+      const opsInd = OPS.indicadoresOps(await ops.listar('procesos'), await ops.listar('saas'), filas,
+        { evaluador: clean(q.evaluador), fecha: clean(q.fecha) || null });
+      res.json({ ...base, ops: opsInd });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 

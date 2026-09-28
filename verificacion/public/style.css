@@ -1433,3 +1433,26 @@ button.ores.sel{border-color:var(--acc);background:var(--acc-soft)}
 #pgSelect{background:var(--bg);border:1px solid var(--line2);border-radius:7px;padding:8px 10px;font-size:14px;color:var(--ink)}
 #pgSi:disabled{opacity:.45;cursor:not-allowed}
 @media (max-width:640px){ .crow{grid-template-columns:1fr auto} .crow .descbtn{grid-column:1 / -1;justify-self:start} }
+
+/* ============ Qué dijo el cliente ============ */
+.clires{flex:none;font-size:12px;font-weight:600;border:1px solid var(--line2);border-radius:7px;padding:5px 8px;background:var(--panel);color:var(--ink2);max-width:190px;cursor:pointer}
+.clires.vacio{border-style:dashed;color:var(--ink3)}
+.clires.ok{border-color:var(--good);color:var(--good);background:var(--good-soft)}
+.clires.no{border-color:var(--crit);color:var(--crit);background:var(--crit-soft)}
+.clires.ns{color:var(--ink2);background:var(--sunk)}
+.clires:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.opsres{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+
+/* ============ Indicadores por sección ============ */
+.indsec{margin:0 0 14px}
+.ifoco .kref{font-size:11.5px;color:var(--ink3);line-height:1.4;margin-top:4px;border-top:1px dashed var(--line);padding-top:5px}
+.ifoco .ks b{color:var(--ink)}
+.isec.seis{grid-template-columns:repeat(6,minmax(0,1fr))}
+@media (max-width:1000px){ .isec.seis{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (max-width:520px){ .isec.seis{grid-template-columns:repeat(2,minmax(0,1fr))} }
+.isc .eqx{color:var(--ink3);font-weight:400}
+.p48{display:flex;flex-direction:column}
+.p48r{text-align:left}
+.p48r .tag{flex:none;min-width:74px;text-align:center}
+.itabla tr.aviso td{background:var(--warn-soft)}
+.hint.fuentes{margin:4px 2px 0;max-width:110ch}

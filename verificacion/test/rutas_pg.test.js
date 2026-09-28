@@ -29,8 +29,19 @@ const llamar = (k, params, body, query={}) => new Promise(ok => { const res = { 
   assert.strictEqual(t.body.pulso.vacantes[0].descartados, 1);
   const v = await llamar('GET /api/vacancies/:id', {id:String(c.body.id)});
   assert.strictEqual(v.status, 200); assert.strictEqual(v.body.candidatos[0].estado_tablero, 'descartado');
+  // Qué dijo el cliente: solo en un emitido (este no lo está).
+  assert.strictEqual((await llamar('POST /api/sessions/:id/cliente', {id:String(s.body.id)}, {resultado:'Lo entrevistó'})).status, 409);
+  await pool.query(`UPDATE ${process.env.VERIF_SCHEMA}.sessions SET status='issued', issued_at=NOW() WHERE id=$1`, [s.body.id]);
+  const cr = await llamar('POST /api/sessions/:id/cliente', {id:String(s.body.id)}, {resultado:'Lo entrevistó'});
+  assert.strictEqual(cr.status, 200, JSON.stringify(cr.body)); assert.strictEqual(cr.body.cliente_resultado, 'Lo entrevistó');
+  const cb = await llamar('POST /api/sessions/:id/cliente', {id:String(s.body.id)}, {resultado:''});
+  assert.strictEqual(cb.status, 200, JSON.stringify(cb.body)); assert.strictEqual(cb.body.cliente_resultado, null);
+  await llamar('POST /api/sessions/:id/cliente', {id:String(s.body.id)}, {resultado:'Lo contrató'});
   const i = await llamar('GET /api/indicadores', {}, {});
   assert.strictEqual(i.status, 200, JSON.stringify(i.body).slice(0,300));
+  assert.ok(i.body.ops && i.body.ops.headhunting && i.body.ops.saas, 'faltan los indicadores de operación');
+  assert.strictEqual(i.body.ops.saas.cliente.recurrencia.den, 51);
+  assert.strictEqual(i.body.ops.headhunting.calidad.contratados_informe, 1);
   assert.strictEqual((await llamar('POST /api/sessions/:id/recuperar', {id:String(s.body.id)}, {})).status, 200);
   const o = await llamar('GET /api/ops/:tipo', {tipo:'saas'});
   assert.strictEqual(o.status, 200); assert.strictEqual(o.body.filas.length, 212);

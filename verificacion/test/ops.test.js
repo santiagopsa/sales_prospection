@@ -87,6 +87,87 @@ const hace = dias => new Date(AH - dias * 86400000).toISOString();
     assert.ok(normalizar('saas', { cliente: 'X' }, { nuevo: true }).errores.some(e => /id vacante/.test(e)));
   });
 
+  console.log('días hábiles, primer envío, fechas');
+  await t('días hábiles: activado el viernes y enviado el martes = 2; el plazo vence el martes', () => {
+    assert.strictEqual(OPS.habilesEntre('2026-09-25', '2026-09-29'), 2);    // vie → mar
+    assert.strictEqual(OPS.habilesEntre('2026-09-25', '2026-09-28'), 1);    // vie → lun
+    assert.strictEqual(OPS.habilesEntre('2026-09-23', '2026-09-23'), 0);
+    assert.strictEqual(OPS.sumarHabiles('2026-09-25', 2), '2026-09-29');
+  });
+  await t('el primer envío se llena solo con el primer "último envío" y no se mueve después', () => {
+    const c1 = reglas('procesos', { etapa: 'Reclutamiento', activado: '2026-09-21' }, { ultimo_envio: '2026-09-22' }, { ahora: AH });
+    assert.strictEqual(c1.primer_envio, '2026-09-22');
+    const c2 = reglas('procesos', { etapa: 'Reclutamiento', primer_envio: '2026-09-22', ultimo_envio: '2026-09-22' }, { ultimo_envio: '2026-09-24' }, { ahora: AH });
+    assert.ok(!('primer_envio' in c2));
+  });
+  await t('la promesa de 48 h: cumple, vencido, en plazo y sin dato (importado)', () => {
+    const p = x => calcular('procesos', { etapa: 'Reclutamiento', ...x }, AH);
+    assert.strictEqual(p({ activado: '2026-09-18', primer_envio: '2026-09-22' }).cumple_48, true);    // vie → mar
+    assert.strictEqual(p({ activado: '2026-09-18', primer_envio: '2026-09-23' }).cumple_48, false);
+    const venc = p({ activado: '2026-09-21' });
+    assert.strictEqual(venc.vence_48, '2026-09-23'); assert.strictEqual(venc.atrasado_48, true);
+    assert.strictEqual(p({ activado: '2026-09-24' }).atrasado_48, false);                            // vence el lunes 28
+    const imp = p({ activado: '2026-09-01', ultimo_envio: '2026-09-10' });
+    assert.strictEqual(imp.cumple_48, null); assert.strictEqual(imp.vence_48, null);
+  });
+  await t('el primer destacado se pone solo al pasar de 0 a 1 o más', () => {
+    assert.strictEqual(reglas('saas', { destacados: 0, meta: 10 }, { destacados: 2 }, { ahora: AH }).primer_destacado, '2026-09-25');
+    assert.ok(!('primer_destacado' in reglas('saas', { destacados: 3, meta: 10 }, { destacados: 4 }, { ahora: AH })));
+  });
+  await t('fechas imposibles: fuera de rango, en el futuro o antes de la activación', () => {
+    assert.ok(normalizar('procesos', { ultima_terna: '2926-08-25' }).errores[0].includes('revisa el año'));
+    assert.ok(normalizar('procesos', { ultimo_envio: '0226-05-28' }).errores.length);
+    const f = calcular('procesos', { etapa: 'Reclutamiento', activado: '2027-09-23' }, AH);
+    assert.deepStrictEqual(f.fechas_mal, ['activado']); assert.strictEqual(f.vence_48, null);
+    assert.deepStrictEqual(calcular('procesos', { etapa: 'Reclutamiento', activado: '2026-09-10', ultima_terna: '2026-09-07' }, AH).fechas_mal, ['ultima_terna']);
+  });
+  await t('una fila con una fecha dañada se puede seguir editando; la fecha nueva sí se revisa', async () => {
+    const o = crearOps({ semilla: false, ahora: () => AH });
+    const x = (await o.crear('procesos', { empresa: 'X', cargo: 'Y', etapa: 'Reclutamiento', activado: '2026-09-10' })).fila;
+    assert.match((await o.actualizar('procesos', x.id, { ultima_terna: '2026-09-01' })).error, /anterior a la activación/);
+    assert.match((await o.actualizar('procesos', x.id, { primer_envio: '2026-12-01' })).error, /futuro/);
+    assert.ok((await o.actualizar('procesos', x.id, { notas: 'ok' })).fila);
+  });
+
+  console.log('indicadores de operación');
+  await t('headhunting: calidad desde los informes, efectividad, recurrencia y promesa', () => {
+    const P = [
+      { id: 1, empresa: 'A', etapa: 'Contratado', activado: '2026-08-01', fecha_cierre: '2026-08-20', tier: 'Alto' },
+      { id: 2, empresa: 'a ', etapa: 'Reclutamiento', activado: '2026-09-01', primer_envio: '2026-09-02', tier: 'Alto' },
+      { id: 3, empresa: 'B', etapa: 'Cancelado', activado: '2026-08-05', fecha_cierre: '2026-09-01', causa_cierre: 'Interna · No logramos terna adecuada', tier: 'Bajo' },
+      { id: 4, empresa: 'C', etapa: 'Reclutamiento', activado: '2026-09-21' },
+    ].map(p => calcular('procesos', { movido_at: hace(1), ...p }, AH));
+    const env = (r, d = 5) => ({ evaluator: 'W', status: 'issued', issued_at: hace(d + 2), cliente_resultado: r, cliente_resultado_at: r ? hace(d) : null, req_total: 2, req_cumple: 2 });
+    const V = [env('Lo entrevistó'), env('Lo contrató'), env('No lo entrevistó'), env(null), env('No se le envió'), env('No sabemos')];
+    const r = OPS.indicadoresOps(P, [], V, { ahora: AH });
+    const c = r.headhunting.calidad;
+    assert.strictEqual(c.enviados, 5);
+    assert.deepStrictEqual([c.tasa_entrevista.num, c.tasa_entrevista.den], [2, 3]);
+    assert.strictEqual(c.sin_respuesta, 2);
+    assert.strictEqual(c.enviados_por_contratacion, 5);
+    assert.deepStrictEqual([c.efectividad.num, c.efectividad.den], [1, 2]);
+    assert.strictEqual(c.perdidas_internas, 1);
+    assert.deepStrictEqual([r.headhunting.cliente.recurrencia.num, r.headhunting.cliente.recurrencia.den], [1, 1]);
+    assert.deepStrictEqual(r.headhunting.cliente.tier_historico.Bajo, { resueltos: 1, contratados: 0 });
+    const v = r.headhunting.velocidad.ventana;           // activados en 28 días: #2 cumple, #4 vencido
+    assert.deepStrictEqual([v.cumple, v.incumple, v.pct], [1, 1, 50]);
+    assert.deepStrictEqual(r.headhunting.pendientes_48.map(x => x.id), [4]);
+    assert.strictEqual(r.lunes, '2026-09-21');
+  });
+  await t('SaaS: meta alcanzada, meta en 2 días hábiles y clientes que vuelven', () => {
+    const S = [
+      { id: 1, cliente: 'X', estado: 'Terminada', activado: '2026-09-01', meta: 10, destacados: 12, meta_at: '2026-09-03' },
+      { id: 2, cliente: 'X', estado: 'Terminada', activado: '2026-09-07', meta: 10, destacados: 4 },
+      { id: 3, cliente: 'Y', estado: 'Activa', activado: '2026-09-23', meta: 10, destacados: 2, actualizado_at: hace(0) },
+      { id: 4, cliente: 'Z', estado: 'Activa', activado: '2026-09-01', meta: 10, destacados: 10, meta_at: '2026-09-10', actualizado_at: hace(3) },
+    ].map(x => calcular('saas', x, AH));
+    const r = OPS.indicadoresOps([], S, [], { ahora: AH }).saas;
+    assert.deepStrictEqual([r.calidad.meta.num, r.calidad.meta.den, r.calidad.en_curso], [2, 3, 1]);
+    assert.deepStrictEqual([r.velocidad.meta_48.num, r.velocidad.meta_48.den], [1, 2]);
+    assert.deepStrictEqual([r.cliente.recurrencia.num, r.cliente.recurrencia.den], [1, 3]);
+    assert.deepStrictEqual([r.al_dia.num, r.al_dia.den], [1, 2]);
+  });
+
   console.log('almacenamiento (memoria) y rutas');
   let reloj = AH;
   const ops = crearOps({ semilla: false, ahora: () => reloj });

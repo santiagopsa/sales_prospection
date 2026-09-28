@@ -8,7 +8,7 @@ const crypto = require('crypto');
 
 const PUB = path.join(__dirname, '..', 'public');
 const MOUNT = '/verificacion'; // igual que en el servidor real
-const { LVLTXT, MAX_REQ, semaforo, bloqueos, estadoIdentidad, tipoDocumento, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana, MOTIVOS_DESCARTE } = require('../rules'); // reglas reales del servidor
+const { LVLTXT, MAX_REQ, semaforo, bloqueos, estadoIdentidad, tipoDocumento, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana, MOTIVOS_DESCARTE, RESULTADOS_CLIENTE } = require('../rules'); // reglas reales del servidor
 const A = require('../archivos'); // misma decisión de "qué es este archivo" que app.js
 
 // Lo que el stub devuelve al "leer" un .docx o .pdf, ya que no tiene mammoth ni pdf-parse.
@@ -185,10 +185,24 @@ const server = http.createServer(async (req, res) => {
 
   if(p === '/api/indicadores' && m==='GET'){
     const u = new URL(req.url, 'http://x').searchParams;
-    return json(res,200, indicadoresSemana(db.sessions.map(conResultado), db.vacancies,
-      {evaluador: u.get('evaluador') || '', fecha: u.get('fecha') || null}));
+    const filasI = db.sessions.map(conResultado);
+    const base = indicadoresSemana(filasI, db.vacancies, {evaluador: u.get('evaluador') || '', fecha: u.get('fecha') || null});
+    const opsInd = OPS.indicadoresOps(await OPS_STORE.listar('procesos'), await OPS_STORE.listar('saas'), filasI,
+      {evaluador: u.get('evaluador') || '', fecha: u.get('fecha') || null});
+    return json(res,200, {...base, ops: opsInd});
   }
 
+  const mc = p.match(/^\/api\/sessions\/(\d+)\/cliente$/);
+  if(mc && m==='POST'){
+    const b = await body(req);
+    const s = db.sessions.find(x=>x.id===+mc[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    const r = clean(b.resultado) || null;
+    if(r && !RESULTADOS_CLIENTE.includes(r)) return json(res,400,{error:'Esa respuesta no es una opción.'});
+    if(s.status!=='issued') return json(res,409,{error:'Solo se anota en un informe emitido.'});
+    Object.assign(s,{cliente_resultado:r, cliente_resultado_at: r ? new Date().toISOString() : null, updated_at:new Date().toISOString()});
+    return json(res,200,{ok:true, cliente_resultado:s.cliente_resultado, cliente_resultado_at:s.cliente_resultado_at});
+  }
   // Descartar / recuperar: mismas reglas que el servidor.
   const md = p.match(/^\/api\/sessions\/(\d+)\/(descartar|recuperar)$/);
   if(md && m==='POST'){

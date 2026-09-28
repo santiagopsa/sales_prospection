@@ -156,6 +156,7 @@ python3 verificacion/test/e2e_nombre.py    # el lápiz junto al nombre, en sesi�
 python3 verificacion/test/e2e_empleo.py    # se verifica el último empleo declarado y no otro
 python3 verificacion/test/e2e_tablero.py   # el pulso, la cola, la meta, cerrar/reabrir, candidatos por vacante y el buscador
 python3 verificacion/test/e2e_indicadores.py # la barra, los focos, empresas atendidas, día por día, navegar semanas, ver como, teléfono
+python3 verificacion/test/e2e_ind_ops.py    # indicadores de Headhunting y SaaS, qué dijo el cliente, 48 h, fechas imposibles
 python3 verificacion/test/e2e_descartar.py  # descartar desde la cola, la lista, la vacante y la sesión; recuperar
 python3 verificacion/test/e2e_ops.py        # Procesos, SaaS y Evaluaciones con los datos de Airtable: editar, Enter, reglas, tier, validación, crear, borrar
 ```
@@ -504,6 +505,25 @@ La barra de arriba tiene dos secciones: **Tablero** (lo del día a día) e **Ind
 - **Últimas 8 semanas.** Informes, vacantes verificadas, empresas atendidas y % que cumple todo, en barras; un clic lleva a esa semana.
 
 Lo calcula `rules.js · indicadoresSemana` (`GET /api/indicadores?fecha=AAAA-MM-DD&evaluador=`), la misma función en el servidor, el stub y las pruebas.
+
+## Indicadores de Wei: Headhunting, SaaS y Verificación
+
+La pestaña **Indicadores** tiene tres secciones (se recuerda la última): **Headhunting**, **SaaS** y **Verificación** (esta es la de siempre). Todas usan la misma semana, de lunes a domingo en hora de Colombia, y el mismo *Ver como*. Las tasas van sobre ventanas móviles (90 días; la de 48 h, 28 días) porque una semana sola tiene muy pocos casos; lo de la semana son conteos comparados con la anterior. Lo calcula `ops.js · indicadoresOps` y viaja en `GET /api/indicadores` (campo `ops`).
+
+**Por qué estos.** Tres focos, en el orden en que pesan para que un cliente vuelva:
+1. **La calidad de los candidatos.** En el sector, la velocidad consigue la vacante y la calidad retiene la cuenta: el 92% de los clientes dice que las agencias entregan a tiempo, pero solo el 57% que la calidad es consistente (StaffingHub). El indicador adelantado de calidad más usado es enviados → entrevistados; en búsquedas contingentes pasa ~44% (Recruiterflow). Las mejores firmas envían 1–2 candidatos por contratación; lo común es 3–4 (Bullhorn).
+2. **El cliente.** En nuestros datos, de 12 empresas en las que se contrató, 7–9 abrieron otro proceso (según cómo se feche la contratación), y el tier predice el resultado: Alto terminó en contratación 16 de 22 veces; Bajo, 0 de 12.
+3. **La velocidad**: la promesa de 48 h de peaku.co, contada en **2 días hábiles** (activado el viernes, cumple si el primero sale a más tardar el martes; los festivos no se descuentan).
+
+**Headhunting.** Focos: *el cliente los entrevista* (de los enviados con respuesta, cuántos entrevistó), *procesos que terminan en contratación* (con reposiciones por garantía y pérdidas por causa interna), *primer candidato en 2 días hábiles* y *clientes que vuelven*. Apoyo: enviados, entrevistas logradas, contrataciones, procesos nuevos, enviados por contratación y satisfacción al cerrar. Debajo, la lista de procesos **sin primer candidato** (vencidos y en plazo; un clic lleva a su fila en Procesos), la tabla de **tier** con su historia y las últimas 8 semanas.
+
+**Los enviados son los informes emitidos en la consola.** En cada informe emitido se anota qué hizo el cliente: *Lo entrevistó*, *Lo contrató*, *No lo entrevistó*, *No sabemos* o *No se le envió* (este último lo saca de los enviados). Se anota con una lista en la fila (cola, lista de verificaciones, pantalla de la vacante) sin abrir el informe, y no toca el informe firmado. Un enviado hace 3+ días sin nada anotado aparece en *Para hacer ahora* como **¿Qué dijo el cliente?**; con cualquier respuesta, incluso "No sabemos", deja de pedirlo. Ruta: `POST /api/sessions/:id/cliente` (`{resultado}`).
+
+**SaaS.** Focos: *vacantes que alcanzan la meta* (de las publicadas en 90 días con resultado; 70%+ es sano en una bolsa de empleo según Cavuno), *meta en 2 días hábiles*, *clientes que vuelven a publicar* y *activas al día hoy*. Apoyo: publicadas, metas cumplidas, clientes nuevos, clientes activos y destacados por vacante.
+
+**Datos nuevos en Procesos y SaaS.** *Primer envío* (se llena solo la primera vez que se anota "Último envío") y *Satisfacción del cliente* al cerrar (vacía si no se preguntó) en Procesos; *Primer destacado* (se pone solo al pasar de 0 a 1 o más) en SaaS. *Días hábiles al primer envío* y *días hábiles hasta la meta* se calculan.
+
+**Fechas imposibles.** La consola aceptaba cualquier fecha y Airtable traía varias dañadas (años 0226, 2926 y 2027, y una terna anterior a la activación). Ahora una fecha fuera de 2015 – hoy + 1 año se rechaza; un hecho (envío, terna, cierre, meta, primer destacado) no puede estar en el futuro ni ser anterior a la activación, y la activación no puede ser futura. Las filas importadas que ya las tienen se marcan en naranja con la cifra *con fechas por revisar*, no bloquean la edición del resto, y los indicadores las ignoran hasta que se corrijan.
 
 ## Descartar candidatos
 

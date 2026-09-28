@@ -199,7 +199,13 @@ function conciliarEmpleo(ancla, r) {
 // En qué punto está una verificación, desde la pregunta "¿qué me toca hacer con esta?".
 function estadoTablero(s, ahora = Date.now()) {
   if (!s) return 'en_curso';
-  if (s.status === 'issued') return 'emitido';
+  if (s.status === 'issued') {
+    // Enviado hace 3+ días y nadie ha anotado qué dijo el cliente: toca preguntar. Con cualquier
+    // respuesta anotada (incluso "No sabemos") deja de pedirlo.
+    const t = s.issued_at ? new Date(s.issued_at).getTime() : NaN;
+    if (!s.cliente_resultado && !isNaN(t) && new Date(ahora).getTime() - t >= DIAS_SEGUIMIENTO * 86400000) return 'seguimiento';
+    return 'emitido';
+  }
   if (s.descartado_at) return 'descartado';
   const tr = estadoTranscripcion(s, ahora).estado;
   if (tr === 'procesando') return 'analizando';
@@ -270,7 +276,7 @@ function estadisticas(sesiones, { evaluador = '', ahora = Date.now(), semanas = 
     racha++; d = sumarDias(d, -1);
   }
 
-  const pendientes = { calificar: 0, fallo: 0, espera: 0, analizando: 0, en_curso: 0 };
+  const pendientes = { calificar: 0, fallo: 0, espera: 0, analizando: 0, en_curso: 0, seguimiento: 0 };
   for (const s of mias) { const e = estadoTablero(s, t); if (pendientes[e] !== undefined) pendientes[e]++; }
   const equipoSemana = todas.filter(s => s.status === 'issued' && s.issued_at && lunesDe(diaLocal(s.issued_at)) === lunes).length;
 
@@ -298,6 +304,12 @@ function estadisticas(sesiones, { evaluador = '', ahora = Date.now(), semanas = 
 // Es una regla que se explica en una línea a propósito: el reclutador tiene que poder
 // decirle al cliente por qué una vacante está "alta" sin abrir una fórmula.
 // ---------------------------------------------------------------------------------------
+// Qué pasó con el candidato después de enviarle el informe al cliente. Es lo que mide la
+// calidad del headhunting: de los enviados, cuántos quiso entrevistar el cliente y cuántos
+// contrató. Sin marcar = no sabemos. No es parte del informe firmado.
+const RESULTADOS_CLIENTE = ['Lo entrevistó', 'Lo contrató', 'No lo entrevistó', 'No sabemos', 'No se le envió'];
+const DIAS_SEGUIMIENTO = 3;
+
 // Por qué se descarta un candidato que no va a seguir en la verificación. Se descarta para que
 // no se quede en "Para hacer ahora" ni cuente como "en proceso" en el pulso de la vacante;
 // se puede recuperar. Un informe ya emitido no se descarta: ya es un resultado.
@@ -514,7 +526,7 @@ function indicadoresSemana(sesiones, vacantes, { fecha = null, evaluador = '', a
 
 module.exports = {
   estadoTablero, claveEvaluador, estadisticas, diaLocal,
-  pulsoVacante, pulsoVacantes, resultadoSesion, TERNA, DIAS_RECIENTE, indicadoresSemana, MOTIVOS_DESCARTE,
+  pulsoVacante, pulsoVacantes, resultadoSesion, TERNA, DIAS_RECIENTE, indicadoresSemana, MOTIVOS_DESCARTE, RESULTADOS_CLIENTE, DIAS_SEGUIMIENTO,
   mismaEmpresa, conciliarEmpleo, ESTADOS_EMPLEO,
   LVLTXT, MAX_REQ, ID_ITEMS, itemsDe, KINDS, esCierre, clean, estadoTranscripcion, TRANSCRIPCION_STALE_MS,
   semaforo, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode,

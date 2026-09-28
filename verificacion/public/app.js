@@ -460,6 +460,7 @@ const ESTADO_TB = {
   espera:     {tag:'a',   tx:'ESPERA TRANSCRIPCIÓN', cta:'Pegar transcripción', orden:2},
   en_curso:   {tag:'n',   tx:'EN CURSO',             cta:'Retomar',             orden:3},
   analizando: {tag:'acc', tx:'⏳ ANALIZANDO',         cta:'',                    orden:4},
+  seguimiento:{tag:'n',   tx:'¿QUÉ DIJO EL CLIENTE?', cta:'',                    orden:5},
 };
 const estadoDe = s => (s.status !== 'issued' && s.descartado_at) ? 'descartado' : (s.estado_tablero && s.estado_tablero !== 'descartado' ? s.estado_tablero : (s.status === 'issued' ? 'emitido' : 'en_curso'));
 const descartada = s => estadoDe(s) === 'descartado';
@@ -520,14 +521,14 @@ function pintarCola(){
     `<span class="tag ${ESTADO_TB[k].tag}">${cuenta[k]} · ${ESTADO_TB[k].tx.replace('⏳ ', '')}</span>`).join('');
   $('#colaList').innerHTML = mias.length ? mias.slice(0, 12).map(s => {
     const e = estadoDe(s), E = ESTADO_TB[e];
-    const ref = e === 'espera' ? (s.entrevista_at || s.started_at) : (s.updated_at || s.transcript_at || s.started_at);
+    const ref = e === 'espera' ? (s.entrevista_at || s.started_at) : e === 'seguimiento' ? s.issued_at : (s.updated_at || s.transcript_at || s.started_at);
     const viejo = e === 'espera' && ref && (Date.now() - new Date(ref).getTime()) > 86400000;
     return `<div class="crow" data-abrir="${s.id}" role="button" tabindex="0">
       <span class="tag ${E.tag}">${E.tx}</span>
       <div class="rowmain"><b>${esc(s.candidate)}</b><span>${esc(s.vacancy_title || 'sin vacante')}${s.company_name ? ' · ' + esc(s.company_name) : ''}${evalActual() ? '' : ' · ' + esc(s.evaluator || 'sin evaluador')}</span></div>
       <span class="cwhen ${viejo ? 'viejo' : ''}">${esc(haceCuanto(ref))}</span>
-      ${E.cta ? `<span class="ccta">${E.cta} →</span>` : '<span class="ccta muted">en segundos</span>'}
-      <button class="descbtn" data-descartar="${s.id}" type="button" title="No sigue en la verificación">Descartar</button>
+      ${e === 'seguimiento' ? selectCliente(s) : E.cta ? `<span class="ccta">${E.cta} →</span>` : '<span class="ccta muted">en segundos</span>'}
+      ${e === 'seguimiento' ? '<span></span>' : `<button class="descbtn" data-descartar="${s.id}" type="button" title="No sigue en la verificación">Descartar</button>`}
     </div>`;
   }).join('') + (mias.length > 12 ? `<p class="hint">Y ${mias.length - 12} más: están en la lista de verificaciones, filtro “Pendientes”.</p>` : '')
     : `<div class="empty ok">Nada pendiente. Todo lo entrevistado ya tiene su informe.</div>`;
@@ -582,7 +583,7 @@ function filaVacante(v, p, cs, clave){
   cs = cs.filter(s => !descartada(s));
   const puntos = ordenarCandidatos(cs).slice(0, 16).map(s => {
     const r = resultadoDe(s), e = estadoDe(s);
-    const cl = r || (e === 'emitido' ? 'nv' : 'proc');
+    const cl = r || (s.status === 'issued' ? 'nv' : 'proc');
     const tt = `${s.candidate} · ${r === 'ok' ? 'cumple todo' : r === 'par' ? 'cumple en parte' : r === 'no' ? 'no cumple' : (ESTADO_TB[e] ? ESTADO_TB[e].tx.replace('⏳ ', '').toLowerCase() : 'emitido')}`;
     return `<i class="pt ${cl}" title="${esc(tt)}"></i>`;
   }).join('') + (cs.length > 16 ? `<span class="ptmas">+${cs.length - 16}</span>` : '');
@@ -664,12 +665,12 @@ function pintarVacantes(){
 // Una fila de verificación. `attr` separa las filas de la lista principal (data-ses) de las
 // que se repiten dentro de una vacante (data-abrir): hacen lo mismo, pero se cuentan aparte.
 function filaSesion(s, attr = 'data-ses', enVacante = false){
-  const e = estadoDe(s), E = ESTADO_TB[e];
+  const e = estadoDe(s), E = e === 'seguimiento' ? null : ESTADO_TB[e];   // un enviado sin respuesta se ve como emitido
   const semTag = e === 'descartado' ? 'n' : E ? E.tag : (s.semaforo === 'verde' ? 'v' : (s.semaforo === 'amarillo' ? 'a' : (s.semaforo === 'rojo' ? 'r' : 'n')));
   const semTx = e === 'descartado' ? 'DESCARTADO' : E ? E.tx : (s.semaforo ? s.semaforo.toUpperCase() : 'EMITIDO');
   const r = resultadoDe(s);
   const desc = e === 'descartado';
-  const accion = s.status === 'issued' ? ''
+  const accion = s.status === 'issued' ? selectCliente(s)
     : desc ? `<button class="descbtn rec" data-recuperar="${s.id}" type="button" title="Vuelve a lo pendiente">Recuperar</button>`
     : `<button class="descbtn" data-descartar="${s.id}" type="button" title="No sigue en la verificación">Descartar</button>`;
   return `<div class="row ${desc ? 'descartada' : ''}" ${attr}="${s.id}" role="button" tabindex="0">
@@ -711,6 +712,7 @@ function enganchesTablero(){
   if(enganchesTablero.hecho) return;
   enganchesTablero.hecho = true;
   const abrir = async e => {
+    if(e.target.closest('[data-cliente]')) return;
     if(e.target.closest('#btnMasPulso')){ TB.pulsoTodas = !TB.pulsoTodas; pintarPulso(); return; }
     const ve = e.target.closest('[data-vestado]');
     if(ve){ cambiarEstadoVacante(+ve.dataset.vestado, ve.dataset.cerrar === '1'); return; }
@@ -731,6 +733,7 @@ function enganchesTablero(){
   };
   ['#pulsoList', '#colaList', '#vacList', '#sesList'].forEach(sel => {
     $(sel).addEventListener('click', abrir);
+    $(sel).addEventListener('change', e => { if(e.target.matches('[data-cliente]')) guardarResultadoCliente(e.target); });
     $(sel).addEventListener('keydown', e => { if((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-abrir],[data-ses]')){ e.preventDefault(); abrir(e); } });
   });
   $('#qVac').addEventListener('input', e => { TB.qv = e.target.value; pintarVacantes(); });
@@ -806,7 +809,7 @@ let TABLERO_TIMER = null;
    calidad, empresas atendidas, informes contra la meta), debajo lo mismo día por día, la
    cobertura por empresa, las tasas de 28 días y las últimas 8 semanas. Lo calcula el servidor
    (rules.js · indicadoresSemana); aquí solo se dibuja. */
-const IND = { fecha: null, d: null };
+const IND = { fecha: null, d: null, sec: lsGet('pkv_ind_sec', 'hh') };
 const MES_LARGO = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const DIA_CORTO = ['dom','lun','mar','mié','jue','vie','sáb'];
 const fechaDia = f => new Date(f + 'T12:00:00Z');
@@ -862,6 +865,9 @@ function pintarSemana(){
     <button class="linkbtn" data-sem="${sumaDias(d.lunes, -7)}" type="button">← Semana anterior</button>
     ${actual ? '<span class="tag acc">EN CURSO</span>' : `<button class="linkbtn" data-sem="${sumaDias(d.lunes, 7)}" type="button">Semana siguiente →</button>
     <button class="linkbtn" data-sem="" type="button">Ir a esta semana</button>`}`;
+  document.querySelectorAll('#segInd [data-sec]').forEach(b => b.classList.toggle('sel', b.dataset.sec === IND.sec));
+  if(IND.sec === 'hh' && d.ops){ $('#indCuerpo').innerHTML = cuerpoHeadhunting(d.ops, meta); return; }
+  if(IND.sec === 'saas' && d.ops){ $('#indCuerpo').innerHTML = cuerpoSaaS(d.ops); return; }
   const soloEquipo = d.filtro ? ' <span class="eq" title="Es un dato de la vacante, no de quien entrevista">del equipo</span>' : '';
 
   const focos = [
@@ -957,9 +963,130 @@ function pintarSemana(){
     </div>`;
 }
 
+/* ---------- Headhunting y SaaS ----------
+   Los tres focos que hacen volver a un cliente, en el orden en que pesan: calidad de los
+   candidatos, el cliente y la velocidad (la promesa de 48 h, en días hábiles). Las tasas van
+   sobre ventanas móviles porque una semana sola tiene muy pocos casos; lo de la semana son
+   conteos comparados con la anterior. Lo calcula el servidor (ops.js · indicadoresOps). */
+const pctTxt = t => (t && t.pct != null ? t.pct + '%' : '—');
+const deTxt = t => (t && t.den ? `${t.num} de ${t.den}` : 'sin casos todavía');
+const clsPct = (t, bueno, malo) => (!t || t.pct == null ? '' : t.pct >= bueno ? 'ok' : t.pct < malo ? 'no' : 'par');
+function focoHtml(f){
+  return `<div class="ifoco">
+    <div class="kl">${f.l}</div>
+    <div class="kv ${f.cls || ''}">${f.v}${f.de != null ? `<small> / ${f.de}</small>` : ''}</div>
+    <div class="ks">${f.sub}</div>
+    ${f.ref ? `<div class="kref">${f.ref}</div>` : ''}
+  </div>`;
+}
+function tendenciaHtml(filas, cols){
+  const max = k => Math.max(1, ...filas.map(x => x[k] || 0));
+  const barra = (v, m, cls = '') => `<span class="ibar ${cls}"><i style="width:${Math.round(100 * (v || 0) / m)}%"></i></span>`;
+  return `<div class="tabla-env"><table class="itabla tend">
+    <thead><tr><th>Semana del</th>${cols.map(c => `<th>${c.l}</th>`).join('')}</tr></thead>
+    <tbody>${filas.slice().reverse().map(x => `<tr data-sem="${x.inicio}" class="${x.inicio === IND.d.lunes ? 'hoy' : ''}" tabindex="0" role="button">
+      <td>${fechaCorta(x.inicio + 'T12:00:00')}${x.inicio === IND.d.lunes ? ' <span class="hoyt">viendo</span>' : ''}</td>
+      ${cols.map(c => `<td><span class="cob">${barra(c.pct ? x[c.k] : x[c.k], c.pct ? 100 : max(c.k), c.pct ? 'ok' : '')}<span>${x[c.k] == null ? '—' : x[c.k] + (c.pct ? '%' : '')}</span></span></td>`).join('')}
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+function cuerpoHeadhunting(o, meta){
+  const h = o.headhunting, c = h.calidad, cl = h.cliente, v = h.velocidad, w = h.semana, p = h.previa;
+  const quien = IND.d.filtro ? 'de este evaluador' : 'del equipo';
+  const focos = [
+    {l: 'Calidad · el cliente los entrevista', v: pctTxt(c.tasa_entrevista), cls: clsPct(c.tasa_entrevista, 44, 25),
+     sub: c.tasa_entrevista.den ? `${deTxt(c.tasa_entrevista)} enviados con respuesta, 90 días · <b>${c.sin_respuesta}</b> sin respuesta` : `Sin respuestas anotadas. En cada informe emitido, anota qué hizo el cliente.`,
+     ref: 'Referencia: en búsquedas contingentes ~44% de los enviados pasa a entrevista.'},
+    {l: 'Procesos que terminan en contratación', v: pctTxt(c.efectividad), cls: clsPct(c.efectividad, 50, 30),
+     sub: `${deTxt(c.efectividad)} resueltos en 90 días · ${c.garantias} reposición${c.garantias === 1 ? '' : 'es'} por garantía · ${c.perdidas_internas} perdido${c.perdidas_internas === 1 ? '' : 's'} por causa interna`},
+    {l: `Primer candidato en ${o.promesa_habiles} días hábiles`, v: pctTxt(v.ventana), cls: clsPct(v.ventana, 90, 70),
+     sub: `${deTxt(v.ventana)} procesos activados en ${v.dias_ventana} días${v.ventana.en_plazo ? ` · ${v.ventana.en_plazo} aún en plazo` : ''}${v.ventana.sin_dato ? ` · ${v.ventana.sin_dato} sin fecha de primer envío` : ''}`,
+     ref: 'La promesa de PeakU: candidatos en 48 h.'},
+    {l: 'Clientes que vuelven', v: pctTxt(cl.recurrencia), cls: clsPct(cl.recurrencia, 60, 30),
+     sub: `${deTxt(cl.recurrencia)} empresas donde contratamos abrieron otro proceso después`,
+     ref: 'La calidad trae la recurrencia: es el resultado de los otros tres.'},
+  ];
+  const sec = [
+    {l: 'Candidatos enviados', v: w.enviados, sub: contra(w.enviados, p.enviados) + ` <span class="eqx">${quien}</span>`},
+    {l: 'Entrevistas logradas', v: w.entrevistas, sub: contra(w.entrevistas, p.entrevistas)},
+    {l: 'Contrataciones', v: w.contrataciones, sub: contra(w.contrataciones, p.contrataciones)},
+    {l: 'Procesos nuevos', v: w.nuevos, sub: `${w.primeros_envios} con primer envío esta semana`},
+    {l: 'Enviados por contratación', v: c.enviados_por_contratacion ?? '—', sub: c.contratados_informe ? `90 días · lo común es 3 a 4; las mejores firmas, 1 a 2` : 'sin contrataciones anotadas en los informes'},
+    {l: 'Satisfacción al cerrar', v: c.satisfaccion.promedio != null ? c.satisfaccion.promedio + ' ★' : '—', sub: `${c.satisfaccion.n} de ${c.satisfaccion.resueltos} cerrados con respuesta del cliente`},
+  ];
+  const TIERS = ['Alto', 'Nuevo · en prueba', 'Mediano', 'Bajo', 'Sin tier'];
+  const histo = t => { const x = cl.tier_historico[t]; return x && x.resueltos ? `${x.contratados} de ${x.resueltos} contratados` : 'sin historia'; };
+  const pend = h.pendientes_48;
+  return `
+    <div class="ifocos">${focos.map(focoHtml).join('')}</div>
+    <div class="isec seis">${sec.map(x => `<div class="isc"><b>${x.v}</b><span>${x.l}</span><small>${x.sub}</small></div>`).join('')}</div>
+
+    <div class="card">
+      <div class="cardhd"><h2>Promesa de 48 h: procesos sin primer candidato</h2><span class="cs">${pend.filter(x => x.atrasado).length} vencidos · ${pend.filter(x => !x.atrasado).length} en plazo</span></div>
+      ${pend.length ? `<div class="p48">${pend.map(x => `<button class="row p48r" data-proceso="${esc(x.cargo || '')}" type="button">
+        <span class="tag ${x.atrasado ? 'r' : 'a'}">${x.atrasado ? 'VENCIDO' : 'EN PLAZO'}</span>
+        <div class="rowmain"><b>${esc(x.cargo || '')}</b><span>${esc(x.empresa || '')} · activado ${fechaCorta(x.activado + 'T12:00:00')}</span></div>
+        <span class="cwhen ${x.atrasado ? 'viejo' : ''}">${x.atrasado ? 'venció' : 'vence'} el ${fechaCorta(x.vence + 'T12:00:00')}</span>
+      </button>`).join('')}</div>` : `<div class="empty ok">Todos los procesos abiertos ya tienen su primer candidato.</div>`}
+      <p class="hint">Cuenta 2 días hábiles desde la activación (los festivos no se descuentan). Se cumple al anotar "Primer envío" (o "Último envío", que lo llena solo) en Procesos.</p>
+    </div>
+
+    <div class="card">
+      <div class="cardhd"><h2>El cliente</h2><span class="cs">${cl.procesos_abiertos} procesos abiertos en ${cl.empresas_abiertas} empresas</span></div>
+      <div class="tabla-env"><table class="itabla">
+        <thead><tr><th>Tier</th><th class="num">Procesos abiertos</th><th>Historia: terminaron en contratación</th></tr></thead>
+        <tbody>${TIERS.filter(t => cl.tier[t] || (cl.tier_historico[t] || {}).resueltos).map(t => `<tr class="${t === 'Sin tier' && cl.tier[t] ? 'aviso' : ''}">
+          <td><b>${esc(t)}</b></td><td class="num">${cl.tier[t] || 0}</td><td>${histo(t)}</td></tr>`).join('')}</tbody>
+      </table></div>
+      <p class="hint">${cl.tier['Sin tier'] ? `<b>${cl.tier['Sin tier']} procesos abiertos no tienen tier</b>: sin él no se sabe cuánto esfuerzo merecen. ` : ''}Pérdidas externas evitables en 90 días: <b>${cl.externas_evitables}</b>${cl.sin_causa ? ` · cerrados sin causa anotada: <b>${cl.sin_causa}</b>` : ''}.</p>
+    </div>
+
+    <div class="card">
+      <div class="cardhd"><h2>Últimas 8 semanas</h2><span class="cs">clic en una semana para verla</span></div>
+      ${tendenciaHtml(h.tendencia, [{k: 'enviados', l: 'Enviados'}, {k: 'entrevistas', l: 'Entrevistas'}, {k: 'contrataciones', l: 'Contrataciones'}, {k: 'nuevos', l: 'Procesos nuevos'}, {k: 'promesa', l: 'Primer candidato ≤ 2 días', pct: true}])}
+    </div>
+    <p class="hint fuentes">Cómo se mide: enviados = informes emitidos en la consola (salvo los marcados "No se le envió"); entrevista y contratación = lo que se anota en cada informe; efectividad y recurrencia = Procesos. Referencias: Bullhorn (KPIs de staffing), Recruiterflow (conversión en búsquedas contingentes), SHRM (calidad de contratación).</p>`;
+}
+function cuerpoSaaS(o){
+  const q = o.saas, c = q.calidad, cl = q.cliente, v = q.velocidad, w = q.semana, p = q.previa;
+  const focos = [
+    {l: 'Vacantes que alcanzan la meta', v: pctTxt(c.meta), cls: clsPct(c.meta, 70, 50),
+     sub: `${deTxt(c.meta)} publicadas en 90 días con resultado${c.en_curso ? ` · ${c.en_curso} aún en curso` : ''}`, ref: 'Referencia: 70% o más es sano en una bolsa de empleo.'},
+    {l: `Meta en ${o.promesa_habiles} días hábiles`, v: pctTxt(v.meta_48), cls: clsPct(v.meta_48, 60, 30),
+     sub: `${deTxt(v.meta_48)} que la alcanzaron · mediana ${v.mediana_meta ?? '—'} días hábiles${v.primer_48.den ? ` · primer destacado a tiempo: ${pctTxt(v.primer_48)}` : ''}`, ref: 'La promesa de PeakU: candidatos calificados en 48 h.'},
+    {l: 'Clientes que vuelven a publicar', v: pctTxt(cl.recurrencia), cls: clsPct(cl.recurrencia, 50, 25),
+     sub: `${deTxt(cl.recurrencia)} clientes con 2 o más vacantes`},
+    {l: 'Activas al día hoy', v: q.al_dia ? pctTxt(q.al_dia) : '—', cls: q.al_dia ? clsPct(q.al_dia, 90, 60) : '',
+     sub: q.al_dia ? `${deTxt(q.al_dia)} vacantes activas actualizadas hoy` : 'solo aplica a la semana en curso'},
+  ];
+  const sec = [
+    {l: 'Vacantes publicadas', v: w.publicadas, sub: contra(w.publicadas, p.publicadas)},
+    {l: 'Metas cumplidas', v: w.metas, sub: contra(w.metas, p.metas)},
+    {l: 'Clientes nuevos', v: w.clientes_nuevos, sub: contra(w.clientes_nuevos, p.clientes_nuevos)},
+    {l: 'Clientes activos', v: cl.clientes_activos, sub: `${cl.vacantes_activas} vacantes activas`},
+    {l: 'Destacados por vacante activa', v: c.destacados_por_vacante ?? '—', sub: 'promedio de hoy'},
+  ];
+  return `
+    <div class="ifocos">${focos.map(focoHtml).join('')}</div>
+    <div class="isec">${sec.map(x => `<div class="isc"><b>${x.v}</b><span>${x.l}</span><small>${x.sub}</small></div>`).join('')}</div>
+    <div class="card">
+      <div class="cardhd"><h2>Últimas 8 semanas</h2><span class="cs">clic en una semana para verla</span></div>
+      ${tendenciaHtml(q.tendencia, [{k: 'publicadas', l: 'Publicadas'}, {k: 'metas', l: 'Metas cumplidas'}, {k: 'meta_48', l: 'Meta en ≤ 2 días hábiles', pct: true}])}
+    </div>
+    <p class="hint fuentes">Cómo se mide: "alcanza la meta" cuenta las vacantes con fecha de meta; no la alcanzó si terminó sin ella o lleva más de 10 días publicada. Los días hábiles no cuentan sábados ni domingos. Referencias: Cavuno (KPIs de bolsas de empleo: fill rate 70%+, primer candidato en 24–48 h, repetición de publicaciones).</p>`;
+}
+
 function enganchesIndicadores(){
   if(enganchesIndicadores.hecho) return;
   enganchesIndicadores.hecho = true;
+  document.querySelectorAll('#segInd [data-sec]').forEach(b => b.addEventListener('click', () => {
+    IND.sec = b.dataset.sec; lsSet('pkv_ind_sec', IND.sec); if(IND.d) pintarSemana();
+  }));
+  $('#indCuerpo').addEventListener('click', e => {
+    const b = e.target.closest('[data-proceso]'); if(!b) return;
+    const q = b.dataset.proceso;
+    loadOps('procesos').then(() => { OPSV.q = q; OPSV.filtro = 'todos'; $('#qOps').value = q; pintarOps(); });
+  });
   const ir = e => { const x = e.target.closest('[data-sem]'); if(x) loadIndicadores(x.dataset.sem || null); };
   $('#vIndicadores').addEventListener('click', ir);
   $('#vIndicadores').addEventListener('keydown', e => { if((e.key === 'Enter' || e.key === ' ') && e.target.matches('tr[data-sem]')){ e.preventDefault(); ir(e); } });
@@ -1044,7 +1171,9 @@ function opsResumen(){
     {id: 'roja', n: cuenta(f => f.salud === 'roja'), l: 'en riesgo (más de 5 días quietos)', cls: 'r', fn: f => f.salud === 'roja'},
     {id: 'amar', n: cuenta(f => f.salud === 'amarilla'), l: 'para revisar (3 a 5 días)', cls: 'a', fn: f => f.salud === 'amarilla'},
     {id: 'falt', n: suma(ab, 'faltan_terna'), l: `candidatos por enviar en ${cuenta(f => f.faltan_terna > 0)} procesos`, fn: f => f.faltan_terna > 0},
+    {id: 'p48', n: cuenta(f => f.atrasado_48), l: 'sin primer candidato después de 2 días hábiles', cls: cuenta(f => f.atrasado_48) ? 'r' : '', fn: f => f.atrasado_48},
     {id: 'causa', n: F.filter(f => f.falta_causa).length, l: 'cancelados o pausados sin causa', cls: F.some(f => f.falta_causa) ? 'a' : '', fn: f => f.falta_causa, todos: true},
+    ...(F.some(f => (f.fechas_mal || []).length) ? [{id: 'fechas', n: F.filter(f => (f.fechas_mal || []).length).length, l: 'con fechas por revisar', cls: 'a', fn: f => (f.fechas_mal || []).length > 0, todos: true}] : []),
   ];
   if(t === 'saas') return [
     {id: 'ab', n: ab.length, l: 'vacantes activas'},
@@ -1052,6 +1181,7 @@ function opsResumen(){
     {id: 'roja', n: cuenta(f => f.salud === 'roja'), l: 'en riesgo alto', cls: 'r', fn: f => f.salud === 'roja'},
     {id: 'meta', n: cuenta(f => f.meta_cumplida), l: 'con la meta cumplida', cls: 'v', fn: f => f.meta_cumplida},
     {id: 'falt', n: suma(ab, 'faltan'), l: 'destacados por conseguir', fn: f => f.faltan > 0},
+    ...(F.some(f => (f.fechas_mal || []).length) ? [{id: 'fechas', n: F.filter(f => (f.fechas_mal || []).length).length, l: 'con fechas por revisar', cls: 'a', fn: f => (f.fechas_mal || []).length > 0, todos: true}] : []),
   ];
   const conAp = ab.filter(f => f.pct_aprobacion != null);
   const sat = F.filter(f => f.satisfaccion);
@@ -1096,7 +1226,8 @@ const opsAncho = c => c.ancho ? 'w-' + c.ancho : (c.t === 'fecha' ? 'w-f' : c.t 
 function filaOps(f){
   const E = OPSV.esp, fijo = E.campos.find(c => c.fijo), resto = E.campos.filter(c => !c.fijo);
   const salud = E.calc.find(c => c.t === 'salud'), otros = E.calc.filter(c => c.t !== 'salud');   // Evaluaciones no tiene salud
-  const td = c => `<td class="${opsAncho(c)} ${c.k === 'causa_cierre' && f.falta_causa ? 'falta' : ''}" data-k="${c.k}">${celdaOps(f, c)}</td>`;
+  const mal = k => (f.fechas_mal || []).includes(k);
+  const td = c => `<td class="${opsAncho(c)} ${(c.k === 'causa_cierre' && f.falta_causa) || mal(c.k) ? 'falta' : ''}" data-k="${c.k}"${mal(c.k) ? ' title="Revisa esta fecha: está fuera de rango, en el futuro o antes de la activación."' : ''}>${celdaOps(f, c)}</td>`;
   return `<tr data-id="${f.id}" class="${f.abierto ? '' : 'cerrada'}">
     <th scope="row" class="fijo ${opsAncho(fijo)}" data-k="${fijo.k}">${celdaOps(f, fijo)}</th>
     ${salud ? `<td class="calc" data-calc="${salud.k}">${calcOps(f, salud)}</td>` : ''}
@@ -1152,7 +1283,11 @@ function refrescarFilaOps(f){
     if(el.type === 'checkbox') el.checked = !!v;
     else if(el.value !== String(v ?? '')) el.value = v ?? '';
   });
-  const causa = tr.querySelector('[data-k="causa_cierre"]'); if(causa) causa.classList.toggle('falta', !!f.falta_causa);
+  tr.querySelectorAll('td[data-k]').forEach(td => {
+    const k = td.dataset.k, mal = (f.fechas_mal || []).includes(k);
+    td.classList.toggle('falta', (k === 'causa_cierre' && !!f.falta_causa) || mal);
+    if(mal) td.title = 'Revisa esta fecha: está fuera de rango, en el futuro o antes de la activación.'; else td.removeAttribute('title');
+  });
   const acc = tr.querySelector('.acc');
   if(acc && OPSV.tipo === 'saas'){
     const b = acc.querySelector('[data-accion="revisado"]');
@@ -1871,9 +2006,11 @@ async function verVacante(id){
         if(hecho) verVacante(v.id);
         return;
       }
+      if(e.target.closest('[data-cliente]')) return;
       const row = e.target.closest('[data-abrir]');
       if(row) verSesion(+row.dataset.abrir);
     });
+    $('#vacStage').querySelector('#vacCands').addEventListener('change', e => { if(e.target.matches('[data-cliente]')) guardarResultadoCliente(e.target); });
     $('#vacStage').querySelector('#vacCands').addEventListener('keydown', e => {
       if((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-abrir]')){ e.preventDefault(); verSesion(+e.target.dataset.abrir); }
     });
@@ -2484,6 +2621,31 @@ function preguntar(titulo, texto, si = 'Guardar y salir', no = 'Seguir aquí', c
     (conOpc ? sel : conCampo ? inp : $('#pgSi')).focus();
     if(conCampo && !conOpc) inp.select();
   });
+}
+
+/* Qué pasó con el candidato en el cliente, después de enviarle el informe. Es lo que mide la
+   calidad del headhunting (de los enviados, cuántos entrevistó y cuántos contrató). Se anota
+   con una lista en la fila; sin marcar = no sabemos. No toca el informe firmado. */
+const RESULTADOS_CLIENTE = ['Lo entrevistó', 'Lo contrató', 'No lo entrevistó', 'No sabemos', 'No se le envió'];
+const CLASE_RESULTADO = {'Lo entrevistó': 'ok', 'Lo contrató': 'ok', 'No lo entrevistó': 'no', 'No sabemos': 'ns', 'No se le envió': 'ns'};
+function selectCliente(s){
+  const v = s.cliente_resultado || '';
+  return `<select class="clires ${CLASE_RESULTADO[v] || 'vacio'}" data-cliente="${s.id}" title="Qué pasó con este candidato en el cliente" aria-label="Qué pasó con ${esc(s.candidate)} en el cliente">
+    <option value="">Cliente: sin marcar</option>${RESULTADOS_CLIENTE.map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}
+  </select>`;
+}
+async function guardarResultadoCliente(el){
+  const id = +el.dataset.cliente, v = el.value;
+  try{
+    const out = await api(`/api/sessions/${id}/cliente`, {method: 'POST', body: {resultado: v}});
+    [TB.ss, (VAC && VAC.candidatos) || []].forEach(lista => {
+      const s = lista.find(x => x.id === id);
+      if(s){ s.cliente_resultado = out.cliente_resultado; s.cliente_resultado_at = out.cliente_resultado_at; if(out.cliente_resultado) s.estado_tablero = 'emitido'; }
+    });
+    el.className = `clires ${CLASE_RESULTADO[v] || 'vacio'}`;
+    toast(v ? `Anotado: ${v}.` : 'Quedó sin marcar.');
+    if($('#vTablero').classList.contains('on')) pintarCola();
+  }catch(e){ toast('No se guardó: ' + e.message); }
 }
 
 /* Descartar a un candidato que no va a seguir en la verificación (no se presentó, no cumple

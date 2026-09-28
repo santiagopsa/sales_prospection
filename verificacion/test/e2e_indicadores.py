@@ -71,6 +71,7 @@ with sync_playwright() as pw:
     if not pg.is_visible("#topNav") or not pg.query_selector('#topNav [data-nav="tablero"].on'):
         errs.append("la barra de arriba no está o no marca el tablero")
     pg.click('#topNav [data-nav="indicadores"]'); pg.wait_for_selector("#vIndicadores.on", timeout=9000); pg.wait_for_timeout(500)
+    pg.click('#segInd [data-sec="ver"]'); pg.wait_for_timeout(300)
     if not pg.query_selector('#topNav [data-nav="indicadores"].on'):
         errs.append("la barra no marca 'Indicadores'")
     d = get("api/indicadores")
@@ -141,6 +142,7 @@ with sync_playwright() as pw:
     m = br.new_page(viewport={"width": 390, "height": 900})
     m.goto(B); m.wait_for_timeout(600)
     m.click('#topNav [data-nav="indicadores"]'); m.wait_for_selector("#vIndicadores.on"); m.wait_for_timeout(600)
+    m.click('#segInd [data-sec="ver"]'); m.wait_for_timeout(300)
     sw = m.evaluate("document.documentElement.scrollWidth")
     if sw > 390:
         errs.append(f"en el teléfono hay scroll horizontal: {sw}px")
