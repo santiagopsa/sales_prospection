@@ -140,8 +140,10 @@ test('compromisos contra la base', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }
     assert.match((await C.leer(db, b.id)).gcal_error, /boom/);
   });
 
+  // Con REUNION_CREA_COMPROMISO en true (hoy está en false: la reunión vive en Calendly).
+  const conReunion = { ...base, REUNION_CREA_COMPROMISO: true };
   await t.test('reunión agendada crea el compromiso de la ejecutiva con Angie invitada; realizada lo cierra', async () => {
-    const r = await registrarToque(db, base, { leadId: await id('Beta'), canal: 'llamada', resultado: 'reunion_agendada', usuario: 'Angie', ahora: lunes, env: ENV,
+    const r = await registrarToque(db, conReunion, { leadId: await id('Beta'), canal: 'llamada', resultado: 'reunion_agendada', usuario: 'Angie', ahora: lunes, env: ENV,
       detalle: { reunion_at: '2026-09-25T15:00:00.000Z', ejecutiva: 'Luisa', ficha_cargos: '2 devs' } });
     assert.ok(r.compromiso_id);
     assert.match(r.avisos.join(' '), /compromiso de Luisa/);
@@ -160,7 +162,7 @@ test('compromisos contra la base', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }
   });
 
   await t.test('sin Calendly la reunión sí va a Google; quitarDelCalendario borra el evento y lo marca', async () => {
-    const sinCal = { ...base, CALENDLY: null };
+    const sinCal = { ...base, CALENDLY: null, REUNION_CREA_COMPROMISO: true };
     await db.query(`INSERT INTO sdr.leads (empresa, contacto, telefono) VALUES ('Epsilon', 'Eva', '+573004444444')`);
     const r = await registrarToque(db, sinCal, { leadId: await id('Epsilon'), canal: 'llamada', resultado: 'reunion_agendada', usuario: 'Angie', ahora: lunes, env: {},
       detalle: { reunion_at: '2026-09-26T15:00:00.000Z', ejecutiva: 'Luisa' } });

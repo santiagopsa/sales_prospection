@@ -195,8 +195,10 @@ hora con el prospecto en la línea. Al colgar, el resultado ya viene en *Reunió
 (no se vuelve a abrir Calendly); solo falta la ficha. Si cuelga antes de que Calendly confirme, el diálogo se
 marca solo cuando llega la confirmación.
 
-Calendly ya pone la reunión en el calendario de Luisa y le manda la invitación al prospecto, así que con
-Calendly activo **ningún** compromiso de reunión crea evento en Google, ni los que vienen de Calendly ni los
+Calendly ya pone la reunión en el calendario de Luisa y le manda la invitación al prospecto, así que la app
+**no crea compromiso de reunión** (`REUNION_CREA_COMPROMISO: false`): la reunión vive en Calendly y en el lead
+(fecha, deal, etapa, comisión). Si se vuelve a encender, con Calendly activo **ningún** compromiso de reunión
+crea evento en Google, ni los que vienen de Calendly ni los
 registrados a mano (`CALENDLY.duplicar_en_google`). Antes, una reunión registrada a mano con la fecha por
 defecto creaba un evento de más a una hora equivocada. Las fechas ya no traen valor por defecto: hay que
 escribir la hora real. Si una reunión quedó a otra hora en la app, **📅 Calendly → corregir sin volver a

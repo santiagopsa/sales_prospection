@@ -316,9 +316,10 @@ module.exports = {
     reunion:     { label: 'Reunión',          canal: 'llamada',  descripcion: 'La reunión agendada (la atiende la ejecutiva)' },
     otro:        { label: 'Otra tarea',       canal: 'correo',   descripcion: 'Cualquier otro pendiente' },
   },
-  // Qué mueve: al agendar una reunión con fecha, se crea un compromiso "reunión" para la ejecutiva
-  // (la del diálogo, o la primera con rol ejecutiva) y Angie queda invitada. null = no crear.
-  REUNION_CREA_COMPROMISO: true,
+  // Qué mueve: true = al agendar una reunión con fecha se crea un compromiso "reunión" para la
+  // ejecutiva en la app. false (hoy): no se crea; la reunión ya vive en Calendly (evento e invitación)
+  // y en el lead (fecha, deal, etapa, comisión). Con Calendly apagado conviene volver a true.
+  REUNION_CREA_COMPROMISO: false,
 
   // ---------------------------------------------------------------------------
   // Calendly de la ejecutiva: la SDR agenda desde la app

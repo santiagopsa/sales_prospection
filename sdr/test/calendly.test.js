@@ -78,7 +78,8 @@ test('calendly contra la base: reservas desde el link, sin lead, reagendadas y c
   k.agregar('C', { inicio: '2026-10-01T16:00:00.000Z', email: 'nadie@x.co', name: 'Nadie' });            // ningún lead
   const log = { log() {}, error() {} };
 
-  const r1 = await CAL.sincronizar(db, base, ENV, { ahora, fetchFn: k.fetchFn, log });
+  // Sin compromiso de reunión por defecto (REUNION_CREA_COMPROMISO false); aquí se prueba con él.
+  const r1 = await CAL.sincronizar(db, { ...base, REUNION_CREA_COMPROMISO: true }, ENV, { ahora, fetchFn: k.fetchFn, log });
   assert.deepStrictEqual({ ...r1, errores: r1.errores.length }, { nuevas: 2, sin_lead: 1, movidas: 0, canceladas: 0, errores: 0 });
   const toque = async id => (await db.query(`SELECT canal, resultado, usuario, detalle FROM sdr.touches WHERE lead_id = $1 ORDER BY id DESC LIMIT 1`, [id])).rows[0];
   const ta = await toque(a);

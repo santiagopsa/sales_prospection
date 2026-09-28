@@ -88,8 +88,10 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
     });
     assert.strictEqual(r.etapa, 'reunion_agendada');
     assert.ok(r.deal_id);
-    assert.deepStrictEqual(r.avisos, ['Reunión anotada como compromiso de Luisa; el evento lo maneja Calendly.']);
-    assert.ok(r.compromiso_id);
+    // REUNION_CREA_COMPROMISO en false: la reunión vive en Calendly y en el lead, sin compromiso aparte.
+    assert.deepStrictEqual(r.avisos, []);
+    assert.strictEqual(r.compromiso_id, null);
+    assert.strictEqual((await db.query(`SELECT COUNT(*)::int AS n FROM sdr.tasks WHERE lead_id=$1 AND tipo='reunion'`, [await id('ACME')])).rows[0].n, 0);
     const deal = (await db.query('SELECT * FROM public.deals WHERE id=$1', [r.deal_id])).rows[0];
     assert.strictEqual(deal.company, 'ACME');
     assert.strictEqual(deal.canal_adquisicion, 'sdr_interno');
