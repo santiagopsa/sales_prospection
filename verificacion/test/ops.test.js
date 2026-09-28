@@ -139,7 +139,7 @@ const hace = dias => new Date(AH - dias * 86400000).toISOString();
     ].map(p => calcular('procesos', { movido_at: hace(1), ...p }, AH));
     const env = (r, d = 5) => ({ evaluator: 'W', status: 'issued', issued_at: hace(d + 2), cliente_resultado: r, cliente_resultado_at: r ? hace(d) : null, req_total: 2, req_cumple: 2 });
     const V = [env('Lo entrevistó'), env('Lo contrató'), env('No lo entrevistó'), env(null), env('No se le envió'), env('No sabemos')];
-    const r = OPS.indicadoresOps(P, [], V, { ahora: AH });
+    const r = OPS.indicadoresOps(P, [], V, { ahora: AH, desde: '2026-01-01' });
     const c = r.headhunting.calidad;
     assert.strictEqual(c.enviados, 5);
     assert.deepStrictEqual([c.tasa_entrevista.num, c.tasa_entrevista.den], [2, 3]);
@@ -161,11 +161,33 @@ const hace = dias => new Date(AH - dias * 86400000).toISOString();
       { id: 3, cliente: 'Y', estado: 'Activa', activado: '2026-09-23', meta: 10, destacados: 2, actualizado_at: hace(0) },
       { id: 4, cliente: 'Z', estado: 'Activa', activado: '2026-09-01', meta: 10, destacados: 10, meta_at: '2026-09-10', actualizado_at: hace(3) },
     ].map(x => calcular('saas', x, AH));
-    const r = OPS.indicadoresOps([], S, [], { ahora: AH }).saas;
+    const r = OPS.indicadoresOps([], S, [], { ahora: AH, desde: '2026-01-01' }).saas;
     assert.deepStrictEqual([r.calidad.meta.num, r.calidad.meta.den, r.calidad.en_curso], [2, 3, 1]);
     assert.deepStrictEqual([r.velocidad.meta_48.num, r.velocidad.meta_48.den], [1, 2]);
     assert.deepStrictEqual([r.cliente.recurrencia.num, r.cliente.recurrencia.den], [1, 3]);
     assert.deepStrictEqual([r.al_dia.num, r.al_dia.den], [1, 2]);
+  });
+
+  await t('lo que antes no se anotaba solo se mide desde el inicio de la medición', () => {
+    const AH2 = Date.parse('2026-10-07T15:00:00Z');                 // miércoles 7 de octubre
+    const h = (d) => new Date(AH2 - d * 86400000).toISOString();
+    const P = [
+      { id: 1, empresa: 'A', etapa: 'Reclutamiento', activado: '2026-09-22' },   // antes del inicio: no cuenta para 48 h
+      { id: 2, empresa: 'B', etapa: 'Reclutamiento', activado: '2026-09-29' },   // después: vencido
+      { id: 3, empresa: 'C', etapa: 'Contratado', activado: '2026-08-01', fecha_cierre: '2026-09-10' },
+    ].map(p => calcular('procesos', { movido_at: h(1), ...p }, AH2));
+    const V = [
+      { evaluator: 'W', status: 'issued', issued_at: '2026-09-20T15:00:00Z', cliente_resultado: 'Lo entrevistó', cliente_resultado_at: '2026-09-21T15:00:00Z' },
+      { evaluator: 'W', status: 'issued', issued_at: '2026-10-01T15:00:00Z', cliente_resultado: 'No lo entrevistó', cliente_resultado_at: '2026-10-02T15:00:00Z' },
+    ];
+    const r = OPS.indicadoresOps(P, [], V, { ahora: AH2, desde: '2026-09-28' }).headhunting;
+    assert.strictEqual(r.calidad.enviados, 1); assert.deepStrictEqual([r.calidad.tasa_entrevista.num, r.calidad.tasa_entrevista.den], [0, 1]);
+    assert.deepStrictEqual(r.pendientes_48.map(x => x.id), [2]);
+    assert.deepStrictEqual([r.velocidad.ventana.incumple, r.velocidad.desde], [1, '2026-09-28']);
+    assert.deepStrictEqual([r.calidad.efectividad.num, r.calidad.efectividad.den], [1, 1]);   // lo de Airtable conserva su historia
+    const antes = OPS.indicadoresOps(P, [], V, { ahora: AH2, desde: '2026-09-28', fecha: '2026-09-21' }).headhunting;
+    assert.strictEqual(antes.semana.enviados, null); assert.strictEqual(antes.semana.medido, false);
+    assert.strictEqual(r.tendencia.find(x => x.inicio === '2026-09-21').enviados, null);
   });
 
   console.log('almacenamiento (memoria) y rutas');

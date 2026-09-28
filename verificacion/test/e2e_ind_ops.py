@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone, date
 AQUI = os.path.dirname(os.path.abspath(__file__))
 PORT = random.choice([p for p in range(3200, 3900) if p not in (3659,)])
 B = f"http://127.0.0.1:{PORT}/verificacion/"
-STUB = subprocess.Popen(["node", os.path.join(AQUI, "stub.js")], env={**os.environ, "PORT": str(PORT)},
+STUB = subprocess.Popen(["node", os.path.join(AQUI, "stub.js")], env={**os.environ, "PORT": str(PORT), "OPS_MEDICION_DESDE": "2026-01-01"},
                         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 for _ in range(60):
     if STUB.poll() is not None: print("el stub murió al arrancar"); sys.exit(1)

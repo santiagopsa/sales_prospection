@@ -1456,3 +1456,5 @@ button.ores.sel{border-color:var(--acc);background:var(--acc-soft)}
 .p48r .tag{flex:none;min-width:74px;text-align:center}
 .itabla tr.aviso td{background:var(--warn-soft)}
 .hint.fuentes{margin:4px 2px 0;max-width:110ch}
+.medaviso{font-size:13px;color:var(--ink2);background:var(--acc-soft);border-radius:10px;padding:10px 14px;margin:0 0 12px;line-height:1.5;max-width:none}
+.medaviso b{color:var(--acc-ink)}

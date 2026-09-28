@@ -524,19 +524,27 @@ function crearOps({ pool = null, schema = 'verificacion', semilla = true, ahora 
 // muy pocos casos; lo de la semana son conteos, comparados con la anterior.
 // ---------------------------------------------------------------------------------------
 const R = require('./rules');
+// Desde cuándo se mide lo que depende de datos que antes no se anotaban (los enviados y qué dijo
+// el cliente, el primer envío, el primer destacado, la satisfacción al cerrar). Antes de esta
+// fecha esa información no existía o está incompleta, y medirla daría números falsos. Lo que sí
+// se llevaba en Airtable (procesos, cierres, tier, metas de SaaS) conserva su historia.
+const MEDICION_DESDE = process.env.OPS_MEDICION_DESDE || '2026-09-28';
 const ENTREVISTADO = ['Lo entrevistó', 'Lo contrató'];
 const CON_RESPUESTA = ['Lo entrevistó', 'Lo contrató', 'No lo entrevistó'];
 const lunesDeF = f => masDias(f, -((diaSemana(f) + 6) % 7));
 const medianaN = xs => { if (!xs.length) return null; const a = xs.slice().sort((x, y) => x - y), m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
 const tasaN = (num, den) => ({ num, den, pct: den ? Math.round(100 * num / den) : null });
 
-function indicadoresOps(procesos, saas, sesiones, { fecha = null, ahora = Date.now(), evaluador = '' } = {}) {
+function indicadoresOps(procesos, saas, sesiones, { fecha = null, ahora = Date.now(), evaluador = '', desde = MEDICION_DESDE } = {}) {
   const hoy = hoyCo(ahora);
   const lunes = lunesDeF(fechaValida(String(fecha || '')) && fecha <= hoy ? fecha : hoy);
   const domingo = masDias(lunes, 6);
   const corte = domingo < hoy ? domingo : hoy;
   const en = (d, a, b) => !!d && d >= a && d <= b;
   const ult = n => [masDias(corte, -(n - 1)), corte];
+  // Ventana recortada al inicio de la medición (para lo que antes no se anotaba).
+  const med = ([a, b]) => [a < desde ? desde : a, b];
+  const medido = (a, b) => b >= desde;          // ¿la semana [a, b] ya se mide?
   const P = Array.isArray(procesos) ? procesos : [], S = Array.isArray(saas) ? saas : [];
   const filtro = R.claveEvaluador(evaluador);
   const V = (Array.isArray(sesiones) ? sesiones : []).filter(s => !filtro || R.claveEvaluador(s.evaluator) === filtro);
@@ -557,13 +565,15 @@ function indicadoresOps(procesos, saas, sesiones, { fecha = null, ahora = Date.n
   const respEn = (a, b) => V.filter(s => enviado(s) && s.cliente_resultado && en(dia(s.cliente_resultado_at), a, b));
 
   function semanaHH(a, b) {
-    const env = enviadosEn(a, b), resp = respEn(a, b);
+    const m = medido(a, b), [ma, mb] = med([a, b]);
+    const env = enviadosEn(ma, mb), resp = respEn(ma, mb);
     return {
-      enviados: env.length,
-      entrevistas: resp.filter(s => ENTREVISTADO.includes(s.cliente_resultado)).length,
-      contratados_informe: resp.filter(s => s.cliente_resultado === 'Lo contrató').length,
+      medido: m,
+      enviados: m ? env.length : null,
+      entrevistas: m ? resp.filter(s => ENTREVISTADO.includes(s.cliente_resultado)).length : null,
+      contratados_informe: m ? resp.filter(s => s.cliente_resultado === 'Lo contrató').length : null,
       nuevos: P.filter(p => en(ok(p, 'activado'), a, b)).length,
-      primeros_envios: P.filter(p => en(ok(p, 'primer_envio'), a, b)).length,
+      primeros_envios: m ? P.filter(p => en(ok(p, 'primer_envio'), ma, mb)).length : null,
       ternas: P.filter(p => en(ok(p, 'ultima_terna'), a, b)).length,
       contrataciones: P.filter(p => contratado(p) && en(resol(p), a, b)).length,
       perdidos: P.filter(p => perdido(p) && en(resol(p), a, b)).length,
@@ -571,8 +581,9 @@ function indicadoresOps(procesos, saas, sesiones, { fecha = null, ahora = Date.n
   }
   // La promesa de 48 h sobre los procesos activados en [a, b]: cumple, no cumple (incluye los
   // que siguen sin envío pasado el plazo), aún en plazo, y sin dato (importados sin primer envío).
-  function promesa(a, b) {
-    const ps = P.filter(p => en(ok(p, 'activado'), a, b));
+  function promesa(a0, b0) {
+    const [a, b] = med([a0, b0]);
+    const ps = b >= a ? P.filter(p => en(ok(p, 'activado'), a, b)) : [];
     const cumple = ps.filter(p => p.cumple_48 === true).length;
     const incumple = ps.filter(p => p.cumple_48 === false || p.atrasado_48).length;
     return { ...tasaN(cumple, cumple + incumple), cumple, incumple,
@@ -581,13 +592,15 @@ function indicadoresOps(procesos, saas, sesiones, { fecha = null, ahora = Date.n
              mediana_habiles: medianaN(ps.map(p => p.primer_envio_habiles).filter(x => x != null)) };
   }
   const [a90, b90] = ult(90), [a28, b28] = ult(28);
-  const env90 = enviadosEn(a90, b90);
+  const [m90a, m90b] = med([a90, b90]);
+  const env90 = m90b >= m90a ? enviadosEn(m90a, m90b) : [];
   const conResp90 = env90.filter(s => CON_RESPUESTA.includes(s.cliente_resultado));
   const entrev90 = env90.filter(s => ENTREVISTADO.includes(s.cliente_resultado));
   const contr90 = env90.filter(s => s.cliente_resultado === 'Lo contrató');
   const conReq90 = env90.filter(s => Number(s.req_total) > 0);
   const res90 = P.filter(p => en(resol(p), a90, b90));
-  const sat90 = res90.map(p => Number(p.satisfaccion)).filter(x => x >= 1 && x <= 5);
+  const resMed = res90.filter(p => resol(p) >= desde);
+  const sat90 = resMed.map(p => Number(p.satisfaccion)).filter(x => x >= 1 && x <= 5);
   // Recurrencia: empresas con al menos una contratación que abrieron otro proceso después.
   const porEmp = {};
   P.forEach(p => { const k = empresa(p); if (k) (porEmp[k] = porEmp[k] || []).push(p); });
@@ -621,7 +634,8 @@ function indicadoresOps(procesos, saas, sesiones, { fecha = null, ahora = Date.n
       efectividad: tasaN(res90.filter(contratado).length, res90.length),
       perdidas_internas: res90.filter(p => clean(p.causa_cierre).startsWith('Interna')).length,
       garantias: P.filter(p => p.garantia && en(ok(p, 'activado'), a90, b90)).length,
-      satisfaccion: { promedio: sat90.length ? Math.round(10 * sat90.reduce((x, y) => x + y, 0) / sat90.length) / 10 : null, n: sat90.length, resueltos: res90.length },
+      ventana_medida: { desde: m90a, hasta: m90b },
+      satisfaccion: { promedio: sat90.length ? Math.round(10 * sat90.reduce((x, y) => x + y, 0) / sat90.length) / 10 : null, n: sat90.length, resueltos: resMed.length },
     },
     cliente: {
       recurrencia: tasaN(volvieron, conContr),
@@ -631,8 +645,8 @@ function indicadoresOps(procesos, saas, sesiones, { fecha = null, ahora = Date.n
       externas_evitables: res90.filter(p => clean(p.causa_cierre).startsWith('Externa evitable')).length,
       sin_causa: P.filter(p => p.falta_causa).length,
     },
-    velocidad: { semana: promesa(lunes, domingo), ventana: promesa(a28, b28), dias_ventana: 28 },
-    pendientes_48: abiertos.filter(p => p.vence_48).map(p => ({ id: p.id, empresa: p.empresa, cargo: p.cargo, activado: p.activado, vence: p.vence_48, atrasado: p.atrasado_48 }))
+    velocidad: { semana: promesa(lunes, domingo), ventana: promesa(a28, b28), dias_ventana: 28, desde: med([a28, b28])[0] },
+    pendientes_48: abiertos.filter(p => p.vence_48 && p.activado >= desde).map(p => ({ id: p.id, empresa: p.empresa, cargo: p.cargo, activado: p.activado, vence: p.vence_48, atrasado: p.atrasado_48 }))
       .sort((x, y) => (y.atrasado - x.atrasado) || x.vence.localeCompare(y.vence)),
     tendencia: [],
   };
@@ -654,7 +668,7 @@ function indicadoresOps(procesos, saas, sesiones, { fecha = null, ahora = Date.n
   const cumplida = s => !!ok(s, 'meta_at');
   const fallida = s => !cumplida(s) && (s.estado !== 'Activa' || (s.dias_publicada || 0) > 10);
   const conMeta = pub90.filter(s => cumplida(s) && s.dias_para_meta != null);
-  const conPrimero = pub90.filter(s => s.primer_destacado_habiles != null);
+  const conPrimero = pub90.filter(s => s.primer_destacado_habiles != null && s.activado >= desde);
   const activas = S.filter(s => s.abierto);
   const vacPorCli = {};
   S.filter(s => ok(s, 'activado') && s.activado <= corte).forEach(s => { const k = cli(s); if (k) vacPorCli[k] = (vacPorCli[k] || 0) + 1; });
@@ -684,12 +698,12 @@ function indicadoresOps(procesos, saas, sesiones, { fecha = null, ahora = Date.n
   for (let i = 7; i >= 0; i--) {
     const a = masDias(lunes, -7 * i), b = masDias(a, 6);
     const h = semanaHH(a, b), sq = semanaSaaS(a, b), pr = promesa(a, b);
-    headhunting.tendencia.push({ inicio: a, enviados: h.enviados, entrevistas: h.entrevistas, nuevos: h.nuevos, contrataciones: h.contrataciones, promesa: pr.pct });
+    headhunting.tendencia.push({ inicio: a, medido: h.medido, enviados: h.enviados, entrevistas: h.entrevistas, nuevos: h.nuevos, contrataciones: h.contrataciones, promesa: h.medido ? pr.pct : null });
     const pubS = S.filter(s => en(ok(s, 'activado'), a, b) && cumplida(s) && s.dias_para_meta != null);
     saasOut.tendencia.push({ inicio: a, publicadas: sq.publicadas, metas: sq.metas,
       meta_48: tasaN(pubS.filter(s => s.dias_para_meta <= PROMESA_HABILES).length, pubS.length).pct });
   }
-  return { lunes, domingo, hoy, corte, promesa_habiles: PROMESA_HABILES, headhunting, saas: saasOut };
+  return { lunes, domingo, hoy, corte, medicion_desde: desde, promesa_habiles: PROMESA_HABILES, headhunting, saas: saasOut };
 }
 
 // Rutas, iguales en el servidor y en el stub: el llamador pasa (método, tipo, id, cuerpo).
@@ -718,5 +732,5 @@ async function atender(ops, metodo, tipo, id, cuerpo) {
 module.exports = {
   ESPECS, TIPOS, ETAPAS, TIERS, CAUSAS, SAAS_ESTADOS, EVAL_ESTADOS,
   calcular, normalizar, reglas, responsabilidad, crearOps, atender, hoyCo, SEMILLA,
-  habilesEntre, sumarHabiles, PROMESA_HABILES, fechasMal, LEYENDA_FECHA, indicadoresOps,
+  habilesEntre, sumarHabiles, PROMESA_HABILES, fechasMal, LEYENDA_FECHA, indicadoresOps, MEDICION_DESDE,
 };

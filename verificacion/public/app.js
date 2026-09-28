@@ -969,6 +969,7 @@ function pintarSemana(){
    sobre ventanas móviles porque una semana sola tiene muy pocos casos; lo de la semana son
    conteos comparados con la anterior. Lo calcula el servidor (ops.js · indicadoresOps). */
 const pctTxt = t => (t && t.pct != null ? t.pct + '%' : '—');
+const masDiasF = (f, n) => { const d = new Date(f + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const deTxt = t => (t && t.den ? `${t.num} de ${t.den}` : 'sin casos todavía');
 const clsPct = (t, bueno, malo) => (!t || t.pct == null ? '' : t.pct >= bueno ? 'ok' : t.pct < malo ? 'no' : 'par');
 function focoHtml(f){
@@ -993,31 +994,38 @@ function tendenciaHtml(filas, cols){
 function cuerpoHeadhunting(o, meta){
   const h = o.headhunting, c = h.calidad, cl = h.cliente, v = h.velocidad, w = h.semana, p = h.previa;
   const quien = IND.d.filtro ? 'de este evaluador' : 'del equipo';
+  // Lo que depende de datos nuevos se mide desde el inicio de la medición; antes no existía.
+  const desdeTxt = fechaCorta(o.medicion_desde + 'T12:00:00');
+  const v90 = c.ventana_medida.desde > c.ventana.desde ? `desde el ${desdeTxt}` : '90 días';
+  const v28 = v.desde > masDiasF(IND.d.hoy, -27) ? `desde el ${desdeTxt}` : `en ${v.dias_ventana} días`;
+  const nd = x => (x == null ? '—' : x);
+  const noMed = `se mide desde el ${desdeTxt}`;
   const focos = [
     {l: 'Calidad · el cliente los entrevista', v: pctTxt(c.tasa_entrevista), cls: clsPct(c.tasa_entrevista, 44, 25),
-     sub: c.tasa_entrevista.den ? `${deTxt(c.tasa_entrevista)} enviados con respuesta, 90 días · <b>${c.sin_respuesta}</b> sin respuesta` : `Sin respuestas anotadas. En cada informe emitido, anota qué hizo el cliente.`,
+     sub: c.tasa_entrevista.den ? `${deTxt(c.tasa_entrevista)} enviados con respuesta, ${v90} · <b>${c.sin_respuesta}</b> sin respuesta` : `Sin respuestas anotadas ${v90}. En cada informe emitido, anota qué hizo el cliente.`,
      ref: 'Referencia: en búsquedas contingentes ~44% de los enviados pasa a entrevista.'},
     {l: 'Procesos que terminan en contratación', v: pctTxt(c.efectividad), cls: clsPct(c.efectividad, 50, 30),
      sub: `${deTxt(c.efectividad)} resueltos en 90 días · ${c.garantias} reposición${c.garantias === 1 ? '' : 'es'} por garantía · ${c.perdidas_internas} perdido${c.perdidas_internas === 1 ? '' : 's'} por causa interna`},
     {l: `Primer candidato en ${o.promesa_habiles} días hábiles`, v: pctTxt(v.ventana), cls: clsPct(v.ventana, 90, 70),
-     sub: `${deTxt(v.ventana)} procesos activados en ${v.dias_ventana} días${v.ventana.en_plazo ? ` · ${v.ventana.en_plazo} aún en plazo` : ''}${v.ventana.sin_dato ? ` · ${v.ventana.sin_dato} sin fecha de primer envío` : ''}`,
+     sub: `${deTxt(v.ventana)} procesos activados ${v28}${v.ventana.en_plazo ? ` · ${v.ventana.en_plazo} aún en plazo` : ''}${v.ventana.sin_dato ? ` · ${v.ventana.sin_dato} sin fecha de primer envío` : ''}`,
      ref: 'La promesa de PeakU: candidatos en 48 h.'},
     {l: 'Clientes que vuelven', v: pctTxt(cl.recurrencia), cls: clsPct(cl.recurrencia, 60, 30),
      sub: `${deTxt(cl.recurrencia)} empresas donde contratamos abrieron otro proceso después`,
      ref: 'La calidad trae la recurrencia: es el resultado de los otros tres.'},
   ];
   const sec = [
-    {l: 'Candidatos enviados', v: w.enviados, sub: contra(w.enviados, p.enviados) + ` <span class="eqx">${quien}</span>`},
-    {l: 'Entrevistas logradas', v: w.entrevistas, sub: contra(w.entrevistas, p.entrevistas)},
+    {l: 'Candidatos enviados', v: nd(w.enviados), sub: w.medido ? contra(w.enviados, p.enviados) + ` <span class="eqx">${quien}</span>` : noMed},
+    {l: 'Entrevistas logradas', v: nd(w.entrevistas), sub: w.medido ? contra(w.entrevistas, p.entrevistas) : noMed},
     {l: 'Contrataciones', v: w.contrataciones, sub: contra(w.contrataciones, p.contrataciones)},
-    {l: 'Procesos nuevos', v: w.nuevos, sub: `${w.primeros_envios} con primer envío esta semana`},
-    {l: 'Enviados por contratación', v: c.enviados_por_contratacion ?? '—', sub: c.contratados_informe ? `90 días · lo común es 3 a 4; las mejores firmas, 1 a 2` : 'sin contrataciones anotadas en los informes'},
-    {l: 'Satisfacción al cerrar', v: c.satisfaccion.promedio != null ? c.satisfaccion.promedio + ' ★' : '—', sub: `${c.satisfaccion.n} de ${c.satisfaccion.resueltos} cerrados con respuesta del cliente`},
+    {l: 'Procesos nuevos', v: w.nuevos, sub: w.medido ? `${w.primeros_envios} con primer envío esta semana` : 'primer envío: ' + noMed},
+    {l: 'Enviados por contratación', v: c.enviados_por_contratacion ?? '—', sub: c.contratados_informe ? `${v90} · lo común es 3 a 4; las mejores firmas, 1 a 2` : `sin contrataciones anotadas en los informes ${v90}`},
+    {l: 'Satisfacción al cerrar', v: c.satisfaccion.promedio != null ? c.satisfaccion.promedio + ' ★' : '—', sub: `${c.satisfaccion.n} de ${c.satisfaccion.resueltos} cerrados ${v90} con respuesta del cliente`},
   ];
   const TIERS = ['Alto', 'Nuevo · en prueba', 'Mediano', 'Bajo', 'Sin tier'];
   const histo = t => { const x = cl.tier_historico[t]; return x && x.resueltos ? `${x.contratados} de ${x.resueltos} contratados` : 'sin historia'; };
   const pend = h.pendientes_48;
   return `
+    <p class="medaviso">La calidad (enviados y qué dijo el cliente), la promesa de 48 h y la satisfacción al cerrar se miden <b>desde el ${desdeTxt}</b>, con lo que se anota en la consola: antes esos datos no se registraban y medirlos daría números falsos. Procesos, cierres, tier y recurrencia conservan la historia de Airtable.</p>
     <div class="ifocos">${focos.map(focoHtml).join('')}</div>
     <div class="isec seis">${sec.map(x => `<div class="isc"><b>${x.v}</b><span>${x.l}</span><small>${x.sub}</small></div>`).join('')}</div>
 
@@ -1027,7 +1035,7 @@ function cuerpoHeadhunting(o, meta){
         <span class="tag ${x.atrasado ? 'r' : 'a'}">${x.atrasado ? 'VENCIDO' : 'EN PLAZO'}</span>
         <div class="rowmain"><b>${esc(x.cargo || '')}</b><span>${esc(x.empresa || '')} · activado ${fechaCorta(x.activado + 'T12:00:00')}</span></div>
         <span class="cwhen ${x.atrasado ? 'viejo' : ''}">${x.atrasado ? 'venció' : 'vence'} el ${fechaCorta(x.vence + 'T12:00:00')}</span>
-      </button>`).join('')}</div>` : `<div class="empty ok">Todos los procesos abiertos ya tienen su primer candidato.</div>`}
+      </button>`).join('')}</div>` : `<div class="empty ok">Ningún proceso activado desde el ${desdeTxt} está esperando su primer candidato.</div>`}
       <p class="hint">Cuenta 2 días hábiles desde la activación (los festivos no se descuentan). Se cumple al anotar "Primer envío" (o "Último envío", que lo llena solo) en Procesos.</p>
     </div>
 
