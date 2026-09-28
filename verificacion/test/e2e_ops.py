@@ -144,6 +144,8 @@ with sync_playwright() as pw:
     pg.click('#topNav [data-nav="evaluaciones"]'); pg.wait_for_selector('#opsTitulo:has-text("Evaluaciones")', timeout=9000); pg.wait_for_timeout(400)
     if "APROBADOS" not in pg.inner_text("#opsGrid thead").upper():
         errs.append("Evaluaciones: falta la columna Aprobados")
+    if "SALUD" in pg.inner_text("#opsGrid thead").upper() or "riesgo" in pg.inner_text("#opsRes").lower() or "EN RIESGO" in pg.inner_text("#opsGrid").upper():
+        errs.append("Evaluaciones sigue mostrando salud o 'en riesgo'")
     fe = api("api/ops/evaluaciones")["filas"]
     e = next(x for x in fe if x["abierto"] and (x["evaluados"] or 0) >= 4)
     celda = f'#opsGrid tr[data-id="{e["id"]}"] [data-c="aprobados"]'

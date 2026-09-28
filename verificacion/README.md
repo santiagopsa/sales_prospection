@@ -521,7 +521,7 @@ Se edita como una hoja de cálculo: cada celda se guarda al salir, **Enter** baj
 
 - *Procesos*: salud por días sin movimiento (verde ≤ 2, amarilla 3–5, roja > 5; solo en Reclutamiento y Terna enviada), días sin enviar candidatos, duración (de la activación al cierre o a hoy) y responsabilidad (sale de la causa de cierre).
 - *SaaS*: faltan destacados, días publicada, días hasta la meta, % descartados, días sin actualizar y salud (verde con la meta cumplida; roja con más de 10 días sin cumplirla o 2+ días sin actualizar). **La meta se cumple solo con destacados**, sin contar descartados (en Airtable dos fórmulas se contradecían).
-- *Evaluaciones*: % de aprobación y salud (verde ≥ 70% y ≤ 14 días; roja < 40% o > 30 días). En Airtable estaban rotas porque apuntaban a una columna borrada; ahora existe **Aprobados**.
+- *Evaluaciones*: % de aprobación (en Airtable estaba roto porque apuntaba a una columna borrada; ahora existe **Aprobados**) y días en proceso. **Sin salud ni "en riesgo"**: la fórmula de Airtable marcaba riesgo con menos de 40% de aprobación o más de 30 días, pero que aprueben pocos es el resultado para el cliente y una evaluación dura lo que el cliente siga mandando candidatos; ninguna de las dos es un problema de la operación.
 
 **Lo que se llena solo**: al pasar un proceso a Contratado, Pausado o Cancelado, la fecha de cierre (y se marca si falta la causa); al reabrirlo se quita; al pasar a Terna enviada sin fecha de terna, la de hoy; en SaaS, la fecha de meta el día en que los destacados la alcanzan; "Sin cambios" marca una vacante SaaS como revisada hoy. El **tier** es de la empresa: cambiarlo en un proceso lo cambia en todos los de esa empresa, y un proceso nuevo de una empresa conocida lo hereda.
 

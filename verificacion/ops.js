@@ -119,13 +119,12 @@ const ESPECS = {
       { k: 'activado', l: 'Activación', t: 'fecha' },
       { k: 'estado', l: 'Estado', t: 'sel', op: EVAL_ESTADOS, req: true },
       { k: 'evaluados', l: 'Evaluados', t: 'num', ancho: 'xs', max: 100000 },
-      { k: 'aprobados', l: 'Aprobados', t: 'num', ancho: 'xs', max: 100000, ayuda: 'Cuántos de los evaluados aprobaron. Sin esto no hay % de aprobación ni salud.' },
+      { k: 'aprobados', l: 'Aprobados', t: 'num', ancho: 'xs', max: 100000, ayuda: 'Cuántos de los evaluados aprobaron. Sin esto no hay % de aprobación.' },
       { k: 'satisfaccion', l: 'Satisfacción del cliente', t: 'estrellas' },
       { k: 'link', l: 'Link a la evaluación', t: 'url', ancho: 'l' },
       { k: 'notas', l: 'Notas internas', t: 'largo', ancho: 'xl' },
     ],
     calc: [
-      { k: 'salud', l: 'Salud', t: 'salud', ayuda: 'Solo si no está terminada. Verde: 70%+ aprueba y 14 días o menos. Roja: menos de 40% o más de 30 días. Sin aprobados: sin datos.' },
       { k: 'pct_aprobacion', l: '% aprobación', t: 'pct' },
       { k: 'dias_en_proceso', l: 'Días en proceso', t: 'num' },
     ],
@@ -203,10 +202,9 @@ function calcular(tipo, fila, ahora = Date.now()) {
     const ev = Number(f.evaluados) || 0;
     f.pct_aprobacion = ev > 0 && f.aprobados != null ? Math.round(1000 * Number(f.aprobados) / ev) / 10 : null;
     f.dias_en_proceso = f.abierto && f.activado ? Math.max(0, diasEntre(f.activado, hoy)) : null;
-    f.salud = !f.abierto ? null
-      : (f.pct_aprobacion == null || !f.activado) ? 'sin_datos'
-      : (f.pct_aprobacion >= 70 && f.dias_en_proceso <= 14) ? 'verde'
-      : (f.pct_aprobacion < 40 || f.dias_en_proceso > 30) ? 'roja' : 'amarilla';
+    // Sin salud: que aprueben pocos es el resultado para el cliente, no un riesgo de la
+    // operación, y una evaluación dura lo que el cliente siga mandando candidatos.
+    f.salud = null;
   }
   return f;
 }

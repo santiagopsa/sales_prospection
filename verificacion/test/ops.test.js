@@ -58,14 +58,14 @@ const hace = dias => new Date(AH - dias * 86400000).toISOString();
   });
 
   console.log('evaluaciones');
-  await t('% de aprobación y salud (el cálculo que Airtable perdió)', () => {
+  await t('% de aprobación (el cálculo que Airtable perdió) y sin bandera de riesgo', () => {
     const e = (ap, ev, act) => calcular('evaluaciones', { estado: 'En evaluación', evaluados: ev, aprobados: ap, activado: act }, AH);
-    assert.strictEqual(e(7, 10, '2026-09-20').pct_aprobacion, 70); assert.strictEqual(e(7, 10, '2026-09-20').salud, 'verde');
-    assert.strictEqual(e(3, 10, '2026-09-20').salud, 'roja');
-    assert.strictEqual(e(5, 10, '2026-09-20').salud, 'amarilla');
-    assert.strictEqual(e(9, 10, '2026-08-01').salud, 'roja');
-    assert.strictEqual(e(null, 10, '2026-09-20').salud, 'sin_datos');
-    assert.strictEqual(calcular('evaluaciones', { estado: 'Terminado', evaluados: 5, aprobados: 1 }, AH).salud, null);
+    assert.strictEqual(e(7, 10, '2026-09-20').pct_aprobacion, 70);
+    assert.strictEqual(e(1, 3, '2026-09-20').pct_aprobacion, 33.3);
+    assert.strictEqual(e(null, 10, '2026-09-20').pct_aprobacion, null);
+    assert.strictEqual(e(1, 10, '2026-07-01').salud, null);          // poca aprobación y mucho tiempo no es "riesgo"
+    assert.strictEqual(e(1, 10, '2026-07-01').dias_en_proceso, 86);
+    assert.ok(!OPS.ESPECS.evaluaciones.calc.some(c => c.k === 'salud'));
   });
 
   console.log('validación');
@@ -137,7 +137,7 @@ const hace = dias => new Date(AH - dias * 86400000).toISOString();
     assert.ok(ss.every(s => s.peaku_id && s.cliente));
     const es = await o.listar('evaluaciones');
     assert.ok(es.every(e => e.aprobados === null));
-    assert.ok(es.every(e => e.salud === null || e.salud === 'sin_datos'));
+    assert.ok(es.every(e => e.salud === null));
   });
 
   console.log(`\n${n} pruebas · todo en verde`);

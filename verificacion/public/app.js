@@ -1057,8 +1057,8 @@ function opsResumen(){
   const sat = F.filter(f => f.satisfaccion);
   return [
     {id: 'ab', n: ab.length, l: 'evaluaciones en curso'},
+    {id: 'ent', n: cuenta(f => f.estado === 'Resultados entregados'), l: 'con resultados entregados', fn: f => f.estado === 'Resultados entregados'},
     {id: 'sinap', n: cuenta(f => f.aprobados == null), l: 'sin aprobados registrados', cls: cuenta(f => f.aprobados == null) ? 'a' : '', fn: f => f.aprobados == null},
-    {id: 'roja', n: cuenta(f => f.salud === 'roja'), l: 'en riesgo', cls: 'r', fn: f => f.salud === 'roja'},
     {id: 'apr', n: conAp.length ? Math.round(conAp.reduce((n, f) => n + f.pct_aprobacion, 0) / conAp.length) + '%' : '—', l: 'aprobación promedio'},
     {id: 'sat', n: sat.length ? (sat.reduce((n, f) => n + f.satisfaccion, 0) / sat.length).toFixed(1) + ' ★' : '—', l: `satisfacción del cliente (${sat.length})`},
   ];
@@ -1095,11 +1095,11 @@ const opsAncho = c => c.ancho ? 'w-' + c.ancho : (c.t === 'fecha' ? 'w-f' : c.t 
 
 function filaOps(f){
   const E = OPSV.esp, fijo = E.campos.find(c => c.fijo), resto = E.campos.filter(c => !c.fijo);
-  const salud = E.calc.find(c => c.t === 'salud'), otros = E.calc.filter(c => c.t !== 'salud');
+  const salud = E.calc.find(c => c.t === 'salud'), otros = E.calc.filter(c => c.t !== 'salud');   // Evaluaciones no tiene salud
   const td = c => `<td class="${opsAncho(c)} ${c.k === 'causa_cierre' && f.falta_causa ? 'falta' : ''}" data-k="${c.k}">${celdaOps(f, c)}</td>`;
   return `<tr data-id="${f.id}" class="${f.abierto ? '' : 'cerrada'}">
     <th scope="row" class="fijo ${opsAncho(fijo)}" data-k="${fijo.k}">${celdaOps(f, fijo)}</th>
-    <td class="calc" data-calc="${salud.k}">${calcOps(f, salud)}</td>
+    ${salud ? `<td class="calc" data-calc="${salud.k}">${calcOps(f, salud)}</td>` : ''}
     ${resto.map(td).join('')}
     ${otros.map(c => `<td class="calc num" data-calc="${c.k}">${calcOps(f, c)}</td>`).join('')}
     <td class="acc">
@@ -1132,7 +1132,7 @@ function pintarOps(){
   const salud = E.calc.find(c => c.t === 'salud'), otros = E.calc.filter(c => c.t !== 'salud');
   const th = (c, cls = '') => `<th class="${cls} ${opsAncho(c)}" data-ord="${c.k}" title="${esc(c.ayuda || '')}" scope="col">${esc(c.l)}${c.ayuda ? '<i class="ay">?</i>' : ''}${OPSV.orden === c.k ? (OPSV.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
   $('#opsGrid').innerHTML = fs.length ? `<table class="ogrid">
-    <thead><tr>${th(fijo, 'fijo')}${th(salud, 'calc')}${resto.map(c => th(c)).join('')}${otros.map(c => th(c, 'calc num')).join('')}<th class="acc" scope="col"><span class="sr">Acciones</span></th></tr></thead>
+    <thead><tr>${th(fijo, 'fijo')}${salud ? th(salud, 'calc') : ''}${resto.map(c => th(c)).join('')}${otros.map(c => th(c, 'calc num')).join('')}<th class="acc" scope="col"><span class="sr">Acciones</span></th></tr></thead>
     <tbody>${fs.map(filaOps).join('')}</tbody>
   </table>` : `<div class="empty">${OPSV.filas.length ? 'Ninguna fila coincide.' : 'Todavía no hay filas.'}</div>`;
 }
