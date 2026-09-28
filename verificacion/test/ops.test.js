@@ -54,6 +54,12 @@ const hace = dias => new Date(AH - dias * 86400000).toISOString();
     const c = reglas('saas', { meta: 10, destacados: 9 }, { destacados: 10 }, { ahora: AH });
     assert.strictEqual(c.meta_at, '2026-09-25'); assert.ok(c.actualizado_at);
     assert.ok(!('meta_at' in reglas('saas', { meta: 10, destacados: 12, meta_at: '2026-09-01' }, { destacados: 13 }, { ahora: AH })));
+    // Ya la cumplía sin fecha (importada): subir destacados no inventa la fecha de hoy.
+    assert.ok(!('meta_at' in reglas('saas', { meta: 10, destacados: 12, meta_at: null }, { destacados: 13 }, { ahora: AH })));
+    // Bajar la meta por debajo de los destacados sí la cruza.
+    assert.strictEqual(reglas('saas', { meta: 20, destacados: 12 }, { meta: 10 }, { ahora: AH }).meta_at, '2026-09-25');
+    // Una fila nueva que ya nace cumpliéndola.
+    assert.strictEqual(reglas('saas', null, { meta: 10, destacados: 10 }, { ahora: AH }).meta_at, '2026-09-25');
     assert.ok(reglas('saas', { meta: 10, destacados: 3 }, {}, { ahora: AH, revisado: true }).actualizado_at);
   });
 

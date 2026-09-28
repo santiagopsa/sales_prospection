@@ -268,7 +268,10 @@ function reglas(tipo, antes, cambios, { ahora = Date.now(), revisado = false } =
     if (!antes || MUEVE.procesos.some(cambio)) c.movido_at = new Date(ahora).toISOString();
   } else if (tipo === 'saas') {
     const meta = Number(m.meta) || 0;
-    if ((cambio('destacados') || cambio('meta')) && meta > 0 && Number(m.destacados) >= meta && !m.meta_at && !('meta_at' in cambios)) c.meta_at = hoy;
+    // Solo el día en que CRUZA la meta (antes no la cumplía, ahora sí). Si ya la cumplía y no
+    // tiene fecha (filas importadas de Airtable sin fecha), no se inventa la de hoy.
+    const cumplia = antes && Number(antes.meta) > 0 && Number(antes.destacados) >= Number(antes.meta);
+    if ((cambio('destacados') || cambio('meta')) && meta > 0 && Number(m.destacados) >= meta && !cumplia && !m.meta_at && !('meta_at' in cambios)) c.meta_at = hoy;
     if (!antes || revisado || MUEVE.saas.some(cambio)) c.actualizado_at = new Date(ahora).toISOString();
   }
   return c;
