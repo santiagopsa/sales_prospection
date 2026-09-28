@@ -8,7 +8,7 @@ const crypto = require('crypto');
 
 const PUB = path.join(__dirname, '..', 'public');
 const MOUNT = '/verificacion'; // igual que en el servidor real
-const { LVLTXT, MAX_REQ, semaforo, bloqueos, estadoIdentidad, tipoDocumento, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana } = require('../rules'); // reglas reales del servidor
+const { LVLTXT, MAX_REQ, semaforo, bloqueos, estadoIdentidad, tipoDocumento, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana, MOTIVOS_DESCARTE } = require('../rules'); // reglas reales del servidor
 const A = require('../archivos'); // misma decisión de "qué es este archivo" que app.js
 
 // Lo que el stub devuelve al "leer" un .docx o .pdf, ya que no tiene mammoth ni pdf-parse.
@@ -187,6 +187,19 @@ const server = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x').searchParams;
     return json(res,200, indicadoresSemana(db.sessions.map(conResultado), db.vacancies,
       {evaluador: u.get('evaluador') || '', fecha: u.get('fecha') || null}));
+  }
+
+  // Descartar / recuperar: mismas reglas que el servidor.
+  const md = p.match(/^\/api\/sessions\/(\d+)\/(descartar|recuperar)$/);
+  if(md && m==='POST'){
+    const b = await body(req);
+    const s = db.sessions.find(x=>x.id===+md[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    if(md[2]==='recuperar'){ Object.assign(s,{descartado_at:null, descarte_motivo:null, descarte_nota:null, updated_at:new Date().toISOString()}); return json(res,200,{ok:true}); }
+    if(!MOTIVOS_DESCARTE.includes(clean(b.motivo))) return json(res,400,{error:'Elige por qué se descarta.'});
+    if(s.status==='issued') return json(res,409,{error:'Un informe emitido no se descarta: ya es un resultado.'});
+    Object.assign(s,{descartado_at:new Date().toISOString(), descarte_motivo:clean(b.motivo), descarte_nota:clean(b.nota)||null, updated_at:new Date().toISOString()});
+    return json(res,200,{ok:true, descartado_at:s.descartado_at, descarte_motivo:s.descarte_motivo});
   }
 
   // Operaciones (Procesos completos, SaaS, Evaluaciones): mismas reglas que el servidor (ops.js).

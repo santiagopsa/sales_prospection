@@ -196,6 +196,11 @@ async function initSchema(pool) {
     `ALTER TABLE ${T.ratings} ADD COLUMN IF NOT EXISTS brecha TEXT`,
     `ALTER TABLE ${T.ratings} ADD COLUMN IF NOT EXISTS analisis TEXT`,
     `ALTER TABLE ${T.ratings} ADD COLUMN IF NOT EXISTS falta TEXT`,
+    // Descartar un candidato que no va a seguir: sale de lo pendiente y del pulso, y se puede
+    // recuperar (el estado anterior no se toca; descartado_at es una marca encima).
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS descartado_at TIMESTAMPTZ`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS descarte_motivo TEXT`,
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS descarte_nota TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_v_req_vacancy ON ${T.requirements}(vacancy_id)`,
     `CREATE INDEX IF NOT EXISTS idx_v_sess_vacancy ON ${T.sessions}(vacancy_id)`,
     `CREATE INDEX IF NOT EXISTS idx_v_rat_session ON ${T.ratings}(session_id)`,

@@ -400,4 +400,38 @@ console.log('indicadores de la semana');
   });
 }
 
+console.log('descartar candidatos');
+{
+  const { estadoTablero, pulsoVacante, estadisticas, indicadoresSemana, MOTIVOS_DESCARTE } = require('../rules');
+  const AH = Date.parse('2026-09-24T15:00:00Z');
+  t('un descartado sale de lo pendiente, sin perder su estado de fondo', () => {
+    const s = {status:'esperando', entrevista_at:'2026-09-23T15:00:00Z', descartado_at:'2026-09-24T14:00:00Z'};
+    assert.strictEqual(estadoTablero(s, AH), 'descartado');
+    assert.strictEqual(estadoTablero({...s, descartado_at:null}, AH), 'espera');
+    assert.strictEqual(estadoTablero({status:'issued', descartado_at:'2026-09-24T14:00:00Z'}, AH), 'emitido');
+    const e = estadisticas([s, {...s, descartado_at:null}], {ahora:AH});
+    assert.strictEqual(e.pendientes.espera, 1);
+  });
+  t('en el pulso de la vacante no cuenta como validación ni como en proceso', () => {
+    const cs = [
+      {vacancy_id:1, status:'draft', started_at:'2026-09-23T15:00:00Z'},
+      {vacancy_id:1, status:'draft', started_at:'2026-09-23T15:00:00Z', descartado_at:'2026-09-24T10:00:00Z'},
+      {vacancy_id:1, status:'draft', started_at:'2026-09-23T15:00:00Z', descartado_at:'2026-09-24T10:00:00Z'},
+    ];
+    const p = pulsoVacante({id:1, created_at:'2026-09-01T00:00:00Z'}, cs, {ahora:AH});
+    assert.strictEqual(p.validaciones, 1); assert.strictEqual(p.en_proceso, 1); assert.strictEqual(p.descartados, 2);
+    assert.strictEqual(p.probabilidad, 'baja');          // con 3 "en proceso" habría sido media
+  });
+  t('la tasa entrevista → informe no cuenta a los descartados', () => {
+    const S = [
+      {evaluator:'W', status:'issued', entrevista_at:'2026-09-22T14:00:00Z', issued_at:'2026-09-22T20:00:00Z', req_total:1, req_cumple:1},
+      {evaluator:'W', status:'draft', entrevista_at:'2026-09-22T14:00:00Z', descartado_at:'2026-09-23T10:00:00Z'},
+    ];
+    const r = indicadoresSemana(S, [], {ahora:AH});
+    assert.strictEqual(r.tasas.entrevista_a_informe.den, 1);
+    assert.strictEqual(r.semana.entrevistas, 2);          // la entrevista sí se hizo
+  });
+  t('hay una lista cerrada de motivos', () => { assert.ok(MOTIVOS_DESCARTE.length >= 5 && MOTIVOS_DESCARTE.includes('Otro')); });
+}
+
 console.log(`\n${n} pruebas · todo en verde`);

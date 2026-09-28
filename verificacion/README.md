@@ -122,7 +122,7 @@ Aparte a propósito: son la parte que no puede fallar y la única con pruebas pr
 ## Pruebas
 
 ```bash
-node verificacion/test/rules.test.js       # 67 pruebas de las reglas, sin dependencias
+node verificacion/test/rules.test.js       # 71 pruebas de las reglas, sin dependencias
 node verificacion/test/assets.test.js      # que el versionado de estáticos siga enganchado
 node verificacion/test/json_llm.test.js    # leer el JSON del modelo venga como venga
 node verificacion/test/llm.test.js         # pedirJson contra un cliente falso, sin gastar tokens
@@ -150,11 +150,13 @@ node verificacion/test/traduccion.test.js  # la ruta de traducción REAL con un 
 node verificacion/test/correccion.test.js  # corregir el nombre: en borrador cambia; emitida, vuelve a firmar y anota
 node verificacion/test/pulso.test.js       # el pulso, los candidatos por vacante y los indicadores en las rutas reales
 node verificacion/test/ops.test.js         # operaciones: cálculos, validación, lo que se llena solo, tier por empresa, importación
+PG_PRUEBA="host=/tmp/pgt port=5499 user=postgres" node verificacion/test/rutas_pg.test.js  # las rutas reales (migraciones, listas, tablero, descartar, ops) contra un Postgres local
 PG_PRUEBA="host=/tmp/pgt port=5499 user=postgres" node verificacion/test/ops_pg.test.js  # el SQL de operaciones contra un Postgres local (se salta sin PG_PRUEBA)
 python3 verificacion/test/e2e_nombre.py    # el lápiz junto al nombre, en sesión y sobre el acta
 python3 verificacion/test/e2e_empleo.py    # se verifica el último empleo declarado y no otro
 python3 verificacion/test/e2e_tablero.py   # el pulso, la cola, la meta, cerrar/reabrir, candidatos por vacante y el buscador
 python3 verificacion/test/e2e_indicadores.py # la barra, los focos, empresas atendidas, día por día, navegar semanas, ver como, teléfono
+python3 verificacion/test/e2e_descartar.py  # descartar desde la cola, la lista, la vacante y la sesión; recuperar
 python3 verificacion/test/e2e_ops.py        # Procesos, SaaS y Evaluaciones con los datos de Airtable: editar, Enter, reglas, tier, validación, crear, borrar
 ```
 
@@ -502,6 +504,12 @@ La barra de arriba tiene dos secciones: **Tablero** (lo del día a día) e **Ind
 - **Últimas 8 semanas.** Informes, vacantes verificadas, empresas atendidas y % que cumple todo, en barras; un clic lleva a esa semana.
 
 Lo calcula `rules.js · indicadoresSemana` (`GET /api/indicadores?fecha=AAAA-MM-DD&evaluador=`), la misma función en el servidor, el stub y las pruebas.
+
+## Descartar candidatos
+
+Un candidato que no va a seguir (no se presentó, no cumple lo básico, desistió, el cliente lo descartó antes del informe, registro duplicado…) se **descarta** para que no se quede en *Para hacer ahora* ni cuente como *en proceso* en el pulso de la vacante. Se descarta desde la cola, desde la lista de verificaciones, desde la pantalla de la vacante o, en plena sesión, con **Descartar candidato** en la barra (guarda lo que haya y vuelve al tablero). Siempre pide el motivo, de una lista cerrada, y admite una nota.
+
+El descarte es una marca encima (`descartado_at`, `descarte_motivo`, `descarte_nota`): no toca el estado de fondo, así que **Recuperar** lo devuelve exactamente a donde estaba. Los descartados quedan en el filtro *Descartadas* (la lista *Todas* ya no los trae), plegados al final de la lista de la vacante, y abrir uno pregunta si se recupera. Un informe emitido no se descarta: ya es un resultado. En los indicadores, la entrevista de un descartado sí cuenta como entrevista, pero no entra en la tasa *entrevistas que ya tienen informe*. Rutas: `POST /api/sessions/:id/descartar` (`{motivo, nota}`) y `POST /api/sessions/:id/recuperar`.
 
 ## Operaciones: Procesos completos, SaaS y Evaluaciones (antes, Airtable)
 

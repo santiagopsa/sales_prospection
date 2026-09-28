@@ -417,6 +417,7 @@ function go(id){
   // En modo lectura no hay cronómetro que correr: la sesión ya pasó.
   $('#clockWrap').style.display = ((live || id==='vActa') && !lectura) ? 'flex' : 'none';
   $('#btnReset').style.display = ((live || id==='vActa')) ? 'block' : 'none';
+  $('#btnDescartar').style.display = (live && !lectura && S && S.sid && !S.fin) ? 'block' : 'none';
   $('#btnReset').textContent = lectura ? 'Volver a la lista' : 'Salir de la sesión';
   $('#whoTop').innerHTML = (S && (live || id==='vActa'))
     ? [`<b>${esc(S.cand)}</b>${S.sid ? ' <button class="lapiz" id="btnCorregirNombre" type="button" title="Corregir el nombre del candidato">✎</button>' : ''}`, S.rol && esc(S.rol)].filter(Boolean).join(' · ') : '';
@@ -460,7 +461,8 @@ const ESTADO_TB = {
   en_curso:   {tag:'n',   tx:'EN CURSO',             cta:'Retomar',             orden:3},
   analizando: {tag:'acc', tx:'⏳ ANALIZANDO',         cta:'',                    orden:4},
 };
-const estadoDe = s => s.estado_tablero || (s.status === 'issued' ? 'emitido' : 'en_curso');
+const estadoDe = s => (s.status !== 'issued' && s.descartado_at) ? 'descartado' : (s.estado_tablero && s.estado_tablero !== 'descartado' ? s.estado_tablero : (s.status === 'issued' ? 'emitido' : 'en_curso'));
+const descartada = s => estadoDe(s) === 'descartado';
 const resultadoDe = s => {
   if(s.status !== 'issued' || !Number(s.req_total)) return null;
   const c = Number(s.req_cumple) || 0, t = Number(s.req_total);
@@ -525,6 +527,7 @@ function pintarCola(){
       <div class="rowmain"><b>${esc(s.candidate)}</b><span>${esc(s.vacancy_title || 'sin vacante')}${s.company_name ? ' · ' + esc(s.company_name) : ''}${evalActual() ? '' : ' · ' + esc(s.evaluator || 'sin evaluador')}</span></div>
       <span class="cwhen ${viejo ? 'viejo' : ''}">${esc(haceCuanto(ref))}</span>
       ${E.cta ? `<span class="ccta">${E.cta} →</span>` : '<span class="ccta muted">en segundos</span>'}
+      <button class="descbtn" data-descartar="${s.id}" type="button" title="No sigue en la verificación">Descartar</button>
     </div>`;
   }).join('') + (mias.length > 12 ? `<p class="hint">Y ${mias.length - 12} más: están en la lista de verificaciones, filtro “Pendientes”.</p>` : '')
     : `<div class="empty ok">Nada pendiente. Todo lo entrevistado ya tiene su informe.</div>`;
@@ -552,10 +555,12 @@ function ordenarCandidatos(cs){
 }
 function listaCandidatos(cs, attr = 'data-abrir'){
   const val = ordenarCandidatos(cs.filter(s => s.status === 'issued'));
-  const pro = ordenarCandidatos(cs.filter(s => s.status !== 'issued'));
+  const pro = ordenarCandidatos(cs.filter(s => s.status !== 'issued' && !descartada(s)));
+  const des = ordenarCandidatos(cs.filter(descartada));
   if(!cs.length) return `<div class="empty">Todavía no hay candidatos verificados en esta vacante.</div>`;
   return (val.length ? `<div class="vgh">Validados · ${val.length}</div>${val.map(s => filaSesion(s, attr, true)).join('')}` : '')
-       + (pro.length ? `<div class="vgh">En proceso · ${pro.length}</div>${pro.map(s => filaSesion(s, attr, true)).join('')}` : '');
+       + (pro.length ? `<div class="vgh">En proceso · ${pro.length}</div>${pro.map(s => filaSesion(s, attr, true)).join('')}` : '')
+       + (des.length ? `<details class="vdesc"><summary class="vgh">Descartados · ${des.length}</summary>${des.map(s => filaSesion(s, attr, true)).join('')}</details>` : '');
 }
 
 // Los tres cupos de la terna: llenos los que ya cumplen todo.
@@ -568,10 +573,13 @@ function ternaHtml(p){
 }
 
 function filaVacante(v, p, cs, clave){
+  // `cs` trae también a los descartados: no cuentan ni tienen punto, pero se listan al final.
   const cerrada = (v.status || 'activa') === 'cerrada';
   const abierta = TB.abiertas.has(clave);
   const pr = p && p.probabilidad ? PROB[p.probabilidad] : null;
   const val = p ? p.validados : cs.filter(s => s.status === 'issued').length;
+  const todos = cs;
+  cs = cs.filter(s => !descartada(s));
   const puntos = ordenarCandidatos(cs).slice(0, 16).map(s => {
     const r = resultadoDe(s), e = estadoDe(s);
     const cl = r || (e === 'emitido' ? 'nv' : 'proc');
@@ -594,11 +602,13 @@ function filaVacante(v, p, cs, clave){
       ${cs.length ? `<div class="pts" aria-label="Candidatos de esta vacante">${puntos}</div>
       <span class="vmini">${p ? `${p.aptos} cumple${p.aptos === 1 ? '' : 'n'} todo${p.parciales ? ` · ${p.parciales} en parte` : ''}${p.no_cumplen ? ` · ${p.no_cumplen} no` : ''}${p.en_proceso ? ` · ${p.en_proceso} en proceso` : ''}` : ''}</span>
       <button class="linkbtn" data-vexp="${clave}" type="button" aria-expanded="${abierta}">${abierta ? 'Ocultar candidatos' : `Ver ${cs.length === 1 ? 'el candidato' : `los ${cs.length} candidatos`}`}</button>`
+      : todos.length ? `<span class="pts vacia">Sin candidatos activos</span>
+        <button class="linkbtn" data-vexp="${clave}" type="button" aria-expanded="${abierta}">${abierta ? 'Ocultar' : `Ver ${todos.length === 1 ? 'el descartado' : `los ${todos.length} descartados`}`}</button>`
       : `<span class="pts vacia">Sin candidatos todavía</span>`}
       <button class="linkbtn vestado" data-vestado="${v.id}" data-cerrar="${cerrada ? '0' : '1'}" type="button"
         title="${cerrada ? 'Vuelve al tablero con sus candidatos' : 'Sale del tablero; sus informes no cambian y se puede reabrir'}">${cerrada ? 'Reabrir' : 'Cerrar vacante'}</button>
     </div>
-    ${abierta ? `<div class="vcands">${listaCandidatos(cs)}</div>` : ''}
+    ${abierta ? `<div class="vcands">${listaCandidatos(todos)}</div>` : ''}
   </div>`;
 }
 
@@ -655,12 +665,17 @@ function pintarVacantes(){
 // que se repiten dentro de una vacante (data-abrir): hacen lo mismo, pero se cuentan aparte.
 function filaSesion(s, attr = 'data-ses', enVacante = false){
   const e = estadoDe(s), E = ESTADO_TB[e];
-  const semTag = E ? E.tag : (s.semaforo === 'verde' ? 'v' : (s.semaforo === 'amarillo' ? 'a' : (s.semaforo === 'rojo' ? 'r' : 'n')));
-  const semTx = E ? E.tx : (s.semaforo ? s.semaforo.toUpperCase() : 'EMITIDO');
+  const semTag = e === 'descartado' ? 'n' : E ? E.tag : (s.semaforo === 'verde' ? 'v' : (s.semaforo === 'amarillo' ? 'a' : (s.semaforo === 'rojo' ? 'r' : 'n')));
+  const semTx = e === 'descartado' ? 'DESCARTADO' : E ? E.tx : (s.semaforo ? s.semaforo.toUpperCase() : 'EMITIDO');
   const r = resultadoDe(s);
-  return `<button class="row" ${attr}="${s.id}" type="button">
+  const desc = e === 'descartado';
+  const accion = s.status === 'issued' ? ''
+    : desc ? `<button class="descbtn rec" data-recuperar="${s.id}" type="button" title="Vuelve a lo pendiente">Recuperar</button>`
+    : `<button class="descbtn" data-descartar="${s.id}" type="button" title="No sigue en la verificación">Descartar</button>`;
+  return `<div class="row ${desc ? 'descartada' : ''}" ${attr}="${s.id}" role="button" tabindex="0">
     <div class="rowmain">
       <b>${esc(s.candidate)}</b>
+      ${e === 'descartado' && s.descarte_motivo ? `<span class="motdesc">${esc(s.descarte_motivo)}</span>` : ''}
       <span>${enVacante ? `${s.status === 'issued' ? 'Informe del ' + fechaCorta(s.issued_at || s.updated_at) : 'Entrevista ' + haceCuanto(s.entrevista_at || s.started_at)} · ${esc(s.evaluator || 'sin evaluador')}`
                         : `${esc(s.vacancy_title || 'sin vacante')}${s.company_name ? ' · ' + esc(s.company_name) : ''} · ${esc(s.evaluator || 'sin evaluador')}`}</span>
     </div>
@@ -669,16 +684,20 @@ function filaSesion(s, attr = 'data-ses', enVacante = false){
       <span class="tag ${semTag}">${semTx}</span><br>
       <span class="mono">${esc(s.report_code || '')}</span> · ${fechaCorta(s.issued_at || s.started_at)}
     </div>
-  </button>`;
+    ${accion}
+  </div>`;
 }
 
 function pintarVerificaciones(){
   const q = normTxt(TB.qs.trim());
   let ss = sesionesDelEval();
+  // "Todas" no incluye a los descartados: descartar es sacarlos de la vista. Tienen su filtro.
+  if(TB.fs === 'descartadas') ss = ss.filter(descartada);
+  else ss = ss.filter(s => !descartada(s));
   if(TB.fs === 'pendientes') ss = ss.filter(s => s.status !== 'issued');
   if(TB.fs === 'emitidas') ss = ss.filter(s => s.status === 'issued');
   if(q) ss = ss.filter(s => normTxt([s.candidate, s.vacancy_title, s.company_name, s.report_code, s.evaluator].join(' ')).includes(q));
-  const tot = sesionesDelEval().length;
+  const tot = sesionesDelEval().filter(s => TB.fs === 'descartadas' ? descartada(s) : !descartada(s)).length;
   $('#sesCount').textContent = tot ? (ss.length === tot ? `${tot} verificaci${tot === 1 ? 'ón' : 'ones'}` : `${ss.length} de ${tot}`) : '';
   $('#sesList').innerHTML = ss.length ? ss.slice(0, TB.lim).map(s => filaSesion(s)).join('')
     : `<div class="empty">${tot ? 'Ninguna verificación coincide.' : 'Ninguna verificación todavía.'}</div>`;
@@ -691,10 +710,19 @@ function enganchesTablero(){
   // Delegación: las listas se repintan enteras y los botones nacen y mueren con ellas.
   if(enganchesTablero.hecho) return;
   enganchesTablero.hecho = true;
-  const abrir = e => {
+  const abrir = async e => {
     if(e.target.closest('#btnMasPulso')){ TB.pulsoTodas = !TB.pulsoTodas; pintarPulso(); return; }
     const ve = e.target.closest('[data-vestado]');
     if(ve){ cambiarEstadoVacante(+ve.dataset.vestado, ve.dataset.cerrar === '1'); return; }
+    const dd = e.target.closest('[data-descartar],[data-recuperar]');
+    if(dd){
+      e.stopPropagation();
+      const id = +(dd.dataset.descartar || dd.dataset.recuperar);
+      const s = TB.ss.find(x => x.id === id);
+      const hecho = dd.dataset.descartar ? await descartarSesion(id, s && s.candidate) : await recuperarSesion(id, s && s.candidate);
+      if(hecho) repintarTablero();
+      return;
+    }
     const x = e.target.closest('[data-abrir],[data-ses],[data-vac],[data-vexp]');
     if(!x) return;
     if(x.dataset.vexp){ const k = x.dataset.vexp; TB.abiertas.has(k) ? TB.abiertas.delete(k) : TB.abiertas.add(k); k[0] === 'p' ? pintarPulso() : pintarVacantes(); return; }
@@ -703,7 +731,7 @@ function enganchesTablero(){
   };
   ['#pulsoList', '#colaList', '#vacList', '#sesList'].forEach(sel => {
     $(sel).addEventListener('click', abrir);
-    $(sel).addEventListener('keydown', e => { if((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-abrir]')){ e.preventDefault(); abrir(e); } });
+    $(sel).addEventListener('keydown', e => { if((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-abrir],[data-ses]')){ e.preventDefault(); abrir(e); } });
   });
   $('#qVac').addEventListener('input', e => { TB.qv = e.target.value; pintarVacantes(); });
   $('#qSes').addEventListener('input', e => { TB.qs = e.target.value; TB.lim = 25; pintarVerificaciones(); });
@@ -1257,6 +1285,11 @@ async function verSesion(id){
   if(S && S.sid && !S.fin && !S.soloLectura){
     if(!await preguntar('Tienes una sesión en curso sin terminar', 'Si abres otra verificación la pierdes de vista, aunque queda guardada en el servidor.', 'Abrir la otra', 'Quedarme')) return;
     await flush();
+  }
+  const enLista = TB.ss.find(x => x.id === id);
+  if(enLista && descartada(enLista)){
+    if(!await preguntar(`${enLista.candidate} está descartado`, `Motivo: ${enLista.descarte_motivo || 'sin motivo'}. Para seguir con su verificación hay que recuperarlo; vuelve a lo pendiente.`, 'Recuperar y abrir', 'Cancelar')) return;
+    if(!await recuperarSesion(id, enLista.candidate)) return;
   }
   overlay(true, 'Abriendo la verificación…', '');
   try{
@@ -1829,7 +1862,21 @@ async function verVacante(id){
       <p class="hint">Se abre una sesión guiada de 30 minutos con estos requisitos ya cargados.</p>
     `;
     $('#vacStage').querySelector('[data-home]').addEventListener('click', loadTablero);
-    $('#vacStage').querySelectorAll('#vacCands [data-abrir]').forEach(b => b.addEventListener('click', () => verSesion(+b.dataset.abrir)));
+    $('#vacStage').querySelector('#vacCands').addEventListener('click', async e => {
+      const dd = e.target.closest('[data-descartar],[data-recuperar]');
+      if(dd){
+        const id = +(dd.dataset.descartar || dd.dataset.recuperar);
+        const c = (v.candidatos || []).find(x => x.id === id);
+        const hecho = dd.dataset.descartar ? await descartarSesion(id, c && c.candidate) : await recuperarSesion(id, c && c.candidate);
+        if(hecho) verVacante(v.id);
+        return;
+      }
+      const row = e.target.closest('[data-abrir]');
+      if(row) verSesion(+row.dataset.abrir);
+    });
+    $('#vacStage').querySelector('#vacCands').addEventListener('keydown', e => {
+      if((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-abrir]')){ e.preventDefault(); verSesion(+e.target.dataset.abrir); }
+    });
     $('#btnNuevaSesion').addEventListener('click', () => setupSesion(v));
     const arriba = $('#btnVerificarArriba');
     if(arriba) arriba.addEventListener('click', () => setupSesion(v));
@@ -2409,24 +2456,76 @@ function beaconSesion(){
 
 /* Pregunta propia en la página (ver index.html: confirm() del navegador puede quedar
    silenciado y entonces el botón parece muerto). Resuelve true/false. */
-function preguntar(titulo, texto, si = 'Guardar y salir', no = 'Seguir aquí', campo = null){
+function preguntar(titulo, texto, si = 'Guardar y salir', no = 'Seguir aquí', campo = null, opciones = null){
   // Con `campo` (un valor inicial) la pregunta lleva un cuadro de texto y resuelve con lo
-  // escrito (o null si cancela). Sin campo, resuelve true/false.
+  // escrito (o null si cancela). Sin campo, resuelve true/false. Con `opciones` (una lista)
+  // lleva además una lista para elegir y resuelve {opcion, texto} (o null si cancela); el
+  // botón de aceptar no se activa hasta que se elige una.
   return new Promise(ok => {
-    const box = $('#pregunta'), inp = $('#pgInput');
+    const box = $('#pregunta'), inp = $('#pgInput'), sel = $('#pgSelect');
     $('#pgTitulo').textContent = titulo; $('#pgTexto').textContent = texto;
     $('#pgSi').textContent = si; $('#pgNo').textContent = no;
     const conCampo = campo !== null && campo !== undefined;
+    const conOpc = Array.isArray(opciones) && opciones.length > 0;
     inp.style.display = conCampo ? 'block' : 'none';
+    inp.placeholder = conOpc ? 'Nota (opcional)' : '';
     if(conCampo) inp.value = String(campo);
-    const cerrar = v => { box.classList.remove('on'); $('#pgSi').onclick = $('#pgNo').onclick = null; inp.onkeydown = null; ok(v); };
-    $('#pgSi').onclick = () => cerrar(conCampo ? inp.value.trim() : true);
-    $('#pgNo').onclick = () => cerrar(conCampo ? null : false);
-    inp.onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); $('#pgSi').click(); } };
+    sel.style.display = conOpc ? 'block' : 'none';
+    if(conOpc){
+      sel.innerHTML = `<option value="">Elige el motivo…</option>` + opciones.map(o => `<option>${esc(o)}</option>`).join('');
+      $('#pgSi').disabled = true;
+      sel.onchange = () => { $('#pgSi').disabled = !sel.value; };
+    }
+    const cerrar = v => { box.classList.remove('on'); $('#pgSi').onclick = $('#pgNo').onclick = null; inp.onkeydown = null; sel.onchange = null; $('#pgSi').disabled = false; ok(v); };
+    $('#pgSi').onclick = () => cerrar(conOpc ? {opcion: sel.value, texto: inp.value.trim()} : conCampo ? inp.value.trim() : true);
+    $('#pgNo').onclick = () => cerrar(conCampo || conOpc ? null : false);
+    inp.onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); if(!$('#pgSi').disabled) $('#pgSi').click(); } };
     box.classList.add('on');
-    (conCampo ? inp : $('#pgSi')).focus();
-    if(conCampo) inp.select();
+    (conOpc ? sel : conCampo ? inp : $('#pgSi')).focus();
+    if(conCampo && !conOpc) inp.select();
   });
+}
+
+/* Descartar a un candidato que no va a seguir en la verificación (no se presentó, no cumple
+   lo básico, desistió…). Sale de "Para hacer ahora" y no cuenta como "en proceso" en el pulso
+   de la vacante; queda en el filtro "Descartadas" y se puede recuperar. Un informe emitido no
+   se descarta. */
+const MOTIVOS_DESCARTE = [
+  'No se presentó a la entrevista',
+  'No cumple lo básico (se vio en la entrevista)',
+  'Desistió o aceptó otra oferta',
+  'El cliente lo descartó antes del informe',
+  'Registro duplicado o por error',
+  'Otro',
+];
+async function descartarSesion(id, nombre){
+  const r = await preguntar(`¿Descartar a ${nombre || 'este candidato'}?`,
+    'Sale de lo pendiente y del pulso de la vacante. Queda en el filtro “Descartadas” y se puede recuperar.',
+    'Descartar', 'Cancelar', '', MOTIVOS_DESCARTE);
+  if(!r || !r.opcion) return false;
+  try{
+    const out = await api(`/api/sessions/${id}/descartar`, {method: 'POST', body: {motivo: r.opcion, nota: r.texto}});
+    const s = TB.ss.find(x => x.id === id);
+    if(s) Object.assign(s, {descartado_at: out.descartado_at, descarte_motivo: out.descarte_motivo, estado_tablero: 'descartado'});
+    toast(`Descartado: ${nombre || 'candidato'}. Lo encuentras en “Descartadas”.`);
+    return true;
+  }catch(e){ toast('No se pudo descartar: ' + e.message); return false; }
+}
+async function recuperarSesion(id, nombre){
+  try{
+    await api(`/api/sessions/${id}/recuperar`, {method: 'POST', body: {}});
+    const s = TB.ss.find(x => x.id === id);
+    if(s){ s.descartado_at = null; s.descarte_motivo = null; s.estado_tablero = null; }
+    toast(`Recuperado: ${nombre || 'candidato'}.`);
+    return true;
+  }catch(e){ toast('No se pudo recuperar: ' + e.message); return false; }
+}
+// Tras descartar o recuperar desde el tablero: se repinta al tiro y se recarga lo del servidor
+// (que es quien recalcula el pulso).
+function repintarTablero(){
+  if(!$('#vTablero').classList.contains('on')) return;
+  pintarCola(); pintarVacantes(); pintarPulso(); pintarVerificaciones();
+  loadTablero();
 }
 
 /* Corregir el nombre del candidato, en una sesión en curso o en un acta ya emitida. En un
@@ -4532,6 +4631,16 @@ function init(){
     loadTablero();
   });
   $('#btnNuevoIntake').addEventListener('click', () => go('vIntake'));
+  // Descartar desde dentro de la sesión: la entrevista salió mal o el candidato no llegó. Se
+  // guarda lo que haya, se descarta y se vuelve al tablero.
+  $('#btnDescartar').addEventListener('click', async () => {
+    if(!S || !S.sid || S.fin) return;
+    const id = S.sid, nombre = S.cand;
+    await flush(8000);
+    if(!await descartarSesion(id, nombre)) return;
+    S = null; VAC = null; clearLocal();
+    loadTablero();
+  });
   $('#topNav').querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', () => navegar(b.dataset.nav)));
   // Ojo: esto era solo un scrollIntoView, y en un tablero corto la página no tiene scroll,
   // así que el botón no hacía absolutamente nada visible. Un botón que no da señal de haber

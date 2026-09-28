@@ -75,6 +75,23 @@ const t = async (nombre, fn) => { await fn(); n++; console.log('  ✓', nombre);
     assert.ok(mov && mov.atendida && mov.trabajadas === 1 && mov.vacantes === 1, JSON.stringify(r.body.empresas));
   });
 
+  await t('descartar: rechaza un emitido y sin motivo; descarta, saca del pulso y se recupera', async () => {
+    const ses = await llamar('GET /api/sessions', {}, {});
+    const carla = ses.body.find(s => s.candidate === 'Carla Proceso');
+    const ana = ses.body.find(s => s.candidate === 'Ana Apta');
+    assert.strictEqual((await llamar('POST /api/sessions/:id/descartar', { id: String(ana.id) }, { motivo: 'Otro' })).status, 409);
+    assert.strictEqual((await llamar('POST /api/sessions/:id/descartar', { id: String(carla.id) }, { motivo: 'porque sí' })).status, 400);
+    const d = await llamar('POST /api/sessions/:id/descartar', { id: String(carla.id) }, { motivo: 'Desistió o aceptó otra oferta', nota: 'aceptó en otra empresa' });
+    assert.strictEqual(d.status, 200, JSON.stringify(d.body));
+    const lista = (await llamar('GET /api/sessions', {}, {})).body.find(s => s.id === carla.id);
+    assert.strictEqual(lista.estado_tablero, 'descartado'); assert.strictEqual(lista.descarte_motivo, 'Desistió o aceptó otra oferta');
+    let p = (await llamar('GET /api/tablero', {}, {})).body.pulso.vacantes.find(x => Number(x.id) === Number(vid));
+    assert.strictEqual(p.en_proceso, 0); assert.strictEqual(p.descartados, 1);
+    assert.strictEqual((await llamar('POST /api/sessions/:id/recuperar', { id: String(carla.id) }, {})).status, 200);
+    p = (await llamar('GET /api/tablero', {}, {})).body.pulso.vacantes.find(x => Number(x.id) === Number(vid));
+    assert.strictEqual(p.en_proceso, 1); assert.strictEqual(p.descartados, 0);
+  });
+
   await t('cerrada: sale del movimiento y no tiene probabilidad', async () => {
     await llamar('PATCH /api/vacancies/:id', { id: String(vid) }, { status: 'cerrada' });
     const r = await llamar('GET /api/tablero', {}, {});

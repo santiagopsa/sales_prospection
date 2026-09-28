@@ -200,6 +200,7 @@ function conciliarEmpleo(ancla, r) {
 function estadoTablero(s, ahora = Date.now()) {
   if (!s) return 'en_curso';
   if (s.status === 'issued') return 'emitido';
+  if (s.descartado_at) return 'descartado';
   const tr = estadoTranscripcion(s, ahora).estado;
   if (tr === 'procesando') return 'analizando';
   if (tr === 'error') return 'fallo';
@@ -297,6 +298,18 @@ function estadisticas(sesiones, { evaluador = '', ahora = Date.now(), semanas = 
 // Es una regla que se explica en una línea a propósito: el reclutador tiene que poder
 // decirle al cliente por qué una vacante está "alta" sin abrir una fórmula.
 // ---------------------------------------------------------------------------------------
+// Por qué se descarta un candidato que no va a seguir en la verificación. Se descarta para que
+// no se quede en "Para hacer ahora" ni cuente como "en proceso" en el pulso de la vacante;
+// se puede recuperar. Un informe ya emitido no se descarta: ya es un resultado.
+const MOTIVOS_DESCARTE = [
+  'No se presentó a la entrevista',
+  'No cumple lo básico (se vio en la entrevista)',
+  'Desistió o aceptó otra oferta',
+  'El cliente lo descartó antes del informe',
+  'Registro duplicado o por error',
+  'Otro',
+];
+
 const TERNA = 3;
 const DIAS_RECIENTE = 14;
 const ms = x => { const n = x ? new Date(x).getTime() : NaN; return isNaN(n) ? null : n; };
@@ -310,7 +323,10 @@ const PROB_ORDEN = { alta: 0, media: 1, baja: 2 };
 
 function pulsoVacante(v, sesiones, { ahora = Date.now(), dias = DIAS_RECIENTE } = {}) {
   const t = new Date(ahora).getTime(), desde = t - dias * 86400000;
-  const cs = (Array.isArray(sesiones) ? sesiones : []).filter(s => s.vacancy_id != null && Number(s.vacancy_id) === Number(v.id));
+  const deVac = (Array.isArray(sesiones) ? sesiones : []).filter(s => s.vacancy_id != null && Number(s.vacancy_id) === Number(v.id));
+  // Los descartados no cuentan: no son validaciones ni están en proceso.
+  const cs = deVac.filter(s => s.status === 'issued' || !s.descartado_at);
+  const descartados = deVac.length - cs.length;
   const validados = cs.filter(s => s.status === 'issued');
   const res = validados.map(resultadoSesion);
   const aptos = res.filter(r => r === 'ok').length;
@@ -347,7 +363,7 @@ function pulsoVacante(v, sesiones, { ahora = Date.now(), dias = DIAS_RECIENTE } 
   return {
     id: v.id, title: v.title || '', company_name: v.company_name || '', status: v.status || 'activa',
     created_at: v.created_at || null,
-    validaciones: cs.length, validados: validados.length, aptos, parciales, no_cumplen, en_proceso,
+    validaciones: cs.length, validados: validados.length, aptos, parciales, no_cumplen, en_proceso, descartados,
     validados_recientes, ultima_actividad: ultima ? new Date(ultima).toISOString() : null,
     reciente, motivo: reciente ? (movida ? 'actividad' : 'nueva') : null,
     probabilidad, faltan, terna: TERNA, razon,
@@ -466,7 +482,7 @@ function indicadoresSemana(sesiones, vacantes, { fecha = null, evaluador = '', a
   // Tasas de los últimos 28 días hasta el cierre de la semana (o hoy, si la semana está en curso).
   const hasta = domingo < hoy ? domingo : hoy, desde = sumarDias(hasta, -(diasTasas - 1));
   const enT = d => d && d >= desde && d <= hasta;
-  const entT = mias.filter(s => enT(dEnt(s)));
+  const entT = mias.filter(s => enT(dEnt(s)) && (s.status === 'issued' || !s.descartado_at));   // un descartado no iba a tener informe
   const infT = mias.filter(s => enT(dInf(s)));
   const conReqT = infT.filter(s => Number(s.req_total) > 0);
   const vacT = [...new Set(entT.concat(infT).map(vid).filter(x => x != null))];
@@ -498,7 +514,7 @@ function indicadoresSemana(sesiones, vacantes, { fecha = null, evaluador = '', a
 
 module.exports = {
   estadoTablero, claveEvaluador, estadisticas, diaLocal,
-  pulsoVacante, pulsoVacantes, resultadoSesion, TERNA, DIAS_RECIENTE, indicadoresSemana,
+  pulsoVacante, pulsoVacantes, resultadoSesion, TERNA, DIAS_RECIENTE, indicadoresSemana, MOTIVOS_DESCARTE,
   mismaEmpresa, conciliarEmpleo, ESTADOS_EMPLEO,
   LVLTXT, MAX_REQ, ID_ITEMS, itemsDe, KINDS, esCierre, clean, estadoTranscripcion, TRANSCRIPCION_STALE_MS,
   semaforo, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode,

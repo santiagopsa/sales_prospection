@@ -11,7 +11,7 @@
 const express = require('express');
 const path = require('path');
 const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt, leerTraduccion } = require('./prompts');
-const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana } = require('./rules');
+const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana, MOTIVOS_DESCARTE } = require('./rules');
 const didit = require('./didit');
 const { T, SCHEMA, initSchema } = require('./schema');
 const OPS = require('./ops');
@@ -449,7 +449,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         const cs = await pool.query(`
           SELECT s.id, s.vacancy_id, s.report_code, s.candidate, s.evaluator, s.kind, s.status, s.semaforo,
                  s.started_at, s.issued_at, s.transcript_at, s.entrevista_at, s.updated_at, s.created_at,
-                 s.transcript_status, s.transcript_started_at,
+                 s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple
           FROM ${T.sessions} s WHERE s.vacancy_id=$1
@@ -1366,6 +1366,44 @@ ${!code ? `
   // firma de integridad sobre el contenido corregido y queda anotada la corrección (qué campo,
   // antes, después, cuándo), que el informe imprime en su pie. El PDF viejo, con el nombre
   // equivocado, deja de corresponder a la firma vigente: es lo correcto, porque estaba mal.
+  // Descartar / recuperar un candidato que no va a seguir en la verificación.
+  r.post('/api/sessions/:id/descartar', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const motivo = clean(req.body && req.body.motivo);
+      const nota = clean(req.body && req.body.nota).slice(0, 500) || null;
+      if (!MOTIVOS_DESCARTE.includes(motivo)) return res.status(400).json({ error: 'Elige por qué se descarta.' });
+      if (pool) {
+        const q = await pool.query(`SELECT id, status FROM ${T.sessions} WHERE id=$1`, [id]);
+        if (!q.rows.length) return res.status(404).json({ error: 'not found' });
+        if (q.rows[0].status === 'issued') return res.status(409).json({ error: 'Un informe emitido no se descarta: ya es un resultado.' });
+        const u = await pool.query(`UPDATE ${T.sessions} SET descartado_at=NOW(), descarte_motivo=$2, descarte_nota=$3, updated_at=NOW()
+                                    WHERE id=$1 RETURNING descartado_at`, [id, motivo, nota]);
+        return res.json({ ok: true, descartado_at: u.rows[0].descartado_at, descarte_motivo: motivo, descarte_nota: nota });
+      }
+      const s = mem.sessions.find(x => x.id === id);
+      if (!s) return res.status(404).json({ error: 'not found' });
+      if (s.status === 'issued') return res.status(409).json({ error: 'Un informe emitido no se descarta: ya es un resultado.' });
+      Object.assign(s, { descartado_at: new Date().toISOString(), descarte_motivo: motivo, descarte_nota: nota, updated_at: new Date().toISOString() });
+      res.json({ ok: true, descartado_at: s.descartado_at, descarte_motivo: motivo, descarte_nota: nota });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+  r.post('/api/sessions/:id/recuperar', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (pool) {
+        const u = await pool.query(`UPDATE ${T.sessions} SET descartado_at=NULL, descarte_motivo=NULL, descarte_nota=NULL, updated_at=NOW()
+                                    WHERE id=$1 RETURNING id`, [id]);
+        if (!u.rows.length) return res.status(404).json({ error: 'not found' });
+        return res.json({ ok: true });
+      }
+      const s = mem.sessions.find(x => x.id === id);
+      if (!s) return res.status(404).json({ error: 'not found' });
+      Object.assign(s, { descartado_at: null, descarte_motivo: null, descarte_nota: null, updated_at: new Date().toISOString() });
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   r.post('/api/sessions/:id/candidato', async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -1493,7 +1531,7 @@ ${!code ? `
           SELECT s.id, s.vacancy_id, s.report_code, s.candidate, s.evaluator, s.mode, s.kind, s.status, s.semaforo,
                  s.didit_status, s.face_verdict, s.face_score, s.id_note,
                  s.started_at, s.issued_at, s.transcript_at, s.entrevista_at, s.updated_at,
-                 s.transcript_status, s.transcript_started_at,
+                 s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple,
                  v.title AS vacancy_title, c.name AS company_name
@@ -1522,7 +1560,7 @@ ${!code ? `
     if (pool) {
       const q = await pool.query(`
         SELECT s.id, s.vacancy_id, s.evaluator, s.status, s.semaforo, s.started_at, s.entrevista_at, s.issued_at, s.transcript_at,
-               s.transcript_status, s.transcript_started_at, s.updated_at, s.created_at,
+               s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo, s.updated_at, s.created_at,
                (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
                (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple
         FROM ${T.sessions} s`);

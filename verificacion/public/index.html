@@ -49,6 +49,7 @@
       <div class="tm"><div class="lb">Total</div><div class="vl mono" id="tTotal">0:00</div></div>
     </div>
     <span class="pill" id="dbPill" title="Estado de la base de datos">···</span>
+    <button class="tbtn descartar" id="btnDescartar" type="button" style="display:none" title="El candidato no sigue en la verificación: sale de lo pendiente y se puede recuperar">Descartar candidato</button>
     <button class="tbtn" id="btnReset" style="display:none">Salir de la sesión</button>
   </div>
 </div>
@@ -113,6 +114,7 @@
             <button type="button" data-fs="todas" class="sel">Todas</button>
             <button type="button" data-fs="pendientes">Pendientes</button>
             <button type="button" data-fs="emitidas">Emitidas</button>
+            <button type="button" data-fs="descartadas">Descartadas</button>
           </div>
         </div>
         <div id="sesList"><div class="empty">Cargando…</div></div>
@@ -294,6 +296,7 @@
   <div class="obox">
     <b id="pgTitulo"></b>
     <span id="pgTexto"></span>
+    <select id="pgSelect" style="display:none;width:100%;margin-top:12px"></select>
     <input id="pgInput" type="text" style="display:none;width:100%;margin-top:12px" autocomplete="off">
     <div class="tools" style="margin-top:18px">
       <button id="pgNo" type="button">Seguir aquí</button>

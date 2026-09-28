@@ -1414,3 +1414,22 @@ button.ores.sel{border-color:var(--acc);background:var(--acc-soft)}
 .onacc .cta{width:auto;padding:9px 18px;font-size:14px}
 @media (max-width:760px){ .onform{grid-template-columns:1fr 1fr} }
 @media (max-width:640px){ .topnav{overflow-x:auto} .topnav button{flex:none} .navsep{display:none} }
+
+/* ============ Descartar candidatos ============ */
+.descbtn{flex:none;font-size:11.5px;font-weight:700;color:var(--ink3);border:1px solid transparent;border-radius:6px;padding:4px 8px;background:transparent;white-space:nowrap}
+.descbtn:hover{color:var(--crit);border-color:var(--crit);background:var(--crit-soft)}
+.descbtn.rec{color:var(--acc);border-color:var(--line2)}
+.descbtn.rec:hover{color:var(--acc-ink);border-color:var(--acc);background:var(--acc-soft)}
+.row.descartada .rowmain b{color:var(--ink3);text-decoration:line-through;text-decoration-color:var(--line2)}
+.rowmain .motdesc{color:var(--ink2)}
+.row{cursor:pointer}
+.crow{grid-template-columns:150px minmax(0,1fr) auto auto auto}
+.vdesc summary{cursor:pointer;list-style:none}
+.vdesc summary::-webkit-details-marker{display:none}
+.vdesc summary::before{content:'▸ ';color:var(--ink3)}
+.vdesc[open] summary::before{content:'▾ '}
+.tbtn.descartar{color:var(--crit);border-color:var(--crit)}
+.tbtn.descartar:hover{background:var(--crit-soft)}
+#pgSelect{background:var(--bg);border:1px solid var(--line2);border-radius:7px;padding:8px 10px;font-size:14px;color:var(--ink)}
+#pgSi:disabled{opacity:.45;cursor:not-allowed}
+@media (max-width:640px){ .crow{grid-template-columns:1fr auto} .crow .descbtn{grid-column:1 / -1;justify-self:start} }
