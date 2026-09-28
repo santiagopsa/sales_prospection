@@ -42,7 +42,12 @@ async function api(env, url, { fetchFn = fetch } = {}) {
   if (!t) throw error(400, 'Falta CALENDLY_TOKEN');
   const r = await fetchFn(url.startsWith('http') ? url : API + url, { headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' } });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw error(502, `Calendly ${r.status}: ${j.message || j.title || 'error'}`);
+  if (!r.ok) {
+    // En un 403 por permisos Calendly dice qué scopes faltan: se muestran para saber qué marcar en el token.
+    const faltan = j.required_scopes || (j.details && [].concat(...j.details.map(d => d.required_scopes || []))) || [];
+    const ruta = String(url).replace(API, '').split('?')[0];
+    throw error(502, `Calendly ${r.status} en ${ruta}: ${j.message || j.title || 'error'}${faltan.length ? ` Faltan permisos en el token: ${faltan.join(', ')}.` : ''}`);
+  }
   return j;
 }
 
