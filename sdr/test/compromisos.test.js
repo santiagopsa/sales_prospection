@@ -148,12 +148,33 @@ test('compromisos contra la base', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }
     const c = await C.leer(db, r.compromiso_id);
     assert.strictEqual(c.tipo, 'reunion'); assert.strictEqual(c.usuario, 'Luisa'); assert.strictEqual(c.con_hora, true);
     assert.match(c.nota, /2 devs/);
-    // El fetch de Google no está inyectado en registrarToque: usa el global. Sin red aquí → error guardado, tarea intacta.
-    assert.ok(c.gcal_error || c.gcal_event_id);
+    // Con Calendly activo, la reunión registrada a mano no crea evento en Google (el calendario lo maneja Calendly).
+    assert.strictEqual(c.gcal_event_id, C.SIN_EVENTO);
+    assert.match(r.avisos.join(' '), /lo maneja Calendly/);
+    const g0 = await C.sincronizar(db, base, ENV, c.id, 'mover', opts);
+    assert.strictEqual(g0.omitido, 'sin evento en Google a propósito');
     const luisa = await C.listar(db, base, { usuario: 'Luisa', ahora: lunes });
     assert.strictEqual(luisa.proximos.length, 1);
     await registrarEjecutiva(db, base, { leadId: await id('Beta'), accion: 'reunion_realizada', usuario: 'Luisa', env: ENV });
     assert.strictEqual((await db.query(`SELECT estado FROM sdr.tasks WHERE id=$1`, [c.id])).rows[0].estado, 'hecha');
+  });
+
+  await t.test('sin Calendly la reunión sí va a Google; quitarDelCalendario borra el evento y lo marca', async () => {
+    const sinCal = { ...base, CALENDLY: null };
+    await db.query(`INSERT INTO sdr.leads (empresa, contacto, telefono) VALUES ('Epsilon', 'Eva', '+573004444444')`);
+    const r = await registrarToque(db, sinCal, { leadId: await id('Epsilon'), canal: 'llamada', resultado: 'reunion_agendada', usuario: 'Angie', ahora: lunes, env: {},
+      detalle: { reunion_at: '2026-09-26T15:00:00.000Z', ejecutiva: 'Luisa' } });
+    const t = await C.leer(db, r.compromiso_id);
+    assert.notStrictEqual(t.gcal_event_id, C.SIN_EVENTO);
+    // Simula que quedó con evento en Google y se limpia.
+    const ev = await C.crear(db, base, ENV, { leadId: await id('Epsilon'), tipo: 'otro', titulo: 'Reunión mal puesta', fecha: '2026-09-27', hora: '10:00', usuario: 'Luisa' }, opts);
+    assert.ok(ev.gcal_event_id || (await C.leer(db, ev.id)).gcal_event_id);
+    const antes = g.eventos.size;
+    const q = await C.quitarDelCalendario(db, base, ENV, ev.id, opts);
+    assert.strictEqual(q.calendario.ok, true);
+    assert.strictEqual(g.eventos.size, antes - 1);
+    assert.strictEqual((await C.leer(db, ev.id)).gcal_event_id, C.SIN_EVENTO);
+    assert.strictEqual((await C.quitarDelCalendario(db, base, ENV, ev.id, opts)).calendario.omitido, 'no tenía evento');
   });
 
   await t.test('reintentarPendientes sube los que quedaron sin evento', async () => {

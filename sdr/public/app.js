@@ -319,7 +319,7 @@
     if (!cs || (!cs.hoy.length && !cs.proximos.length)) return '';
     const item = t => `<div class="compromiso ${t.vencido ? 'vencido' : ''}" data-cid="${t.id}">
         <div class="hora">${t.hora ? esc(t.hora) : (t.fecha ? fecha(t.due_ms) : 'hoy')}</div>
-        <div class="que"><b>${esc(t.titulo || TIPO_LABEL(t.tipo))}</b> <span class="chip ${t.canal}">${esc(TIPO_LABEL(t.tipo))}</span>${t.gcal_event_id ? ` <span class="suave" title="${t.gcal_event_id === 'calendly' ? 'En el calendario (lo creó Calendly)' : 'En Google Calendar'}">📅</span>` : t.gcal_error ? ` <span class="suave" title="${esc(t.gcal_error)}" style="color:var(--mal)">📅!</span>` : ''}
+        <div class="que"><b>${esc(t.titulo || TIPO_LABEL(t.tipo))}</b> <span class="chip ${t.canal}">${esc(TIPO_LABEL(t.tipo))}</span>${t.gcal_event_id ? ` <span class="suave" title="${t.gcal_event_id === 'calendly' ? 'En el calendario (lo creó Calendly)' : t.gcal_event_id === 'sin-evento' ? 'Sin evento en Google (el calendario lo maneja Calendly)' : 'En Google Calendar'}">📅</span>` : t.gcal_error ? ` <span class="suave" title="${esc(t.gcal_error)}" style="color:var(--mal)">📅!</span>` : ''}
           ${t.lead_id ? `<div><a href="#/lead/${t.lead_id}">${esc(t.empresa || 'lead')}</a>${t.contacto ? ' · ' + esc(t.contacto) : ''}${t.telefono ? ' · <span class="num">' + esc(telVisible(t.telefono)) + '</span>' : ''}</div>` : ''}
           ${t.nota ? `<div class="suave" style="font-size:12px;white-space:pre-wrap">${esc(t.nota)}</div>` : ''}
           ${t.usuario && t.usuario !== usuarioActual() ? `<div class="suave" style="font-size:12px">de ${esc(t.usuario)}</div>` : ''}</div>
@@ -1101,8 +1101,8 @@
         const $listo = capa.querySelector('.calendly-listo');
         $listo.hidden = false;
         $listo.innerHTML = `<form id="frm-hora" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-            <div><b>✅ Quedó agendada en Calendly.</b><div class="suave" style="font-size:12px">¿Qué día y a qué hora quedó?</div></div>
-            <input type="datetime-local" name="hora" required value="${fechaLocal(new Date(Date.now() + 86400000))}" />
+            <div><b>✅ Quedó agendada en Calendly.</b><div class="suave" style="font-size:12px">Escribe el día y la hora que escogiste en Calendly (tal cual, para que la reunión quede bien en la app).</div></div>
+            <input type="datetime-local" name="hora" required min="${fechaLocal(new Date())}" />
             <button class="btn primario" type="submit">Registrar reunión</button></form>`;
         capa.querySelector('#frm-hora').addEventListener('submit', ev => {
           ev.preventDefault();
@@ -1129,6 +1129,10 @@
         <b>${l.etapa === 'reunion_agendada' ? 'Reagendarla tú' : 'Agendarla tú'}</b> <span class="suave">· recomendado: el cliente no tiene que hacer nada</span>
         <div class="suave" style="font-size:12px;margin:4px 0 8px">${l.etapa === 'reunion_agendada' ? 'Escoges la nueva hora en Calendly y la reunión se mueve aquí. Después cancela la anterior en Calendly.' : 'Llenas la ficha, escoges la hora en Calendly y queda registrada como reunión agendada.'}</div>
         <button class="btn primario" data-yo>📅 ${l.etapa === 'reunion_agendada' ? 'Reagendar ahora' : 'Agendar ahora'}</button>
+        ${l.etapa === 'reunion_agendada' ? `<details style="margin-top:10px"><summary class="suave" style="cursor:pointer;font-size:12px">La reunión está bien en Calendly pero aquí quedó a otra hora: corregir sin volver a agendar</summary>
+          <form id="frm-corregir" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+            <input type="datetime-local" name="hora" required style="font:inherit;padding:6px 8px;border:1px solid var(--linea);border-radius:8px" />
+            <button class="btn" type="submit">Corregir hora</button></form></details>` : ''}
       </div>
       <p style="margin:12px 0 6px"><b>O mandarle el link</b> <span class="suave" style="font-size:12px">para que escoja él</span></p>` : ''}
       <p class="suave" style="margin:0 0 12px;font-size:12px">El link lleva marcado el lead y el canal: si reserva desde ahí, la reunión queda a tu nombre y por ese canal${meta.calendly.horaDeCalendly ? ' (se detecta sola)' : ' (se detecta cuando esté el token de Calendly; si no, regístrala tú)'}.</p>
@@ -1139,6 +1143,17 @@
         <button class="btn" data-cerrar>Cerrar</button>
       </div><div id="link-msg" class="suave" style="margin-top:10px;font-size:12px;word-break:break-all"></div></div></div>`;
     $modal.querySelector('[data-cerrar]').addEventListener('click', () => { $modal.innerHTML = ''; });
+    const $corr = $modal.querySelector('#frm-corregir');
+    if ($corr) $corr.addEventListener('submit', async e => {
+      e.preventDefault();
+      const v = new FormData($corr).get('hora');
+      try {
+        const x = await api(`leads/${l.id}/reagendar`, { method: 'POST', body: { reunion_at: new Date(v + ':00-05:00').toISOString(), nota: 'Hora corregida (ya estaba bien en Calendly)' } });
+        $modal.innerHTML = '';
+        avisar(`Hora corregida: ${fechaHora(new Date(x.reunion_at).getTime())}.`);
+        if (despues) despues(x);
+      } catch (err) { document.getElementById('link-msg').innerHTML = pintarError(err); }
+    });
     const $yo = $modal.querySelector('[data-yo]');
     if ($yo) $yo.addEventListener('click', async () => {
       if (l.etapa !== 'reunion_agendada') { $modal.innerHTML = ''; return abrirResultado(l, { agendar: true, alTerminar: despues }); }
@@ -1201,7 +1216,7 @@
             ${meta.calendly.permitirManual ? `<label class="check"><input type="checkbox" name="manual" value="1"> Ya quedó agendada por fuera de Calendly (pongo la fecha a mano)</label>` : ''}</div>` : ''}
           <div id="fecha-manual" ${meta.calendly ? 'hidden' : ''}>
             <label>Fecha y hora de la reunión</label>
-            <input type="datetime-local" name="reunion_at" value="${fechaLocal(enUnaHora)}" />
+            <input type="datetime-local" name="reunion_at" min="${fechaLocal(new Date(Date.now() - 86400000))}" />
           </div>
           <div class="dos">
             <div><label>Ejecutiva que atiende</label><input name="ejecutiva" placeholder="Luisa" value="${esc(meta.calendly ? meta.calendly.ejecutiva : (meta.usuarios || []).find(u => u.rol === 'ejecutiva') ? (meta.usuarios || []).find(u => u.rol === 'ejecutiva').nombre : '')}" /></div>
@@ -1273,6 +1288,8 @@
         if (resultado === 'descartado') { body.razon = f.get('razon'); body.reintento_meses = Number(f.get('reintento') || 0); }
         if (resultado === 'reunion_agendada') {
           const local = f.get('reunion_at');
+          const aMano = !meta.calendly || (f.get('manual') && !reservasEnLlamada[l.id]);
+          if (aMano && !local) { document.getElementById('frm-error').innerHTML = pintarError(new Error('Pon la fecha y la hora de la reunión.')); return; }
           body.detalle = {
             reunion_at: local ? new Date(local + ':00-05:00').toISOString() : null,
             ejecutiva: f.get('ejecutiva'), linea_negocio: f.get('linea_negocio'),

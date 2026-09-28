@@ -128,6 +128,7 @@ function rutas({ db, config }) {
       const usuario = require('./resultados').usuarioValido(config, b.usuario);
       return C.crear(db, config, process.env, { leadId: b.lead_id, tipo: b.tipo, titulo: b.titulo, canal: b.canal, fecha: b.fecha, hora: b.hora, nota: b.nota, usuario: require('./resultados').usuarioValido(config, b.dueno) || usuario, creadoPor: usuario });
     }],
+    ['post', '/api/tareas/:id/quitar-del-calendario', async ({ params }) => { sinDb(); return C.quitarDelCalendario(db, config, process.env, params.id); }],
     ['post', '/api/tareas/:id/hecha', async ({ params, body }) => { sinDb(); return C.hecha(db, config, process.env, params.id, { deshacer: !!(body || {}).deshacer }); }],
     ['post', '/api/tareas/:id/eliminar', async ({ params }) => { sinDb(); return C.eliminar(db, config, process.env, params.id); }],
     ['post', '/api/tareas/:id/mover', async ({ params, body }) => { sinDb(); const b = body || {}; return C.mover(db, config, process.env, params.id, { fecha: b.fecha, hora: b.hora, dias: b.dias, titulo: b.titulo, nota: b.nota }); }],

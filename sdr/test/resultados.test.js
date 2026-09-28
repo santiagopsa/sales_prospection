@@ -88,7 +88,7 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
     });
     assert.strictEqual(r.etapa, 'reunion_agendada');
     assert.ok(r.deal_id);
-    assert.deepStrictEqual(r.avisos, ['Reunión anotada como compromiso de Luisa.']);
+    assert.deepStrictEqual(r.avisos, ['Reunión anotada como compromiso de Luisa; el evento lo maneja Calendly.']);
     assert.ok(r.compromiso_id);
     const deal = (await db.query('SELECT * FROM public.deals WHERE id=$1', [r.deal_id])).rows[0];
     assert.strictEqual(deal.company, 'ACME');

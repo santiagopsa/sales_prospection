@@ -63,6 +63,10 @@ async function leer(db, id) {
 
 // Marca en gcal_event_id de un compromiso cuyo evento ya existe porque lo creó Calendly.
 const EN_CALENDLY = 'calendly';
+// Marca de un compromiso que a propósito no tiene evento en Google (reunión registrada a mano con
+// Calendly activo: el calendario de la ejecutiva lo maneja Calendly).
+const SIN_EVENTO = 'sin-evento';
+const reunionSinGoogle = (config, detalle) => !!((config.CALENDLY || {}).url) && !(config.CALENDLY || {}).duplicar_en_google;
 
 // Sincroniza con Google Calendar. accion: 'crear' | 'mover' | 'borrar'. Nunca lanza: devuelve
 // { ok, error } y deja el resultado en la fila.
@@ -71,6 +75,7 @@ async function sincronizar(db, config, env, taskId, accion, { fetchFn, invitados
   try { t = await leer(db, taskId); } catch (e) { return { ok: false, error: e.message }; }
   // La reunión la creó Calendly en el calendario de la ejecutiva: no se duplica en Google.
   if (t.gcal_event_id === EN_CALENDLY) return { ok: true, omitido: 'el evento lo creó Calendly' };
+  if (t.gcal_event_id === SIN_EVENTO) return { ok: true, omitido: 'sin evento en Google a propósito' };
   if (!cal.activo(env)) return { ok: false, error: null, omitido: 'sin llave' };
   if (!(config.CALENDARIO_TIPOS || []).includes(t.tipo)) return { ok: false, error: null, omitido: 'tipo no sincronizado' };
   const usuario = t.gcal_usuario ? (config.USUARIOS || []).find(u => u.email === t.gcal_usuario) : null;
@@ -95,6 +100,16 @@ async function sincronizar(db, config, env, taskId, accion, { fetchFn, invitados
     console.error('[sdr/calendario]', accion, 'tarea', t.id, e.message);
     return { ok: false, error: e.message };
   }
+}
+
+// Borra el evento de Google de un compromiso (si lo tiene) y lo deja marcado sin evento. Para limpiar
+// reuniones que quedaron en el calendario a una hora equivocada.
+async function quitarDelCalendario(db, config, env, taskId, opts = {}) {
+  const t = await leer(db, taskId);
+  let g = { ok: true, omitido: 'no tenía evento' };
+  if (t.gcal_event_id && ![EN_CALENDLY, SIN_EVENTO].includes(t.gcal_event_id)) g = await sincronizar(db, config, env, t.id, 'borrar', opts);
+  if (g.ok) await db.query(`UPDATE ${T.tasks} SET gcal_event_id = $2, gcal_error = NULL WHERE id = $1`, [t.id, SIN_EVENTO]);
+  return { id: t.id, calendario: g };
 }
 
 async function crear(db, config, env, datos, opts = {}) {
@@ -184,4 +199,4 @@ function ejecutivaPara(config, nombre) {
   return (pedida && pedida.rol === 'ejecutiva' ? pedida : us.find(u => u.rol === 'ejecutiva')) || null;
 }
 
-module.exports = { insertar, crear, hecha, eliminar, mover, listar, leer, sincronizar, reintentarPendientes, ejecutivaPara, vencimiento, EN_CALENDLY };
+module.exports = { insertar, crear, hecha, eliminar, mover, listar, leer, sincronizar, reintentarPendientes, ejecutivaPara, vencimiento, quitarDelCalendario, reunionSinGoogle, EN_CALENDLY, SIN_EVENTO };

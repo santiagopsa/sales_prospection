@@ -253,12 +253,13 @@ async function registrarToque(db, config, {
             usuario: eje.nombre, creadoPor: usuario, invitados: emailAngie ? [emailAngie] : [],
           });
           compromisoCreado = t.id; proxima = proxima || null;
-          // Si vino de Calendly, el evento ya está en el calendario de la ejecutiva (con el invitado).
-          if (detalle && detalle.calendly && !(config.CALENDLY || {}).duplicar_en_google) {
-            await c.query(`UPDATE ${T.tasks} SET gcal_event_id = $2 WHERE id = $1`, [t.id, C.EN_CALENDLY]);
-          }
-          avisos.push(detalle && detalle.calendly && !(config.CALENDLY || {}).duplicar_en_google
-            ? `Reunión anotada como compromiso de ${eje.nombre}; el evento y la invitación los manda Calendly.`
+          // Con Calendly activo, el calendario de la ejecutiva lo maneja Calendly: la app no crea eventos
+          // de reunión en Google (ni para las que vienen de Calendly ni para las registradas a mano),
+          // para no dejar reuniones de más o a horas equivocadas.
+          const sinGoogle = C.reunionSinGoogle(config, detalle);
+          if (sinGoogle) await c.query(`UPDATE ${T.tasks} SET gcal_event_id = $2 WHERE id = $1`, [t.id, detalle && detalle.calendly ? C.EN_CALENDLY : C.SIN_EVENTO]);
+          avisos.push(sinGoogle
+            ? `Reunión anotada como compromiso de ${eje.nombre}; el evento lo maneja Calendly.`
             : `Reunión anotada como compromiso de ${eje.nombre}${emailAngie ? ' (te llega la invitación al calendario)' : ''}.`);
         }
       }
