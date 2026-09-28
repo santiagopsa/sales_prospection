@@ -226,7 +226,9 @@ webhooks → Personal access tokens; en Render como variable de entorno), cada `
 - Las reservas que el prospecto hace **solo, desde el link** que le mandaron quedan como *Reunión agendada* del
   lead (por `utm_content`, o por el correo si el link no venía marcado), con el canal del link y a nombre de la
   SDR que lo mandó. Crean el deal en el Sandler y el compromiso de Luisa igual que desde la app.
-- Si reagenda, se mueve la hora. Si **cancela**, el lead vuelve a la SDR en *Conversación* con una llamada al día
+- Si reagenda, se mueve la hora. Si la hora de una reunión quedó mal escrita en la app, se corrige sola con la
+  de Calendly. Una reserva de otra persona de una empresa que ya tiene reunión (mismo dominio de correo, o el
+  nombre de la empresa en la reserva) solo ajusta la hora de esa reunión; nunca crea una reunión nueva. Si **cancela**, el lead vuelve a la SDR en *Conversación* con una llamada al día
   siguiente (`CALENDLY.tras_cancelacion`), y en la comisión aparece como *Cancelada*.
 - Las reservas que no son de ningún lead quedan en `sdr.calendly_eventos` con estado `sin_lead`
   (`GET /api/calendly/estado`). `POST /api/calendly/sincronizar` fuerza una pasada.

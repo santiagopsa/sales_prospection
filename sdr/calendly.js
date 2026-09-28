@@ -117,16 +117,42 @@ async function sincronizar(db, config, env, { ahora = new Date(), fetchFn, log =
   const sdrs = (config.USUARIOS || []).filter(u => u.rol === 'sdr').map(u => u.nombre);
 
   for (const ev of await reservas(env, me.uri, { status: 'active', desde, opts })) {
-    if (conocidas.has(ev.uri)) continue;
+    const k = conocidas.get(ev.uri);
+    if (k && k.estado === 'registrado') {
+      // Ya la conocemos: si es la reunión vigente del lead y la hora de la app no coincide con la de
+      // Calendly (se escribió mal a mano, o la movieron en Calendly), se corrige.
+      if (k.lead_id && ev.start_time) {
+        const l = (await db.query(`SELECT etapa, reunion_at FROM ${T.leads} WHERE id = $1`, [k.lead_id])).rows[0];
+        const ultima = (await db.query(`SELECT uri FROM ${T.calendly} WHERE lead_id = $1 AND estado = 'registrado' ORDER BY created_at DESC LIMIT 1`, [k.lead_id])).rows[0];
+        if (l && l.etapa === 'reunion_agendada' && ultima && ultima.uri === ev.uri && (!l.reunion_at || new Date(l.reunion_at).getTime() !== new Date(ev.start_time).getTime())) {
+          await db.query(`UPDATE ${T.leads} SET reunion_at = $2 WHERE id = $1`, [k.lead_id, ev.start_time]);
+          await db.query(`UPDATE ${T.calendly} SET inicio = $2, updated_at = NOW() WHERE uri = $1`, [ev.uri, ev.start_time]);
+          res.movidas++;
+        }
+      }
+      continue;
+    }
+    if (k && k.estado === 'cancelado') continue;
     try {
+      // Nueva, o una sin lead que se vuelve a intentar (pudo cargarse el lead o su correo después).
       const e = await resolver(env, { event_uri: ev.uri }, opts);
       let leadId = leadDeTracking(e.tracking);
       if (!leadId && e.email) {
-        const l = await db.query(`SELECT id FROM ${T.leads} WHERE LOWER(email) = LOWER($1) ORDER BY id DESC LIMIT 1`, [e.email]);
+        const l = await db.query(`SELECT id FROM ${T.leads} WHERE LOWER(email) = LOWER($1) OR LOWER(extra->>'email_alt') = LOWER($1) ORDER BY id DESC LIMIT 1`, [e.email]);
         leadId = l.rows[0] ? l.rows[0].id : null;
       }
-      const lead = leadId ? (await db.query(`SELECT id, etapa FROM ${T.leads} WHERE id = $1`, [leadId])).rows[0] : null;
-      if (!lead) { await registrarEvento(db, { ...e, origen: 'sincronizacion', estado: 'sin_lead' }); res.sin_lead++; continue; }
+      let lead = leadId ? (await db.query(`SELECT id, etapa FROM ${T.leads} WHERE id = $1`, [leadId])).rows[0] : null;
+      // Coincidencia aproximada (dominio del correo de la empresa o nombre de la empresa en la reserva):
+      // solo para ubicar la hora de una reunión que el lead YA tiene; nunca crea una reunión nueva.
+      let aproximada = false;
+      if (!lead) { lead = await reunionPorEmpresa(db, e); aproximada = !!lead; }
+      if (!lead) { await registrarEvento(db, { ...e, origen: 'sincronizacion', estado: 'sin_lead' }); if (!k) res.sin_lead++; continue; }
+      if (aproximada) {
+        await db.query(`UPDATE ${T.leads} SET reunion_at = $2 WHERE id = $1`, [lead.id, e.inicio]);
+        await registrarEvento(db, { ...e, lead_id: lead.id, origen: 'sincronizacion', estado: 'registrado' });
+        res.movidas++;
+        continue;
+      }
       const t = e.tracking || {};
       if (lead.etapa === 'reunion_agendada') {
         // Ya tenía reunión (reagendó, o la registró a mano): se toma la hora de Calendly.
@@ -163,6 +189,23 @@ async function sincronizar(db, config, env, { ahora = new Date(), fetchFn, log =
     } catch (err) { res.errores.push(`${ev.uri}: ${err.message}`); log.error('[sdr/calendly]', err.message); }
   }
   return res;
+}
+
+const CORREO_PERSONAL = ['gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com', 'yahoo.es', 'live.com', 'icloud.com', 'hotmail.es', 'outlook.es', 'msn.com'];
+// Lead con reunión agendada de la misma empresa que la reserva: por el dominio del correo (si no es
+// uno personal) o porque el nombre de la empresa aparece en el nombre de la reserva ("Conoce Peaku! -
+// Clinicos"). Solo devuelve un lead si hay exactamente uno que coincide.
+async function reunionPorEmpresa(db, e) {
+  const LN = require('./listanegra');
+  const cand = (await db.query(`SELECT id, etapa, empresa, email FROM ${T.leads} WHERE etapa = 'reunion_agendada'`)).rows;
+  const dom = String(e.email || '').toLowerCase().split('@')[1] || '';
+  let hits = [];
+  if (dom && !CORREO_PERSONAL.includes(dom)) hits = cand.filter(l => String(l.email || '').toLowerCase().endsWith('@' + dom));
+  if (!hits.length && e.nombre) {
+    const texto = ' ' + (LN.normalizarEmpresa(e.nombre) || '') + ' ';
+    hits = cand.filter(l => { const n = LN.normalizarEmpresa(l.empresa); return n && n.length >= 4 && n !== 'sin empresa' && texto.includes(' ' + n + ' '); });
+  }
+  return hits.length === 1 ? hits[0] : null;
 }
 
 async function estado(db, config, env) {

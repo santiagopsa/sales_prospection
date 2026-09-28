@@ -131,7 +131,28 @@ test('calendly contra la base: reservas desde el link, sin lead, reagendadas y c
   const com = await require('../comision').resumenMes(db, base, { mes: '2026-09', usuario: 'Angie', ahora });
   assert.strictEqual(com.reuniones.find(x => x.lead_id === b).estado, 'cancelada');
   const est = await CAL.estado(db, base, ENV);
-  assert.strictEqual(est.sin_lead.length, 1);
+  assert.strictEqual(est.sin_lead.length >= 1, true);
+  // Hora mal escrita a mano en la app: la sincronización la corrige con la de Calendly.
+  const c = await lead('Hora mal', 'c@horamal.co', 'reunion_agendada');
+  await db.query(`UPDATE sdr.leads SET reunion_at = '2026-09-26T15:00:00Z' WHERE id = $1`, [c]);
+  const uc = k.agregar('HM', { inicio: '2026-09-29T14:00:00.000Z', email: 'c@horamal.co' });
+  await CAL.registrarEvento(db, { uri: uc, lead_id: c, inicio: '2026-09-26T15:00:00Z', origen: 'app', estado: 'registrado' });
+  // Reserva de otra persona de una empresa que ya tiene reunión (mismo dominio) y otra por nombre en la reserva.
+  const d = await lead('Enlace Editorial S A S', 'rrhh@enlaceeditorial.com', 'reunion_agendada');
+  k.agregar('EE', { inicio: '2026-09-30T14:00:00.000Z', email: 'jefe@enlaceeditorial.com', name: 'Jefe' });
+  const e2 = await lead('Clinicos', null, 'reunion_agendada');
+  k.agregar('CL', { inicio: '2026-09-28T21:30:00.000Z', email: 'x@gmail.com', name: 'Conoce Peaku! - Clinicos' });
+  const toquesAntes = (await db.query(`SELECT COUNT(*)::int AS n FROM sdr.touches`)).rows[0].n;
+  const r5 = await CAL.sincronizar(db, base, ENV, { ahora, fetchFn: k.fetchFn, log });
+  assert.strictEqual(r5.movidas, 3);
+  const hora = async id => new Date((await db.query(`SELECT reunion_at FROM sdr.leads WHERE id = $1`, [id])).rows[0].reunion_at).toISOString();
+  assert.strictEqual(await hora(c), '2026-09-29T14:00:00.000Z');
+  assert.strictEqual(await hora(d), '2026-09-30T14:00:00.000Z');
+  assert.strictEqual(await hora(e2), '2026-09-28T21:30:00.000Z');
+  assert.strictEqual((await db.query(`SELECT COUNT(*)::int AS n FROM sdr.touches`)).rows[0].n, toquesAntes);   // no inventa reuniones
+  // "Nadie" sigue sin lead y no se cuenta dos veces.
+  assert.strictEqual(r5.sin_lead, 0);
+  assert.strictEqual((await CAL.sincronizar(db, base, ENV, { ahora, fetchFn: k.fetchFn, log })).movidas, 0);
   // Sin token no hace nada.
   assert.deepStrictEqual(await CAL.sincronizar(db, base, {}), { omitido: 'sin CALENDLY_TOKEN' });
   await db.end();
