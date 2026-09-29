@@ -362,3 +362,6 @@ a.chip.fuego:hover { text-decoration: none; background: #ffe4cc; }
 .lista-leads li.hecho { opacity: .55; }
 .lista-leads .q { flex: 1; min-width: 0; }
 .lista-leads .q b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Aviso de versión nueva: se queda hasta recargar */
+.toast.version-nueva { top: 112px; bottom: auto; background: var(--texto); display: flex; align-items: center; gap: 10px; z-index: 70; }
+.toast.version-nueva .btn { background: #fff; color: var(--texto); border-color: #fff; font-size: 12px; }

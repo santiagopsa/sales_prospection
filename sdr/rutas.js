@@ -2,6 +2,7 @@
 // (producción) y el servidor de desarrollo sin dependencias (sdr/dev.js), así que las dos
 // formas de correr el módulo no pueden divergir.
 const { importar } = require('./importar');
+const VERSION = String(Date.now());
 const { consultarCola, posponerTarea } = require('./cola');
 const L = require('./leads');
 const D = require('./dominio');
@@ -18,6 +19,8 @@ function rutas({ db, config }) {
   const sinDb = () => { if (!db) throw Object.assign(new Error('SDR necesita DATABASE_URL'), { status: 503 }); };
   return [
     ['get', '/api/meta', async () => ({
+      // Cambia con cada arranque del servidor (cada deploy): la pantalla avisa si quedó vieja.
+      version: VERSION,
       etapas: ETAPAS.map(e => ({ id: e, label: ETAPA_LABEL[e] })),
       etapasAngie: D.ETAPAS_DE_ANGIE,
       canales: CANALES.map(c => ({ id: c, label: CANAL_LABEL[c] })),

@@ -1795,4 +1795,21 @@
   window.addEventListener('hashchange', render);
   enlazarBuscador();
   api('meta').then(m => { meta = m; pintarUsuarios(); }).catch(() => {}).finally(render);
+
+  // La pestaña de Angie vive abierta días: cuando hay un deploy nuevo, avisa para recargar (así no se
+  // queda con una versión vieja, sin las cosas nuevas). Se revisa al cambiar de vista, cada 5 min.
+  let ultimaRevision = Date.now();
+  async function revisarVersion() {
+    if (Date.now() - ultimaRevision < 5 * 60 * 1000 || !meta.version) return;
+    ultimaRevision = Date.now();
+    let m; try { m = await api('meta'); } catch (_) { return; }
+    if (!m.version || m.version === meta.version || document.getElementById('version-nueva')) return;
+    const $a = document.createElement('div');
+    $a.id = 'version-nueva'; $a.className = 'toast aviso version-nueva';
+    $a.innerHTML = 'Hay una versión nueva de la app. <button type="button" class="btn mini">Recargar</button>';
+    $a.querySelector('button').addEventListener('click', () => location.reload());
+    document.body.appendChild($a);
+  }
+  window.addEventListener('hashchange', revisarVersion);
+  setInterval(revisarVersion, 5 * 60 * 1000);
 })();
