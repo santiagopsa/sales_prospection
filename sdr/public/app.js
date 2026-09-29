@@ -1145,50 +1145,77 @@
     if ($llamarAlt) $llamarAlt.addEventListener('click', () => iniciarLlamada(l.telefono_alt));
     if ($llamar && puedeLlamar) $llamar.addEventListener('click', () => iniciarLlamada(l.telefono));
     function iniciarLlamada(numero) {
-      const $estado = document.getElementById('llamada-estado');
       const uuid = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
-      let enCurso = true, inicio = null, reloj = null, ultimo = ['conectando', ''], teclado = false, tecleado = '';
+      let enCurso = true, inicio = null, reloj = null, ultimo = ['conectando', ''], teclado = false, tecleado = '', minimizado = false;
       delete reservasEnLlamada[l.id];
+      // El teléfono flota sobre todo (abajo a la derecha) y sobrevive a cambiar de vista: la llamada
+      // sigue aunque Angie abra otro lead o la cola. El estado en la ficha solo dice que hay llamada.
+      let $tel = document.getElementById('softphone');
+      if ($tel) $tel.remove();
+      $tel = document.createElement('div'); $tel.id = 'softphone'; $tel.className = 'softphone'; document.body.appendChild($tel);
+      const $estadoFicha = () => document.getElementById('llamada-estado');
+      const enFicha = () => location.hash.split('?')[0] === '#/lead/' + l.id;
+      const irALaFicha = async () => {
+        if (enFicha() && document.getElementById('modal')) return;
+        location.hash = '#/lead/' + l.id;
+        for (let i = 0; i < 40 && !document.getElementById('modal'); i++) await new Promise(r => setTimeout(r, 75));
+      };
       const pulsar = k => {
         if (!enCurso || !tel.teclear || !tel.teclear(k)) return;
-        tecleado = (tecleado + k).slice(-20);
-        const $p = document.getElementById('tecleado'); if ($p) $p.textContent = tecleado;
-        const b = $estado.querySelector(`[data-tecla="${k}"]`); if (b) { b.classList.add('pulsada'); setTimeout(() => b.classList.remove('pulsada'), 150); }
+        tecleado = (tecleado + k).slice(-24);
+        const $p = $tel.querySelector('#tecleado'); if ($p) { $p.textContent = tecleado; $p.classList.remove('vacio'); }
+        const b = $tel.querySelector(`[data-tecla="${k}"]`); if (b) { b.classList.add('pulsada'); setTimeout(() => b.classList.remove('pulsada'), 150); }
       };
-      // Con el teclado abierto, los números del computador también marcan (si no se está escribiendo en un campo).
+      // Los números del teclado del computador también marcan mientras hay llamada (si no se está
+      // escribiendo en un campo); al primero se abre el teclado en pantalla.
       const teclaFisica = e => {
         if (!enCurso) return document.removeEventListener('keydown', teclaFisica);
-        if (!teclado || /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')) return;
-        if (/^[0-9*#]$/.test(e.key)) { e.preventDefault(); pulsar(e.key); }
+        if (/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')) return;
+        if (!/^[0-9*#]$/.test(e.key) || !tel.teclear) return;
+        e.preventDefault();
+        if (!teclado) { teclado = true; minimizado = false; pintar(...ultimo); }
+        pulsar(e.key);
       };
       document.addEventListener('keydown', teclaFisica);
       const mmss = ms => { const t = Math.floor(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+      const LETRAS = { 2: 'ABC', 3: 'DEF', 4: 'GHI', 5: 'JKL', 6: 'MNO', 7: 'PQRS', 8: 'TUV', 9: 'WXYZ', 0: '+' };
       const pintar = (fase, texto) => {
         // fase: conectando | timbrando | activa
         ultimo = [fase, texto];
         const reserva = reservasEnLlamada[l.id];
-        const agendar = fase === 'activa' && meta.calendly
-          ? (reserva ? `<span class="agendada">✅ Reunión agendada${reserva.reunion_at ? ' · ' + esc(fechaHora(new Date(reserva.reunion_at).getTime())) : ''}</span>`
-            : `<button class="btn agendar" type="button" id="agendar-llamada" title="Abre el Calendly de ${esc(meta.calendly.ejecutiva)} sin colgar">📅 Agendar</button>`)
-          : '';
-        const conTeclado = (fase === 'activa' || fase === 'timbrando') && tel.teclear;
-        $estado.innerHTML = `<div class="llamada ${fase}">
-          <span class="punto"></span>
-          <div class="txt"><b>${esc(texto)}</b><span class="num" id="reloj">${inicio ? mmss(Date.now() - inicio) : ''}</span></div>
-          ${conTeclado ? `<button class="btn teclado-btn ${teclado ? 'activo' : ''}" type="button" id="teclado-btn" title="Teclado para conmutadores (marque 1, extensión…)">⌨️</button>` : ''}
-          ${agendar}
-          <button class="btn colgar" type="button" id="colgar">Colgar</button></div>
-          ${conTeclado && teclado ? `<div class="teclado"><div class="teclado-pantalla num" id="tecleado">${esc(tecleado) || '<span class="suave">Marca la opción o la extensión</span>'}</div>
-            <div class="teclado-teclas">${['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'].map(k => `<button type="button" class="btn tecla" data-tecla="${k}">${k}</button>`).join('')}</div>
-            <div class="suave" style="font-size:11px;margin-top:4px">También puedes usar los números del teclado del computador.</div></div>` : ''}
-          ${fase === 'activa' && meta.recordatorioGrabacion ? `<div class="recordatorio">🎙 ${esc(meta.recordatorioGrabacion)}</div>` : ''}`;
-        document.getElementById('colgar').addEventListener('click', () => { if (enCurso) tel.colgar(); });
-        const $tb = document.getElementById('teclado-btn');
-        if ($tb) $tb.addEventListener('click', () => { teclado = !teclado; pintar(...ultimo); });
-        $estado.querySelectorAll('[data-tecla]').forEach(b => b.addEventListener('click', () => pulsar(b.dataset.tecla)));
-        const $ag = document.getElementById('agendar-llamada');
+        const conTeclado = (fase === 'activa' || fase === 'timbrando') && !!tel.teclear;
+        const reloj = `<span class="sp-reloj num" id="reloj">${inicio ? mmss(Date.now() - inicio) : ''}</span>`;
+        const nombre = [l.contacto, l.cargo].filter(Boolean).join(' · ');
+        $tel.className = `softphone ${fase} ${minimizado ? 'min' : ''} ${teclado && conTeclado ? 'con-teclado' : ''}`;
+        $tel.innerHTML = minimizado
+          ? `<button type="button" class="sp-pill" id="sp-expandir" title="Abrir el teléfono"><span class="sp-punto"></span><b>${esc(l.empresa || telVisible(numero))}</b>${reloj}</button>
+             ${conTeclado ? `<button type="button" class="sp-ico" id="teclado-btn" title="Teclado">⌨️</button>` : ''}
+             <button type="button" class="sp-colgar sp-ico" id="colgar" title="Colgar">✕</button>`
+          : `<div class="sp-cabeza">
+              <span class="sp-punto"></span><span class="sp-estado">${esc(texto)}</span>${reloj}
+              <button type="button" class="sp-ico" id="sp-minimizar" title="Encoger">—</button></div>
+            <div class="sp-quien"><b>${esc(l.empresa || 'Sin empresa')}</b><span>${esc(nombre || telVisible(numero))}${nombre ? ' · ' + esc(telVisible(numero)) : ''}</span></div>
+            ${reserva ? `<div class="sp-agendada">✅ Reunión agendada${reserva.reunion_at ? ' · ' + esc(fechaHora(new Date(reserva.reunion_at).getTime())) : ''}</div>` : ''}
+            ${teclado && conTeclado ? `<div class="sp-teclado">
+              <div class="sp-pantalla num ${tecleado ? '' : 'vacio'}" id="tecleado">${tecleado ? esc(tecleado) : 'Marca la opción o la extensión'}</div>
+              <div class="sp-teclas">${['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'].map(k => `<button type="button" class="sp-tecla" data-tecla="${k}"><b>${k}</b><small>${LETRAS[k] || ''}</small></button>`).join('')}</div></div>` : ''}
+            <div class="sp-acciones">
+              ${conTeclado ? `<button type="button" class="sp-btn ${teclado ? 'activo' : ''}" id="teclado-btn" title="Teclado para conmutadores (marque 1, extensión…)">⌨️<span>Teclado</span></button>` : ''}
+              ${fase === 'activa' && meta.calendly && !reserva ? `<button type="button" class="sp-btn" id="agendar-llamada" title="Abre el Calendly de ${esc(meta.calendly.ejecutiva)} sin colgar">📅<span>Agendar</span></button>` : ''}
+              <button type="button" class="sp-btn sp-colgar" id="colgar"><i></i><span>Colgar</span></button></div>
+            ${fase === 'activa' && meta.recordatorioGrabacion ? `<div class="sp-nota">🎙 ${esc(meta.recordatorioGrabacion)}</div>` : ''}`;
+        const $f = $estadoFicha();
+        if ($f) $f.innerHTML = `<div class="llamada ${fase}"><span class="punto"></span><div class="txt"><b>${esc(texto)}</b><span class="suave">el teléfono está abajo a la derecha</span></div></div>`;
+        $tel.querySelector('#colgar').addEventListener('click', () => { if (enCurso) tel.colgar(); });
+        const $tb = $tel.querySelector('#teclado-btn');
+        if ($tb) $tb.addEventListener('click', () => { teclado = !teclado; minimizado = false; pintar(...ultimo); });
+        const $mn = $tel.querySelector('#sp-minimizar'); if ($mn) $mn.addEventListener('click', () => { minimizado = true; pintar(...ultimo); });
+        const $ex = $tel.querySelector('#sp-expandir'); if ($ex) $ex.addEventListener('click', () => { minimizado = false; pintar(...ultimo); });
+        $tel.querySelectorAll('[data-tecla]').forEach(b => b.addEventListener('click', () => pulsar(b.dataset.tecla)));
+        const $ag = $tel.querySelector('#agendar-llamada');
         if ($ag) $ag.addEventListener('click', async () => {
           $ag.disabled = true;
+          await irALaFicha();
           const r = await reservarEnCalendly(l, 'llamada').catch(e => { avisar(e.message, 'error'); return null; });
           if (r) {
             reservasEnLlamada[l.id] = r;
@@ -1198,7 +1225,7 @@
           if (enCurso) pintar(...ultimo); else if ($ag.isConnected) $ag.disabled = false;
         });
       };
-      $llamar.disabled = true;
+      if ($llamar) $llamar.disabled = true;
       pintar('conectando', 'Preparando la llamada…');
       tel.llamar({ lead: l, uuid, telefono: numero }, {
         estado: txt => {
@@ -1206,27 +1233,36 @@
           if (fase === 'activa' && !inicio) { inicio = Date.now(); reloj = setInterval(() => { const r = document.getElementById('reloj'); if (r) r.textContent = mmss(Date.now() - inicio); }, 1000); }
           pintar(fase, txt);
         },
-        fin: info => {
+        fin: async info => {
           enCurso = false; clearInterval(reloj);
-          $llamar.disabled = false;
+          const $b = document.getElementById('llamar'); if ($b) $b.disabled = false;
+          const dur = inicio ? ` · ${mmss(Date.now() - inicio)}` : '';
+          const cierre = txt => { $tel.className = 'softphone fin'; $tel.innerHTML = `<div class="sp-cabeza"><span class="sp-punto"></span><span class="sp-estado">${esc(txt)}</span></div>`; setTimeout(() => $tel.remove(), 1800); };
           if (info && info.error) {
-            // No salió la llamada: no hay nada que registrar. Se muestra el motivo y la bitácora.
+            // No salió la llamada: no hay nada que registrar. Se muestra el motivo y la bitácora en la ficha.
+            cierre('No se pudo llamar');
+            await irALaFicha();
             const detalle = (tel.bitacora ? tel.bitacora() : []).slice(-8).map(x => `<div>${esc(x)}</div>`).join('');
-            $estado.innerHTML = `<div class="error" style="margin:0"><b>No se pudo llamar.</b> ${esc(info.error)}</div>
+            const $f = $estadoFicha();
+            if ($f) $f.innerHTML = `<div class="error" style="margin:0"><b>No se pudo llamar.</b> ${esc(info.error)}</div>
               <details style="margin-top:6px"><summary class="suave" style="cursor:pointer;font-size:12px">Detalle técnico</summary><div class="suave" style="font-size:12px;font-family:monospace">${detalle}</div></details>`;
             avisar('No se pudo llamar: ' + info.error, 'error');
             return;
           }
-          const dur = inicio ? ` · ${mmss(Date.now() - inicio)}` : '';
           // El operador no cursó la llamada (número no encontrado, falla de central): no es un
           // resultado de prospección. Angie ve el motivo exacto y decide qué hacer.
-          if (info && ['numero_invalido', 'fallo_central'].includes(info.estadoVox)) return pintarFallo(info);
-          $estado.innerHTML = `<div class="llamada fin"><span class="punto"></span><div class="txt"><b>${info && info.contesto ? 'Llamada terminada' + dur : esc((info && info.motivoLegible) || 'No contestaron')}</b></div></div>`;
+          if (info && ['numero_invalido', 'fallo_central'].includes(info.estadoVox)) { cierre('No salió'); await irALaFicha(); return pintarFallo(info); }
+          const texto = info && info.contesto ? 'Llamada terminada' + dur : ((info && info.motivoLegible) || 'No contestaron');
+          cierre(texto);
+          await irALaFicha();
+          const $f = $estadoFicha();
+          if ($f) $f.innerHTML = `<div class="llamada fin"><span class="punto"></span><div class="txt"><b>${esc(texto)}</b></div></div>`;
           if (!(info && info.cancelada)) abrirResultado(l, { callUuid: uuid, obligatorio: true });
         },
       });
       function pintarFallo(info) {
         const invalido = info.estadoVox === 'numero_invalido';
+        const $estado = $estadoFicha(); if (!$estado) return;
         $estado.innerHTML = `<div class="fallo">
           <b>${invalido ? 'No salió: el operador no encuentra el número' : 'No salió: falla de la central'}</b>
           <div class="suave" style="font-size:12px">${esc(telVisible(numero))} · código ${esc(info.codigo || '?')}${info.motivo ? ' ' + esc(info.motivo) : ''} · ${plural(info.intentos || 1, 'intento', 'intentos')}. ${invalido ? 'Puede ser un número malo, o un número portado que esta ruta no encuentra.' : 'Suele ser pasajero.'}</div>
@@ -1504,19 +1540,6 @@
       try {
         const r = await api(ruta, { method: 'POST', body });
         delete reservasEnLlamada[l.id];
-      const pulsar = k => {
-        if (!enCurso || !tel.teclear || !tel.teclear(k)) return;
-        tecleado = (tecleado + k).slice(-20);
-        const $p = document.getElementById('tecleado'); if ($p) $p.textContent = tecleado;
-        const b = $estado.querySelector(`[data-tecla="${k}"]`); if (b) { b.classList.add('pulsada'); setTimeout(() => b.classList.remove('pulsada'), 150); }
-      };
-      // Con el teclado abierto, los números del computador también marcan (si no se está escribiendo en un campo).
-      const teclaFisica = e => {
-        if (!enCurso) return document.removeEventListener('keydown', teclaFisica);
-        if (!teclado || /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')) return;
-        if (/^[0-9*#]$/.test(e.key)) { e.preventDefault(); pulsar(e.key); }
-      };
-      document.addEventListener('keydown', teclaFisica);
         // El compromiso que quedó pactado en la llamada, si lo llenó.
         if (f.get('c_titulo') && f.get('c_fecha') && resultado !== 'descartado') {
           try { const rc = await api('tareas', { method: 'POST', body: { lead_id: l.id, tipo: f.get('c_tipo') || 'seguimiento', titulo: f.get('c_titulo'), fecha: f.get('c_fecha'), hora: f.get('c_hora') || null } }); (r.avisos = r.avisos || []).push(rc.calendario && rc.calendario.ok ? 'Compromiso anotado y en el calendario.' : 'Compromiso anotado.'); }
