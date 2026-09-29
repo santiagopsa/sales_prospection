@@ -29,6 +29,52 @@ async function dealsPorId(db, ids) {
 
 function ms(v) { return v ? new Date(v).getTime() : null; }
 
+// Un lead de la SDR puede quedar apuntando a un deal que ya no sirve: la ejecutiva borró el deal que
+// creó la SDR y llenó el demo en un deal nuevo ("Nuevo deal" en vez de "Tomar"), o el deal de la SDR
+// sigue vacío mientras el demo quedó en otro. Aquí se re-enlaza el lead al deal de la misma empresa
+// (nombre normalizado: "Air products" = "Air Products S.A.S.") que tenga el demo o la calificación.
+// Si no hay otro, se deja como está (al calificar se crea uno nuevo si el suyo ya no existe).
+// Devuelve [{ lead_id, antes, ahora }] con los cambios.
+async function reconciliarDeals(db, { leadIds = null } = {}) {
+  if (!(await hayDeals(db))) return [];
+  const LN = require('./listanegra');
+  const leads = (await db.query(
+    `SELECT l.id, l.empresa, l.deal_id, d.id AS existe,
+            (SELECT MAX(x.created_at) FROM ${T.touches} x WHERE x.lead_id = l.id AND x.resultado = 'reunion_agendada') AS agendada_at,
+            (d.calificacion_sandler IS NOT NULL OR COALESCE(d.data->>'transcript', '') <> '' OR d.data ? 'calificacionManual') AS con_datos
+     FROM ${T.leads} l LEFT JOIN public.deals d ON d.id = l.deal_id
+     WHERE (l.deal_id IS NOT NULL OR l.etapa IN ('reunion_agendada', 'reunion_realizada', 'calificado'))
+       AND ($1::jsonb IS NULL OR l.id IN (SELECT jsonb_array_elements_text($1::jsonb)::int))`,
+    [leadIds ? JSON.stringify(leadIds) : null])).rows.filter(l => !l.existe || !l.con_datos);
+  if (!leads.length) return [];
+  const deals = (await db.query(
+    `SELECT id, company, (to_jsonb(deals.*)->>'created_at')::timestamptz AS creado, (calificacion_sandler IS NOT NULL OR COALESCE(data->>'transcript', '') <> '' OR data ? 'calificacionManual') AS con_datos
+     FROM public.deals ORDER BY id DESC`)).rows;   // el más reciente primero
+  const porEmpresa = new Map();
+  for (const d of deals) {
+    const k = LN.normalizarEmpresa(d.company);
+    if (!k) continue;
+    if (!porEmpresa.has(k)) porEmpresa.set(k, []);
+    porEmpresa.get(k).push(d);
+  }
+  const cambios = [];
+  for (const l of leads) {
+    const k = LN.normalizarEmpresa(l.empresa);
+    const cands = (k && porEmpresa.get(k)) || [];
+    // Solo deals de esta vuelta: creados desde 3 días antes de que la SDR agendara (no un deal viejo
+    // de la misma empresa, de otra negociación).
+    const desde = l.agendada_at ? new Date(l.agendada_at).getTime() - 3 * 86400000 : null;
+    const mejor = cands.find(d => d.con_datos && d.id !== l.deal_id && (!desde || !d.creado || new Date(d.creado).getTime() >= desde));
+    if (!mejor) continue;
+    await db.query(`UPDATE ${T.leads} SET deal_id = $2 WHERE id = $1`, [l.id, mejor.id]);
+    // El deal pasa a contar como traído por la SDR (canal), sin tocar lo que la ejecutiva llenó.
+    await db.query(`UPDATE public.deals SET canal_adquisicion = COALESCE(canal_adquisicion, 'sdr_interno'), freelancer_nombre = COALESCE(freelancer_nombre, 'Angie (SDR)') WHERE id = $1`, [mejor.id]);
+    cambios.push({ lead_id: l.id, antes: l.deal_id, ahora: mejor.id });
+  }
+  if (cambios.length) console.log('[sdr] deals re-enlazados:', cambios.map(c => `lead ${c.lead_id}: #${c.antes || '—'} → #${c.ahora}`).join(', '));
+  return cambios;
+}
+
 // Resultado comercial del deal (lo que sigue después de calificar).
 function comercial(fila) {
   if (!fila) return null;
@@ -63,6 +109,7 @@ function fila(x, lead, deal, ahora) {
 }
 
 async function tablero(db, config, { mes, ahora = new Date() } = {}) {
+  try { await reconciliarDeals(db); } catch (e) { console.error('[sdr] reconciliar deals:', e.message); }
   const res = await C.resumenMes(db, config, { mes, ahora });
   const ids = res.reuniones.map(x => x.lead_id);
   const leads = {};
@@ -139,6 +186,10 @@ async function calificar(db, config, { leadId, items, limpiar = false, usuario, 
   }
   const avisos = [];
   let dealId = lead.deal_id;
+  // Su deal ya no existe o está vacío y el demo quedó en otro deal de la misma empresa: se re-enlaza.
+  const re = await reconciliarDeals(db, { leadIds: [leadId] });
+  if (re.length) { dealId = re[0].ahora; avisos.push(`Quedó enlazado al deal #${dealId} (el del demo).`); }
+  if (dealId && !(await db.query(`SELECT 1 FROM public.deals WHERE id = $1`, [dealId])).rows.length) dealId = null;   // lo borraron
   if (!dealId) {
     dealId = await R.enTransaccion(db, async c => {
       const id = await R.crearDeal(c, lead, {}, lead.reunion_at ? new Date(lead.reunion_at) : null);
@@ -184,4 +235,4 @@ async function guardarEnDeal(db, dealId, { items, limpiar = false, usuario = nul
   return { label, cal };
 }
 
-module.exports = { tablero, calificar, guardarEnDeal, hayDeals };
+module.exports = { tablero, calificar, guardarEnDeal, hayDeals, reconciliarDeals };

@@ -65,6 +65,7 @@ function etapaDe(config, d) {
 
 async function tablero(db, config, { ahora = new Date() } = {}) {
   if (!(await asegurarColumnas(db))) return { etapas: ETAPAS, columnas: {}, conteo: {}, sin_tabla: true };
+  try { await E.reconciliarDeals(db); } catch (e) { console.error('[sdr] reconciliar deals:', e.message); }
   const r = reglas(config);
   const desde = new Date(ahora.getTime() - r.diasCerrados * 86400000).toISOString();
   const q = await db.query(
@@ -75,6 +76,7 @@ async function tablero(db, config, { ahora = new Date() } = {}) {
               'dolorImpacto', d.data->'dolorImpacto', 'presupuesto', d.data->'presupuesto', 'decisor', d.data->'decisor',
               'procesoDecision', d.data->'procesoDecision', 'fechaLimiteDecision', d.data->'fechaLimiteDecision',
               'calificacionManual', d.data->'calificacionManual') AS data,
+            COALESCE(d.data->>'transcript', '') <> '' AS con_demo,
             ${ms('d.quoted_at')} AS quoted_ms, ${ms('d.closed_at')} AS closed_ms, ${ms('d.created_at')} AS created_ms,
             ${ms('COALESCE(d.etapa_embudo_at, d.closed_at, d.quoted_at, d.created_at)')} AS etapa_ms,
             l.id AS lead_id, l.contacto, l.cargo, l.telefono, l.email, l.etapa AS lead_etapa, ${ms('l.reunion_at')} AS reunion_ms
@@ -88,6 +90,9 @@ async function tablero(db, config, { ahora = new Date() } = {}) {
     // Deal de la SDR cuya reunión no se hizo (no asistió / canceló): vuelve a ser de la SDR y no
     // ocupa el embudo hasta que se reagende. Si ya tiene calificación o etapa, sí se queda.
     if (d.lead_id && D.ETAPAS_DE_ANGIE.includes(d.lead_etapa) && etapa === 'sin_calificar' && !d.etapa_embudo) continue;
+    // Cascarón vacío que creó la SDR y ya no es de ningún lead (el demo quedó en otro deal): no se muestra.
+    const vacio = !d.calificacion_sandler && !d.etapa_embudo && !d.data.calificacionManual && !d.con_demo;
+    if (!d.lead_id && d.canal_adquisicion === 'sdr_interno' && vacio && etapa === 'sin_calificar') continue;
     const cal = CAL.calificacionSandler(d.data || {});
     columnas[etapa].push({
       deal_id: d.id, empresa: d.company, contacto: d.contacto || null, cargo: d.cargo || null, telefono: d.telefono || null,

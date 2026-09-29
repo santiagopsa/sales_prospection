@@ -105,5 +105,29 @@ test('tablero de la ejecutiva y chulos contra la base', { skip: !url && 'sin SDR
   assert.ok(r.deal_id);
   assert.ok(r.avisos.some(a => /deal/.test(a)));
   assert.strictEqual((await db.query(`SELECT deal_id FROM sdr.leads WHERE id = $1`, [sinDeal])).rows[0].deal_id, r.deal_id);
+
+  // La ejecutiva borró el deal de la SDR y llenó el demo en uno nuevo ("Nuevo deal"): el lead se
+  // re-enlaza al deal nuevo de la misma empresa (nombre normalizado), no a uno viejo de otra negociación.
+  const air = await lead('Air products', '2026-09-24T15:00:00Z', { etapa: 'reunion_realizada', agendada: '2026-09-22T15:00:00Z' });
+  const dealSdr = (await db.query(`SELECT deal_id FROM sdr.leads WHERE id = $1`, [air])).rows[0].deal_id;
+  await db.query(`DELETE FROM public.deals WHERE id = $1`, [dealSdr]);
+  await db.query(`ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
+  const viejo = (await db.query(`INSERT INTO public.deals (executive, company, calificacion_sandler, created_at) VALUES ('Luisa', 'AIR PRODUCTS', 'Completa', '2025-01-10T15:00:00Z') RETURNING id`)).rows[0].id;
+  const suyo = (await db.query(`INSERT INTO public.deals (executive, company, calificacion_sandler, data, created_at) VALUES ('Luisa', 'Air Products S.A.S.', 'Parcial', '{"transcript":"demo"}', '2026-09-22T21:37:00Z') RETURNING id`)).rows[0].id;
+  t = await E.tablero(db, base, { mes: '2026-09', ahora });
+  assert.strictEqual(de('Air products').deal_id, suyo);
+  assert.notStrictEqual(de('Air products').deal_id, viejo);
+  assert.strictEqual(de('Air products').calificacion, 'Parcial');
+  const fsuyo = (await db.query(`SELECT canal_adquisicion, freelancer_nombre FROM public.deals WHERE id = $1`, [suyo])).rows[0];
+  assert.deepStrictEqual([fsuyo.canal_adquisicion, fsuyo.freelancer_nombre], ['sdr_interno', 'Angie (SDR)']);
+  r = await E.calificar(db, base, { leadId: air, items: { dolor: true, presupuesto: true, decision: true, fecha: true }, usuario: 'Luisa', ahora });
+  assert.deepStrictEqual([r.deal_id, r.calificacion], [suyo, 'Completa']);
+  // Sin deal de reemplazo: al calificar se crea uno nuevo en vez de fallar.
+  const huerfano = await lead('Sin reemplazo', '2026-09-22T15:00:00Z', { etapa: 'reunion_realizada' });
+  const dh = (await db.query(`SELECT deal_id FROM sdr.leads WHERE id = $1`, [huerfano])).rows[0].deal_id;
+  await db.query(`DELETE FROM public.deals WHERE id = $1`, [dh]);
+  r = await E.calificar(db, base, { leadId: huerfano, items: { dolor: true }, usuario: 'Luisa', ahora });
+  assert.ok(r.deal_id && r.deal_id !== dh);
+  assert.ok(r.avisos.some(a => /Se creó el deal/.test(a)));
   await db.end();
 });

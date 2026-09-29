@@ -315,6 +315,9 @@ app.delete('/api/deals/:id', async (req, res) => {
     if (!Number.isInteger(id)) return res.status(400).json({ ok: false, error: 'id inválido' });
     if (pool) {
       await pool.query(`DELETE FROM wishlist WHERE deal_id=$1`, [id]);
+      // Si era el deal de un lead de la SDR, el lead queda sin deal (se re-enlaza al demo que se llene
+      // en otro deal de la misma empresa, o se crea uno nuevo al calificar).
+      try { await pool.query(`UPDATE sdr.leads SET deal_id = NULL WHERE deal_id = $1`, [id]); } catch (_) { /* sin módulo SDR */ }
       const r = await pool.query(`DELETE FROM deals WHERE id=$1 RETURNING id`, [id]);
       if (!r.rows.length) return res.status(404).json({ ok: false, error: 'not found' });
       return res.json({ ok: true, id });
