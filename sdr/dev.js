@@ -27,6 +27,10 @@ async function main() {
 
   http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
+    if (url.pathname === '/peaku.css' || url.pathname === '/peaku.js') {   // capa de plataforma, en el public del Sandler
+      const f = path.join(__dirname, '..', 'public', url.pathname.slice(1));
+      if (fs.existsSync(f)) { res.writeHead(200, { 'Content-Type': TIPOS[path.extname(f)] }); return fs.createReadStream(f).pipe(res); }
+    }
     if (url.pathname.startsWith('/img/')) {                 // el logo vive en el public del Sandler
       const img = path.join(__dirname, '..', 'public', path.normalize(url.pathname));
       if (fs.existsSync(img)) { res.writeHead(200, { 'Content-Type': 'image/png' }); return fs.createReadStream(img).pipe(res); }

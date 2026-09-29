@@ -1764,7 +1764,7 @@
   async function render() {
     const [ruta, query] = (location.hash.replace(/^#\/?/, '') || 'cola').split('?');
     const partes = ruta.split('/');
-    document.querySelectorAll('.barra nav a').forEach(a => a.classList.toggle('activo', a.dataset.r === partes[0]));
+    document.querySelectorAll('.pk-tabs a').forEach(a => a.classList.toggle('activo', a.dataset.r === partes[0]));
     try {
       if (partes[0] === 'importar') await vistaImportar();
       else if (partes[0] === 'pipeline') await vistaPipeline(new URLSearchParams(query));

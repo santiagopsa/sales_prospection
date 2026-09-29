@@ -168,7 +168,9 @@ function daysBetween(a, b) { return Math.floor((new Date(b).getTime() - new Date
 function router() {
   // Sin ruta (la página principal) abre el tablero; #/ es el asistente de un deal nuevo.
   const hash = location.hash || '#/tablero';
-  document.querySelectorAll('nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === hash.split('?')[0]));
+  document.body.classList.toggle('pk-en-inicio', hash.startsWith('#/inicio'));
+  document.querySelectorAll('.pk-tabs a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === hash.split('?')[0]));
+  if (hash.startsWith('#/inicio')) return renderInicio();
   if (hash.startsWith('#/tablero')) return renderTablero(new URLSearchParams(hash.split('?')[1] || ''));
   if (hash.startsWith('#/embudo')) return renderEmbudo();
   if (hash.startsWith('#/deal/')) return renderDealDetail(hash.split('/')[2]);
@@ -2235,6 +2237,79 @@ function embCalificar(id, paraAvanzar = false) {
     } catch (e) { tbAvisar(e.message, 'error'); }
     await embRecargar();
   });
+}
+
+// ---------- Inicio de PeakU AI ----------
+// La portada de la plataforma: qué está pasando hoy en los tres módulos, con un número de cada uno.
+// Lee las APIs de cada módulo; si una no responde, la tarjeta muestra "—" y sigue siendo el enlace.
+async function renderInicio() {
+  const hoyBog = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+  const hora = Number(new Date().toLocaleTimeString('en-GB', { timeZone: 'America/Bogota', hour: '2-digit', hour12: false }));
+  const saludo = hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
+  const fechaTxt = new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'long' });
+  const n = v => (v == null || Number.isNaN(v) ? '—' : Number(v).toLocaleString('es-CO'));
+  const tarjeta = (href, titulo, quien, nums, medio, pie) => `<a class="pk-mod" href="${href}">
+    <div class="pk-mod-top"><b>${titulo}</b><small>${esc(quien || '')}</small></div>
+    <div class="pk-mod-nums">${nums.map(x => `<div class="${x.tono || ''}"><b>${x.valor}</b><span>${esc(x.label)}</span></div>`).join('')}</div>
+    ${medio || ''}
+    <div class="pk-mod-foot"><span>${pie[0]}</span><em>${pie[1]} →</em></div>
+  </a>`;
+  const skel = (href, titulo) => tarjeta(href, titulo, '', [1, 2, 3].map(() => ({ valor: '<span class="pk-skel">00</span>', label: ' ' })), '', ['', 'Abrir']);
+  h(`<div class="pk-home">
+    <div class="pk-home-hd"><div><h1>${saludo}</h1><p class="muted">${esc(fechaTxt)} · lo que está pasando en ventas, prospección y verificación.</p></div></div>
+    <div class="pk-home-grid" id="pk-home-grid">${skel('#/tablero', 'Ventas')}${skel('/sdr/', 'Prospección')}${skel('/verificacion/', 'Verificación')}</div>
+    <p class="pk-home-note">Cada tarjeta abre su módulo. Los números son de hoy y de este mes.</p>
+  </div>`);
+
+  const j = (url) => fetch(url).then(r => (r.ok ? r.json() : Promise.reject(new Error(r.status)))).catch(() => null);
+  const meta = await j('/sdr/api/meta');
+  const sdrNombre = ((meta && meta.usuarios || []).find(u => u.rol === 'sdr') || {}).nombre || '';
+  const ejeNombre = ((meta && meta.usuarios || []).find(u => u.rol === 'ejecutiva') || {}).nombre || '';
+  const [eje, deals, cola, com, ver] = await Promise.all([
+    j('/sdr/api/ejecutiva'), j('/api/deals'), j('/sdr/api/cola' + (sdrNombre ? '?usuario=' + encodeURIComponent(sdrNombre) : '')),
+    j('/sdr/api/comision' + (sdrNombre ? '?usuario=' + encodeURIComponent(sdrNombre) : '')), j('/verificacion/api/tablero'),
+  ]);
+  const grid = document.getElementById('pk-home-grid');
+  if (!grid) return;
+
+  // Ventas
+  let ventas;
+  if (eje) {
+    const ci = tbCierre(Array.isArray(deals) ? deals : [], hoyBog.slice(0, 7));
+    const k = eje.kpis;
+    ventas = tarjeta('#/tablero', 'Ventas', ejeNombre, [
+      { valor: n(k.por_calificar), label: 'por calificar', tono: k.por_calificar ? 'warn' : '' },
+      { valor: n(ci.abiertos), label: 'deals abiertos' },
+      { valor: n(ci.ganados), label: 'ganados (mes)', tono: ci.ganados ? 'ok' : '' },
+    ], '', [`${k.reuniones} reuniones de ${esc(sdrNombre || 'la SDR')} este mes${ci.tasa == null ? '' : ' · cierre ' + ci.tasa + '%'}`, 'Abrir tablero']);
+  } else ventas = tarjeta('#/tablero', 'Ventas', ejeNombre, [{ valor: '—', label: 'sin datos' }], '', ['', 'Abrir tablero']);
+
+  // Prospección
+  let sdr;
+  if (cola) {
+    const i = cola.indicadores, pct = Math.min(100, Math.round((i.marcaciones / Math.max(i.metaMarcaciones, 1)) * 100));
+    const cumple = cola.racha && cola.racha.hoyCumple;
+    sdr = tarjeta('/sdr/', 'Prospección', sdrNombre, [
+      { valor: `${n(i.marcaciones)}<small>/${n(i.metaMarcaciones)}</small>`, label: 'marcaciones hoy', tono: cumple ? 'ok' : '' },
+      { valor: `${n(i.reuniones)}<small>/${n(i.metaReuniones)}</small>`, label: 'reuniones hoy', tono: i.reuniones >= i.metaReuniones ? 'ok' : '' },
+      { valor: n(cola.racha ? cola.racha.dias : null), label: 'días de racha' },
+    ], `<div class="pk-meter" title="Avance de la meta de marcaciones"><i class="${cumple ? 'ok' : ''}" style="width:${pct}%"></i></div>`,
+      [com ? `Comisión del mes ${esc(com.reglas.moneda)} ${n(com.comision.total)} · ${n(com.conteo.calificadas)} calificadas` : `${n(i.porContactar)} por contactar`, 'Abrir cola']);
+  } else sdr = tarjeta('/sdr/', 'Prospección', sdrNombre, [{ valor: '—', label: 'sin datos' }], '', ['', 'Abrir cola']);
+
+  // Verificación
+  let verify;
+  if (ver) {
+    const quien = (ver.evaluadores || []).slice().sort((a, b) => b.n - a.n)[0];
+    const sem = (ver.semanas || []).slice(-8), max = Math.max(1, ...sem.map(x => x.entrevistas));
+    verify = tarjeta('/verificacion/', 'Verificación', quien ? quien.nombre.split(' ')[0] : '', [
+      { valor: n(ver.esta_semana && ver.esta_semana.entrevistas), label: 'entrevistas (semana)' },
+      { valor: n(ver.esta_semana && ver.esta_semana.informes), label: 'informes (semana)' },
+      { valor: ver.cumplen && ver.cumplen.informes ? ver.cumplen.pct + '<small>%</small>' : '—', label: 'en 48 h', tono: ver.cumplen && ver.cumplen.pct >= 80 ? 'ok' : '' },
+    ], `<div class="pk-spark" title="Entrevistas por semana, últimas 8">${sem.map(x => `<i style="height:${Math.max(8, Math.round((x.entrevistas / max) * 100))}%" title="${x.entrevistas}"></i>`).join('')}</div>`,
+      [`${n(ver.pendientes && ver.pendientes.calificar)} por calificar · racha de ${n(ver.racha)} días`, 'Abrir consola']);
+  } else verify = tarjeta('/verificacion/', 'Verificación', '', [{ valor: '—', label: 'sin datos' }], '', ['', 'Abrir consola']);
+  grid.innerHTML = ventas + sdr + verify;
 }
 
 router();

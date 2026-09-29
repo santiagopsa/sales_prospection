@@ -319,6 +319,17 @@ Los contactos que ya estaban en la app también quedan en la lista, sin duplicar
   archivo, luego en curso) y "▶ Trabajar esta lista": desde ahí el botón "Siguiente de la lista" de la
   ficha sigue dentro de esa lista hasta "salir". También se cambia la prioridad o se cierra la lista.
 
+## PeakU AI: la capa de plataforma
+
+Los tres módulos (Ventas en `/`, Prospección en `/sdr/`, Verificación en `/verificacion/`) comparten
+la barra y la paleta de **PeakU AI**: `public/peaku.css` y `public/peaku.js`, que cada `index.html`
+carga después de su propio css. `peaku.css` re-mapea los tokens de color de cada módulo a una sola
+paleta (cian PeakU solo para indicadores y foco; botones primarios en tinta) y pinta la barra:
+marca → switcher de módulos → controles del módulo, y debajo las pestañas del módulo (`.pk-tabs`,
+con la clase de activo que cada app ya usaba: `active`, `activo`, `on`). La marca abre `/#/inicio`,
+la portada con un número de cada módulo. Cada `<body>` lleva `pk-ventas`, `pk-sdr` o `pk-verify`.
+En desarrollo, `sdr/dev.js` sirve `/peaku.css` y `/peaku.js` desde el public del Sandler.
+
 ## Tablero de la ejecutiva (en el Sandler Coach)
 
 La calificación de las reuniones es de la ejecutiva y vive en su página, el Sandler Coach: pestaña

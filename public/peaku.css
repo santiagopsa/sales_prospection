@@ -1,0 +1,176 @@
+/* PeakU AI — capa de plataforma compartida por los tres módulos (Ventas, Prospección, Verificación).
+   Se carga DESPUÉS del css de cada módulo: unifica la paleta (re-mapea los tokens de cada uno), pone
+   la barra de la plataforma y afina los componentes comunes. Nada de aquí cambia comportamiento. */
+
+:root {
+  --pk-bg: #F6F8FA;
+  --pk-panel: #FFFFFF;
+  --pk-sunk: #EFF2F5;
+  --pk-line: #E5E9EE;
+  --pk-line2: #D2D9E0;
+  --pk-ink: #0F1720;
+  --pk-ink2: #4B5563;
+  --pk-ink3: #7C8794;
+  --pk-accent: #00C3FF;         /* cian PeakU: indicadores, foco, la "AI" */
+  --pk-accent-soft: #E6F8FF;
+  --pk-accent-ink: #0084AE;     /* mismo matiz, legible sobre blanco: enlaces y botones */
+  --pk-good: #157A57; --pk-good-soft: #E6F4EE;
+  --pk-warn: #9A5B00; --pk-warn-soft: #FBF1DF;
+  --pk-bad: #B42318;  --pk-bad-soft: #FBEAE8;
+  --pk-radius: 12px;
+  --pk-shadow: 0 1px 2px rgba(15, 23, 32, .04);
+  --pk-w: 1120px;
+  --pk-font: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+
+  /* Ventas (public/style.css) */
+  --bg: var(--pk-bg); --panel: var(--pk-panel); --panel-2: var(--pk-sunk); --line: var(--pk-line);
+  --text: var(--pk-ink); --muted: var(--pk-ink3);
+  --peaku-blue: var(--pk-accent); --peaku-blue-dark: var(--pk-accent-ink); --peaku-gray: #2B3440;
+  --peaku-green: #1D976C; --peaku-green-dark: #156E4F;
+  --warn: var(--pk-warn); --bad: var(--pk-bad); --good: var(--pk-good); --radius: var(--pk-radius);
+  /* Prospección (sdr/public/sdr.css) */
+  --azul: var(--pk-accent); --azul-osc: var(--pk-accent-ink); --verde: #1D976C;
+  --fondo: var(--pk-bg); --linea: var(--pk-line); --texto: var(--pk-ink); --suave: #6B7280;
+  --alerta: var(--pk-warn); --alerta-bg: var(--pk-warn-soft); --mal: var(--pk-bad); --mal-bg: var(--pk-bad-soft); --bien-bg: var(--pk-good-soft);
+  --r: var(--pk-radius);
+  /* Verificación (verificacion/public/style.css) */
+  --sunk: var(--pk-sunk); --line2: var(--pk-line2); --ink: var(--pk-ink); --ink2: var(--pk-ink2); --ink3: var(--pk-ink3);
+  --acc: var(--pk-accent-ink); --acc-soft: var(--pk-accent-soft); --acc-ink: #005F80;
+  --good-soft: var(--pk-good-soft); --warn-soft: var(--pk-warn-soft); --crit: var(--pk-bad); --crit-soft: var(--pk-bad-soft);
+  --shadow: var(--pk-shadow);
+}
+/* Verificación soporta modo oscuro: la barra lo sigue. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pk-bg: #15191C; --pk-panel: #1E2327; --pk-sunk: #262C31; --pk-line: #2A3237; --pk-line2: #3A444A;
+    --pk-ink: #EDF2F4; --pk-ink2: #A8AEB2; --pk-ink3: #7B8285; --pk-accent-soft: #132A36; --pk-accent-ink: #5CD3FF;
+    --pk-shadow: 0 1px 2px rgba(0, 0, 0, .4);
+  }
+}
+:root[data-theme="dark"] {
+  --pk-bg: #15191C; --pk-panel: #1E2327; --pk-sunk: #262C31; --pk-line: #2A3237; --pk-line2: #3A444A;
+  --pk-ink: #EDF2F4; --pk-ink2: #A8AEB2; --pk-ink3: #7B8285; --pk-accent-soft: #132A36; --pk-accent-ink: #5CD3FF;
+  --pk-shadow: 0 1px 2px rgba(0, 0, 0, .4);
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body { background: var(--pk-bg); color: var(--pk-ink); font-family: var(--pk-font); -webkit-font-smoothing: antialiased; }
+:focus-visible { outline: 2px solid var(--pk-accent); outline-offset: 2px; border-radius: 4px; }
+::selection { background: var(--pk-accent-soft); }
+
+/* ============================================================ la barra de la plataforma */
+.pk-shell { position: sticky; top: 0; z-index: 60; overflow: hidden; background: color-mix(in srgb, var(--pk-panel) 88%, transparent);
+  -webkit-backdrop-filter: saturate(180%) blur(14px); backdrop-filter: saturate(180%) blur(14px); border-bottom: 1px solid var(--pk-line); }
+.pk-bar, .pk-sub { max-width: var(--pk-w); margin: 0 auto; padding: 0 20px; display: flex; align-items: center; gap: 16px; }
+.pk-bar { height: 56px; }
+.pk-brand { display: flex; align-items: center; gap: 9px; color: var(--pk-ink); text-decoration: none; font-weight: 700; font-size: 16px; letter-spacing: -.02em; flex: none; border: 0; background: none; padding: 0; cursor: pointer; font-family: inherit; }
+.pk-brand:hover { text-decoration: none; }
+.pk-iso { height: 22px; width: auto; display: block; }
+.pk-iso .a { fill: var(--pk-accent); } .pk-iso .b { fill: #3E9DBD; }
+.pk-word b { color: var(--pk-accent-ink); font-weight: 800; margin-left: 5px; }
+.pk-mods { display: flex; gap: 2px; padding: 3px; background: var(--pk-sunk); border-radius: 10px; flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.pk-mods::-webkit-scrollbar { display: none; }
+.pk-mods > a, .pk-mods > button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 8px; font: inherit; font-size: 13px; font-weight: 600; color: var(--pk-ink3); text-decoration: none; border: 0; background: none; cursor: pointer; white-space: nowrap; transition: color .12s, background .12s; }
+.pk-mods > a:hover, .pk-mods > button:hover { color: var(--pk-ink); text-decoration: none; }
+.pk-mods > .pk-on { background: var(--pk-panel); color: var(--pk-ink); box-shadow: 0 1px 2px rgba(15, 23, 32, .10), 0 0 0 1px rgba(15, 23, 32, .04); }
+.pk-mods i { width: 6px; height: 6px; border-radius: 50%; background: var(--pk-line2); }
+.pk-mods > .pk-on i { background: var(--pk-accent); }
+.pk-right { margin-left: auto; display: flex; align-items: center; gap: 10px; min-width: 0; flex: none; }
+.pk-sub { height: 42px; margin-top: -2px; }
+.pk-tabs { display: flex; align-items: stretch; gap: 2px; height: 42px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; }
+.pk-tabs::-webkit-scrollbar { display: none; }
+.pk-tabs > a, .pk-tabs > button { display: inline-flex; align-items: center; padding: 0 10px; margin: 0; border: 0; background: none; font: inherit; font-size: 13.5px; font-weight: 600; color: var(--pk-ink3); text-decoration: none; white-space: nowrap; border-bottom: 2px solid transparent; cursor: pointer; transition: color .12s; }
+.pk-tabs > a:hover, .pk-tabs > button:hover { color: var(--pk-ink); text-decoration: none; }
+.pk-tabs > .active, .pk-tabs > .activo, .pk-tabs > .on { color: var(--pk-ink); border-bottom-color: var(--pk-accent); }
+.pk-tabs .navsep { width: 1px; background: var(--pk-line); margin: 12px 6px; }
+/* Verificación trae su propio estilo de pestañas (.topnav): aquí manda el de la plataforma. */
+.pk-tabs.topnav button, .pk-tabs.topnav button.on { background: none; border-radius: 0; box-shadow: none; padding: 0 10px; }
+.pk-tabs.topnav button.on { color: var(--pk-ink); border-bottom-color: var(--pk-accent); }
+.pk-sub-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.pk-sub:has(> .pk-tabs[style*="none"]) { display: none; }
+/* Controles de la barra */
+.pk-select { font: inherit; font-size: 13px; font-weight: 600; color: var(--pk-ink); background: var(--pk-panel); border: 1px solid var(--pk-line2); border-radius: 8px; padding: 6px 28px 6px 10px; max-width: 150px; appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237C8794' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 9px center; }
+.pk-select.sin-usuario { border-color: var(--pk-warn); color: var(--pk-warn); }
+.pk-search { position: relative; width: 260px; max-width: 100%; }
+.pk-search input[type=search] { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 6px 10px 6px 30px; border: 1px solid transparent; border-radius: 8px; background: var(--pk-sunk) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237C8794' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 10px center; color: var(--pk-ink); transition: background .12s, border-color .12s; }
+.pk-search input[type=search]:focus { outline: none; background-color: var(--pk-panel); border-color: var(--pk-accent); }
+.pk-search .buscar-resultados { top: calc(100% + 8px); right: 0; left: auto; width: 380px; max-width: 90vw; border-radius: 12px; }
+
+@media (max-width: 760px) {
+  .pk-bar, .pk-sub { padding: 0 14px; gap: 10px; }
+  .pk-word span { display: none; }               /* solo el isotipo y "AI" */
+  .pk-mods > a, .pk-mods > button { padding: 5px 9px; font-size: 12px; }
+  .pk-mods i { display: none; }
+  .pk-select { max-width: 96px; padding: 5px 24px 5px 8px; font-size: 12px; background-position: right 7px center; }
+  .pk-bar { gap: 8px; }
+  .pk-right { gap: 6px; }
+  .pk-sub { flex-wrap: nowrap; }
+  .pk-sub-right { flex: none; }
+  .pk-search { width: 44px; }
+  .pk-search input[type=search] { padding-left: 30px; color: transparent; }
+  .pk-search input[type=search]:focus { width: 220px; position: absolute; right: 0; top: -15px; color: var(--pk-ink); }
+}
+
+/* ============================================================ afinado común de los tres módulos */
+main { max-width: var(--pk-w); }
+.wrap { max-width: var(--pk-w); }
+main h1, main h2 { color: var(--pk-ink); }
+main h1 { font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
+main h2 { letter-spacing: -.01em; }
+.card, .panel { box-shadow: var(--pk-shadow); }
+.kpi b, .score-card .num, .tb-kpis .num, .emb-col header span { font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+table th { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--pk-ink3); font-weight: 700; }
+/* Botones: el primario es tinta (negro azulado); el cian se guarda para indicadores y foco.
+   Cada módulo lleva su clase en <body> (pk-ventas, pk-sdr, pk-verify). */
+.pk-ventas .btn:not(.secondary):not(.ghost):not(.green):not(.danger):not(.danger-solid),
+.pk-sdr .btn.primario, .pk-verify .cta:not(.ghost) { background: var(--pk-ink); border-color: var(--pk-ink); color: #fff; }
+.pk-ventas .btn:not(.secondary):not(.ghost):not(.green):not(.danger):not(.danger-solid):hover,
+.pk-sdr .btn.primario:hover, .pk-verify .cta:not(.ghost):hover { background: #1F2A37; border-color: #1F2A37; filter: none; }
+.pk-verify .cta:disabled { background: var(--pk-line2); border-color: var(--pk-line2); color: var(--pk-ink3); }
+:root[data-theme="dark"] .pk-verify .cta:not(.ghost) { color: #15191C; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pk-verify .cta:not(.ghost) { color: #15191C; } }
+.pk-ventas .btn.secondary, .pk-ventas .btn.ghost, .pk-sdr .btn:not(.primario) { border-color: var(--pk-line2); }
+.pk-sdr .btn.mini, .pk-sdr .btn.chico { border-color: var(--pk-line); }
+.pk-sdr .btn.fantasma { border-color: transparent; }
+.btn:focus-visible, .cta:focus-visible { outline-offset: 3px; }
+input[type=text], input[type=search], input[type=date], input[type=tel], input:not([type]), textarea, select { border-color: var(--pk-line2); }
+/* Ventas: pasos del asistente y píldoras */
+.topbar, .barra, .top { display: none; }        /* las barras viejas, por si quedara alguna */
+.foot { border-top: 0; color: var(--pk-ink3); font-size: 12px; }
+.pill, .chip, .tag { font-variant-numeric: tabular-nums; }
+
+/* ============================================================ inicio de PeakU AI (Ventas · #/inicio) */
+.pk-home { padding: 8px 0 40px; }
+.pk-home-hd { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 10px 0 22px; }
+.pk-home-hd h1 { font-size: 28px; letter-spacing: -.025em; margin: 0; }
+.pk-home-hd .muted { margin: 4px 0 0; }
+.pk-home-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 900px) { .pk-home-grid { grid-template-columns: 1fr; } }
+.pk-mod { display: flex; flex-direction: column; gap: 16px; background: var(--pk-panel); border: 1px solid var(--pk-line); border-radius: 16px; padding: 20px 20px 18px; color: var(--pk-ink); text-decoration: none; position: relative; overflow: hidden; transition: border-color .15s, transform .15s; }
+.pk-mod:hover { border-color: var(--pk-line2); text-decoration: none; transform: translateY(-1px); }
+.pk-mod::before { content: ""; position: absolute; left: 20px; right: 20px; top: 0; height: 2px; background: var(--pk-accent); opacity: 0; transition: opacity .15s; }
+.pk-mod:hover::before { opacity: 1; }
+.pk-mod-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pk-mod-top b { font-size: 15px; letter-spacing: -.01em; }
+.pk-mod-top small { color: var(--pk-ink3); font-size: 12px; font-weight: 600; }
+.pk-mod-nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pk-mod-nums div { min-width: 0; }
+.pk-mod-nums b { display: block; font-size: 26px; font-weight: 700; letter-spacing: -.03em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.pk-mod-nums b small { font-size: 13px; color: var(--pk-ink3); font-weight: 600; letter-spacing: 0; margin-left: 2px; }
+.pk-mod-nums span { display: block; font-size: 11.5px; color: var(--pk-ink3); font-weight: 600; margin-top: 5px; line-height: 1.25; }
+.pk-mod-nums .ok b { color: var(--pk-good); } .pk-mod-nums .warn b { color: var(--pk-warn); }
+.pk-meter { height: 4px; border-radius: 2px; background: var(--pk-sunk); overflow: hidden; }
+.pk-meter i { display: block; height: 100%; background: var(--pk-accent); border-radius: 2px; transition: width .4s ease; }
+.pk-meter i.ok { background: var(--pk-good); }
+.pk-mod-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--pk-ink3); margin-top: auto; }
+.pk-mod-foot span { min-width: 0; }
+.pk-mod-foot em { white-space: nowrap; flex: none; }
+.pk-en-inicio .foot { display: none; }
+.pk-mod-foot em { font-style: normal; color: var(--pk-accent-ink); font-weight: 600; }
+.pk-spark { display: flex; align-items: flex-end; gap: 3px; height: 22px; }
+.pk-spark i { flex: 1; background: var(--pk-line2); border-radius: 2px 2px 0 0; min-height: 2px; }
+.pk-spark i:last-child { background: var(--pk-accent); }
+.pk-home-note { margin: 18px 0 0; font-size: 12.5px; color: var(--pk-ink3); }
+.pk-skel { color: transparent !important; background: var(--pk-sunk); border-radius: 6px; }
+@media print { .pk-shell { display: none !important; } }

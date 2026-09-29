@@ -238,7 +238,7 @@ tbody tr.clickable { cursor: pointer; }
 
 /* Embudo (#/embudo) */
 main:has(.emb-tablero) { max-width: 1400px; }
-.emb-tablero { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr); gap: 10px; overflow-x: auto; padding: 14px 0 12px; align-items: start; }
+.emb-tablero { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(196px, 1fr); gap: 10px; overflow-x: auto; padding: 14px 0 12px; align-items: start; }
 .emb-col { background: var(--panel-2); border: 1px solid var(--line); border-top: 4px solid var(--c); border-radius: var(--radius); min-height: 180px; display: flex; flex-direction: column; }
 .emb-col.encima { outline: 2px dashed var(--c); outline-offset: -2px; background: #fff; }
 .emb-col header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px 6px; font-size: 13px; color: var(--peaku-gray); }
