@@ -187,9 +187,14 @@ const PROMESA_HABILES = 2;
 // Fechas que no pueden ser anteriores a la activación ni estar en el futuro (son hechos).
 const FECHAS_HECHO = { procesos: ['primer_envio', 'ultimo_envio', 'ultima_terna', 'fecha_cierre'], saas: ['primer_destacado', 'meta_at'], evaluaciones: [] };
 const ANIO_MIN = 2015;
+const dmy = f => (f ? `${f.slice(8, 10)}/${f.slice(5, 7)}/${f.slice(0, 4)}` : '');
+// Una activación sirve de referencia solo si es posible: no futura y dentro de rango. Si está
+// dañada (hay filas de Airtable con 2027), el problema es ella y no las demás fechas.
+const activacionValida = (act, hoy) => !!act && act >= `${ANIO_MIN}-01-01` && act <= hoy;
 function fechasMal(tipo, f, hoy) {
   const mal = [];
   const tope = masDias(hoy, 366);
+  const actOk = activacionValida(f.activado, hoy);
   const todas = ESPECS[tipo].campos.filter(c => c.t === 'fecha').map(c => c.k);
   for (const k of todas) {
     const v = f[k]; if (!v) continue;
@@ -197,7 +202,7 @@ function fechasMal(tipo, f, hoy) {
     if (k === 'activado' && v > hoy) { mal.push(k); continue; }   // la activación ya pasó (hay filas de Airtable con 2027)
     if (FECHAS_HECHO[tipo].includes(k)) {
       if (v > hoy) mal.push(k);
-      else if (f.activado && v < f.activado) mal.push(k);
+      else if (actOk && v < f.activado) mal.push(k);
     }
   }
   if (tipo === 'procesos' && f.primer_envio && f.ultimo_envio && f.ultimo_envio < f.primer_envio && !mal.includes('primer_envio')) mal.push('primer_envio');
@@ -352,11 +357,18 @@ function coherencia(tipo, fila, cambios = null, ahora = Date.now()) {
   const hoy = hoyCo(ahora);
   const toca = k => !cambios || k in cambios;
   const nombre = k => (ESPECS[tipo].campos.find(c => c.k === k) || {}).l || k;
-  if (fila.activado && toca('activado') && fila.activado > hoy) return `${nombre('activado')} no puede estar en el futuro.`;
+  if (fila.activado && toca('activado') && fila.activado > hoy) return `${nombre('activado')} no puede estar en el futuro (${dmy(fila.activado)}).`;
+  // Con la activación dañada no se compara contra ella: si no, una fila importada con 2027
+  // no deja anotar ningún envío (le pasó a Weimar). La activación queda marcada para corregir.
+  const actOk = activacionValida(fila.activado, hoy);
   for (const k of FECHAS_HECHO[tipo] || []) {
     const v = fila[k]; if (!v) continue;
-    if (toca(k) && v > hoy) return `${nombre(k)} no puede estar en el futuro.`;
-    if ((toca(k) || toca('activado')) && fila.activado && v < fila.activado) return `${nombre(k)} no puede ser anterior a la activación (${fila.activado}).`;
+    if (toca(k) && v > hoy) return `${nombre(k)} no puede estar en el futuro (${dmy(v)}).`;
+    if (actOk && (toca(k) || toca('activado')) && v < fila.activado) {
+      return toca('activado') && !toca(k)
+        ? `La activación (${dmy(fila.activado)}) quedaría después de ${nombre(k).toLowerCase()} (${dmy(v)}). Revisa las dos fechas.`
+        : `${nombre(k)} (${dmy(v)}) no puede ser anterior a la activación (${dmy(fila.activado)}). Si la activación está mal, corrígela primero.`;
+    }
   }
   return null;
 }

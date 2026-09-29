@@ -129,6 +129,26 @@ const hace = dias => new Date(AH - dias * 86400000).toISOString();
     assert.ok((await o.actualizar('procesos', x.id, { notas: 'ok' })).fila);
   });
 
+  await t('con la activación dañada (2027) se pueden anotar los envíos, y la activación se corrige', async () => {
+    // La fila entra como llegó de Airtable (la semilla no pasa por la validación).
+    const o2 = crearOps({ semilla: false, ahora: () => Date.parse('2026-09-29T15:00:00Z') });
+    const fs = require('fs'), path = require('path'), os = require('os');
+    const arch = path.join(os.tmpdir(), 'semilla_2027.json');
+    fs.writeFileSync(arch, JSON.stringify({ procesos: [{ empresa: 'Direktio', cargo: 'TPO', etapa: 'Reclutamiento', activado: '2027-09-23' }], saas: [], evaluaciones: [] }));
+    await o2.sembrar(arch);
+    const f = (await o2.listar('procesos'))[0];
+    assert.deepStrictEqual(f.fechas_mal, ['activado']);
+    const r = await o2.actualizar('procesos', f.id, { primer_envio: '2026-09-28' });
+    assert.ok(r.fila, r.error); assert.strictEqual(r.fila.primer_envio, '2026-09-28');
+    const r2 = await o2.actualizar('procesos', f.id, { activado: '2026-09-23' });
+    assert.ok(r2.fila, r2.error); assert.deepStrictEqual(r2.fila.fechas_mal, []);
+    assert.strictEqual(r2.fila.primer_envio_habiles, 3);
+    const r3 = await o2.actualizar('procesos', f.id, { activado: '2026-09-29' });
+    assert.match(r3.error, /Revisa las dos fechas/);
+    const r4 = await o2.actualizar('procesos', f.id, { ultima_terna: '2026-09-01' });
+    assert.match(r4.error, /01\/09\/2026.*23\/09\/2026/);
+  });
+
   console.log('indicadores de operación');
   await t('headhunting: calidad desde los informes, efectividad, recurrencia y promesa', () => {
     const P = [

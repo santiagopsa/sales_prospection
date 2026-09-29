@@ -1390,7 +1390,7 @@ button.ores.sel{border-color:var(--acc);background:var(--acc-soft)}
 .ogrid td.calc.num{text-align:right}
 .ogrid thead th.calc{background:var(--line)}
 .ogrid td .z,.ogrid td.calc .z{color:var(--line2)}
-.ogrid td.falta{box-shadow:inset 0 0 0 2px var(--warn)}
+.ogrid td.falta{box-shadow:inset 0 0 0 2px var(--warn);background:var(--warn-soft)}
 .ogrid td.guardando,.ogrid th.guardando{box-shadow:inset 0 0 0 2px var(--line2)}
 .ogrid td.ok,.ogrid th.ok{box-shadow:inset 0 0 0 2px var(--good)}
 .ogrid td.error,.ogrid th.error{box-shadow:inset 0 0 0 2px var(--crit)}
