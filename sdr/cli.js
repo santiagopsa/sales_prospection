@@ -4,6 +4,7 @@
 //
 //   node sdr/cli.js secuencia [--desde 2026-09-21]            fechas de las tareas de un lead nuevo
 //   node sdr/cli.js cola                                        orden de la cola de hoy con el desglose del puntaje
+//   node sdr/cli.js proyeccion                                  plan de la silla vs real, mes a mes (reglas PROYECCION)
 //   node sdr/cli.js embudo                                      deals por etapa del embudo de la ejecutiva (reglas EMBUDO)
 //   node sdr/cli.js importar archivo.csv|.xlsx [--confirmar]   carga desde la terminal (sin --confirmar, simula)
 //   node sdr/cli.js lista-negra archivo.csv|.xlsx [--confirmar] carga la base de lista negra (empresa, teléfono, correo, dominio, motivo)
@@ -122,6 +123,11 @@ async function main() {
         const d = t.desglose;
         console.log(`  ${pad(n + 1, 4)}${pad(t.puntaje, 5)}${pad(`${d.etapa}+${d.canal}+${d.atraso}+${d.lista || 0}${t.diasVencida ? ` (${t.diasVencida}d)` : ''}`, 26)}${pad(CANAL_LABEL[t.canal], 10)}${pad(ETAPA_LABEL[t.etapa], 14)}${t.empresa}${t.lista ? `  [lista: ${t.lista.nombre}]` : ''}`);
       });
+    } else if (cmd === 'proyeccion') {
+      const r = await require('./proyeccion').seguimiento(db, config, { hasta: args.hasta });
+      console.log(`\nProyección de la silla desde ${r.inicio} · nivel ${r.supuestos.nivel} calificadas/mes · ${r.supuestos.llamadas_mes} llamadas/mes del modelo\n`);
+      console.log(`  ${pad('mes', 9)}${pad('plan calif', 11)}${pad('real', 6)}${pad('ritmo', 7)}${pad('agend', 7)}${pad('llamadas', 10)}${pad('clientes', 10)}${pad('comisión', 10)}costo`);
+      for (const m of r.meses) console.log(`  ${pad(m.mes, 9)}${pad(m.plan ? m.plan.calificadas.toFixed(1) : '—', 11)}${pad(m.real.calificadas, 6)}${pad(m.ritmo ? m.ritmo.calificadas : '', 7)}${pad(m.real.agendadas, 7)}${pad(`${m.real.llamadas}/${m.plan ? m.plan.llamadas : '—'}`, 10)}${pad(`${m.real.ganados}/${m.plan ? m.plan.clientes.toFixed(1) : '—'}`, 10)}${pad(`${m.real.comision}/${m.plan ? m.plan.comision : '—'}`, 10)}${m.plan && m.plan.costo != null ? m.plan.costo : '—'}`);
     } else if (cmd === 'embudo') {
       const r = await require('./embudo').tablero(db, config);
       if (r.sin_tabla) console.log('No está la tabla public.deals del Sandler.');

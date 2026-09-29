@@ -66,9 +66,14 @@ test('embudo de la ejecutiva', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, as
   await Em.mover(db, base, { dealId: nuevo, etapa: 'interesado', usuario: 'Luisa', ahora });
   // Ganado pide motivo y cierra el deal; volver atrás lo reabre.
   await assert.rejects(Em.mover(db, base, { dealId: nuevo, etapa: 'ganado', usuario: 'Luisa', ahora }), /motivo/);
-  await Em.mover(db, base, { dealId: nuevo, etapa: 'ganado', motivo: 'Piloto validó la solución', usuario: 'Luisa', ahora });
+  // Ganado exige qué se vendió (y solo acepta los productos de la lista).
+  await assert.rejects(Em.mover(db, base, { dealId: nuevo, etapa: 'ganado', motivo: 'x', usuario: 'Luisa', ahora }), /qué se vendió/);
+  await assert.rejects(Em.mover(db, base, { dealId: nuevo, etapa: 'ganado', motivo: 'x', productos: ['Consultoría'], usuario: 'Luisa', ahora }), /qué se vendió/);
+  const g = await Em.mover(db, base, { dealId: nuevo, etapa: 'ganado', motivo: 'Piloto validó la solución', productos: ['SaaS', 'Evaluaciones', 'Otro'], usuario: 'Luisa', ahora });
+  assert.deepStrictEqual(g.productos, ['SaaS', 'Evaluaciones']);
   fila = (await db.query(`SELECT * FROM public.deals WHERE id = $1`, [nuevo])).rows[0];
-  assert.deepStrictEqual([fila.outcome, fila.outcome_reason, !!fila.closed_at], ['won', 'Piloto validó la solución', true]);
+  assert.deepStrictEqual([fila.outcome, fila.outcome_reason, !!fila.closed_at, fila.productos], ['won', 'Piloto validó la solución', true, 'SaaS, Evaluaciones']);
+  assert.deepStrictEqual((await Em.tablero(db, base, { ahora })).columnas.ganado.find(x => x.deal_id === nuevo).productos, ['SaaS', 'Evaluaciones']);
   await Em.mover(db, base, { dealId: nuevo, etapa: 'interesado', usuario: 'Luisa', ahora });
   fila = (await db.query(`SELECT * FROM public.deals WHERE id = $1`, [nuevo])).rows[0];
   assert.deepStrictEqual([fila.outcome, fila.closed_at, fila.etapa_embudo], ['open', null, 'interesado']);
@@ -94,5 +99,32 @@ test('embudo de la ejecutiva', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, as
   // Un deal cerrado hace más de dias_cerrados ya no se ve.
   await db.query(`UPDATE public.deals SET closed_at = '2026-06-01T15:00:00Z' WHERE id = $1`, [ganado]);
   assert.strictEqual((await Em.tablero(db, base, { ahora })).conteo.ganado, 0);
+
+  // Cotización: se guarda como texto, lleva el deal a propuesta y el análisis compara con el demo.
+  const cot = await deal('Cotizar SA', { cal: 'Completa', data: { dolor: 'Vacante de desarrollador abierta hace 4 meses', presupuesto: '3 millones al mes', idealRequests: [{ text: 'candidatos en 48 horas', weHave: true }] } });
+  await assert.rejects(Em.guardarCotizacion(db, base, { dealId: cot, archivo: 'p.txt', texto: 'corta', usuario: 'Luisa', ahora }), /casi vacío/);
+  const texto = 'Propuesta comercial Peaku\r\n\r\n\r\nPlan SaaS mensual: 2.5 millones. Incluye publicación ilimitada y terna en 48 horas. Sin cláusula de permanencia.';
+  const gc = await Em.guardarCotizacion(db, base, { dealId: cot, archivo: 'propuesta.txt', base64: Buffer.from(texto).toString('base64'), usuario: 'Luisa', ahora });
+  assert.strictEqual(gc.archivo, 'propuesta.txt');
+  let c = await Em.cotizacion(db, cot);
+  assert.ok(c.cotizacion.texto.startsWith('Propuesta comercial Peaku\n\nPlan'));
+  assert.ok(/Dolor principal: Vacante/.test(c.pedido) && /candidatos en 48 horas/.test(c.pedido));
+  fila = (await db.query(`SELECT etapa_embudo, propuesta_tipo, quoted_at FROM public.deals WHERE id = $1`, [cot])).rows[0];
+  assert.deepStrictEqual([fila.etapa_embudo, fila.propuesta_tipo, !!fila.quoted_at], ['propuesta', 'cotizacion', true]);
+  assert.ok((await Em.tablero(db, base, { ahora })).columnas.propuesta.find(x => x.deal_id === cot).cotizacion.archivo === 'propuesta.txt');
+  // Análisis con una IA falsa.
+  const ia = { messages: { create: async ({ messages }) => { assert.ok(/Plan SaaS mensual/.test(messages[0].content) && /Vacante de desarrollador/.test(messages[0].content)); return { model: 'falso', content: [{ text: '```json\n{"cubre":["terna en 48 horas"],"falta":["no habla del dolor de 4 meses"],"sobra":[],"precio":"2.5M dentro de los 3M","riesgos":[],"ajustes":["anclar el precio al costo de la vacante"],"alineacion":72,"resumen":"Alineada; falta el ancla."}\n```' }] }; } } };
+  await assert.rejects(Em.analizarCotizacion(db, base, null, { dealId: cot, usuario: 'Luisa', ahora }), /ANTHROPIC_API_KEY/);
+  const an = await Em.analizarCotizacion(db, base, ia, { dealId: cot, usuario: 'Luisa', ahora });
+  assert.deepStrictEqual([an.alineacion, an.cubre[0], an.por], [72, 'terna en 48 horas', 'Luisa']);
+  c = await Em.cotizacion(db, cot);
+  assert.strictEqual(c.analisis.alineacion, 72);
+  // Subir otra cotización borra el análisis viejo.
+  await Em.guardarCotizacion(db, base, { dealId: cot, archivo: 'v2.txt', texto: texto + ' Versión 2 con ancla de precio contra la vacante abierta.', usuario: 'Luisa', ahora });
+  assert.strictEqual((await Em.cotizacion(db, cot)).analisis, null);
+  // Sin demo ni ficha no hay contra qué comparar.
+  const vacio = await deal('Vacío SA', { cal: 'Completa' });
+  await Em.guardarCotizacion(db, base, { dealId: vacio, archivo: 'x.txt', texto: texto, usuario: 'Luisa', ahora });
+  await assert.rejects(Em.analizarCotizacion(db, base, ia, { dealId: vacio, usuario: 'Luisa', ahora }), /no tiene el demo/);
   await db.end();
 });

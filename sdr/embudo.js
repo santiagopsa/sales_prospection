@@ -31,7 +31,8 @@ const RANGO = { 'no califica': 0, parcial: 1, completa: 2 };
 
 function reglas(config) {
   const e = config.EMBUDO || {};
-  return { minimo: e.minimo_calificado || 'Completa', exigir: e.exigir_calificado !== false, diasCerrados: e.dias_cerrados || 60 };
+  return { minimo: e.minimo_calificado || 'Completa', exigir: e.exigir_calificado !== false, diasCerrados: e.dias_cerrados || 60,
+    productos: e.productos || ['SaaS', 'Headhunting', 'EOR', 'Evaluaciones'], cotizacionMax: e.cotizacion_max_chars || 40000 };
 }
 function alcanza(config, label) {
   return !!label && (RANGO[String(label).toLowerCase()] ?? -1) >= RANGO[reglas(config).minimo.toLowerCase()];
@@ -46,6 +47,7 @@ async function asegurarColumnas(db) {
     `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS etapa_embudo TEXT`,
     `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS etapa_embudo_at TIMESTAMPTZ`,
     `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS propuesta_tipo TEXT`,
+    `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS productos TEXT`,
     `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS quoted_at TIMESTAMPTZ`,
     `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS outcome_reason TEXT`,
     `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ`,
@@ -70,7 +72,9 @@ async function tablero(db, config, { ahora = new Date() } = {}) {
   const desde = new Date(ahora.getTime() - r.diasCerrados * 86400000).toISOString();
   const q = await db.query(
     `SELECT d.id, d.company, d.executive, d.canal_adquisicion, d.freelancer_nombre, d.calificacion_sandler, d.outcome, d.outcome_reason,
-            d.etapa_embudo, d.propuesta_tipo,
+            d.etapa_embudo, d.propuesta_tipo, d.productos,
+            d.data->'cotizacion'->>'archivo' AS cotizacion_archivo, (d.data->'cotizacion'->>'at')::timestamptz AS cotizacion_at,
+            d.data ? 'cotizacionAnalisis' AS con_analisis,
             -- Solo los campos que usa la calificación (data trae el transcript completo del demo).
             jsonb_build_object('dolor', d.data->'dolor', 'dolorCuantificar', d.data->'dolorCuantificar', 'dolorHistoria', d.data->'dolorHistoria',
               'dolorImpacto', d.data->'dolorImpacto', 'presupuesto', d.data->'presupuesto', 'decisor', d.data->'decisor',
@@ -99,6 +103,8 @@ async function tablero(db, config, { ahora = new Date() } = {}) {
       ejecutiva: d.executive, canal: d.canal_adquisicion, trajo: d.freelancer_nombre,
       calificacion: d.calificacion_sandler, items: cal.items, n: CAL.CLAVES.filter(k => cal.items[k]).length,
       propuesta_tipo: d.propuesta_tipo || (d.quoted_ms ? 'cotizacion' : null), motivo: d.outcome_reason,
+      productos: d.productos ? d.productos.split(',').map(x => x.trim()).filter(Boolean) : [],
+      cotizacion: d.cotizacion_archivo ? { archivo: d.cotizacion_archivo, ms: ms(d.cotizacion_at), analizada: !!d.con_analisis } : null,
       lead_id: d.lead_id, reunion_ms: d.reunion_ms, reunion_pendiente: !!(d.lead_id && d.lead_etapa === 'reunion_agendada' && d.reunion_ms && d.reunion_ms > ahora.getTime()),
       dias_en_etapa: Math.max(0, Math.floor((ahora.getTime() - d.etapa_ms) / 86400000)), created_ms: d.created_ms,
     });
@@ -108,7 +114,7 @@ async function tablero(db, config, { ahora = new Date() } = {}) {
   const conteo = Object.fromEntries(IDS.map(id => [id, columnas[id].length]));
   const ejecutiva = ((config.USUARIOS || []).find(u => u.rol === 'ejecutiva') || {}).nombre || null;
   const sdr = ((config.USUARIOS || []).find(u => u.rol === 'sdr') || {}).nombre || null;
-  return { etapas: ETAPAS, columnas, conteo, reglas: r, criterios: CAL.CRITERIOS, tipos_propuesta: TIPOS_PROPUESTA, ejecutiva, sdr };
+  return { etapas: ETAPAS, columnas, conteo, reglas: r, criterios: CAL.CRITERIOS, tipos_propuesta: TIPOS_PROPUESTA, productos: r.productos, ejecutiva, sdr };
 }
 
 async function leerDeal(db, dealId) {
@@ -153,7 +159,7 @@ async function ponerEtapa(db, dealId, d, etapa, usuario, ahora, extra = {}) {
 const etapaDeFila = d => d.etapa_embudo || (d.outcome === 'won' ? 'ganado' : d.outcome === 'lost' ? 'perdido' : null);
 
 // Mover un deal de etapa. propuesta pide tipo (prueba | cotizacion); ganado y perdido piden motivo.
-async function mover(db, config, { dealId, etapa, tipo, motivo, usuario, ahora = new Date() }) {
+async function mover(db, config, { dealId, etapa, tipo, motivo, productos, usuario, ahora = new Date() }) {
   dealId = Number(dealId);
   if (!IDS.includes(etapa)) throw error(400, 'Etapa desconocida');
   await asegurarColumnas(db);
@@ -168,6 +174,9 @@ async function mover(db, config, { dealId, etapa, tipo, motivo, usuario, ahora =
   }
   if (etapa === 'propuesta' && !TIPOS_PROPUESTA[tipo]) throw error(400, 'Elige si es prueba gratis o cotización');
   if ((etapa === 'ganado' || etapa === 'perdido') && !String(motivo || '').trim()) throw error(400, 'Escribe el motivo');
+  // Ganado exige qué se vendió (una o varias líneas de EMBUDO.productos).
+  const prods = Array.isArray(productos) ? productos.filter(x => r.productos.includes(x)) : [];
+  if (etapa === 'ganado' && !prods.length) throw error(400, `Marca qué se vendió: ${r.productos.join(', ')}`);
 
   const sets = [], params = [dealId];
   const set = (col, v) => { params.push(v); sets.push(`${col} = $${params.length}`); };
@@ -175,14 +184,110 @@ async function mover(db, config, { dealId, etapa, tipo, motivo, usuario, ahora =
     set('propuesta_tipo', tipo);
     if (tipo === 'cotizacion' && !d.quoted_at) set('quoted_at', ahora.toISOString());
   }
+  if (etapa === 'ganado') set('productos', prods.join(', '));
   if (etapa === 'ganado' || etapa === 'perdido') {
     set('outcome', etapa === 'ganado' ? 'won' : 'lost'); set('outcome_reason', String(motivo).trim()); set('closed_at', ahora.toISOString());
   } else if (d.outcome === 'won' || d.outcome === 'lost') {
     set('outcome', 'open'); set('outcome_reason', null); set('closed_at', null);   // se reabre
   }
   if (sets.length) await db.query(`UPDATE public.deals SET ${sets.join(', ')} WHERE id = $1`, params);
-  await ponerEtapa(db, dealId, d, etapa, usuario, ahora, etapa === 'propuesta' ? { tipo } : motivo ? { motivo: String(motivo).trim() } : {});
-  return { deal_id: dealId, etapa };
+  await ponerEtapa(db, dealId, d, etapa, usuario, ahora, etapa === 'propuesta' ? { tipo } : motivo ? { motivo: String(motivo).trim(), ...(prods.length ? { productos: prods } : {}) } : {});
+  return { deal_id: dealId, etapa, productos: prods };
 }
 
-module.exports = { ETAPAS, tablero, calificar, mover, etapaDe, alcanza, _reiniciar: () => { columnasListas = false; } };
+// ---- Cotización: el documento que se le mandó al cliente, como texto, para compararlo con lo que
+// pidió en el demo. Se guarda en data.cotizacion; el análisis (Claude) en data.cotizacionAnalisis.
+async function textoDeArchivo(nombre, buf) {
+  const ext = String(nombre || '').toLowerCase().split('.').pop();
+  if (ext === 'pdf') {
+    let pdfParse; try { pdfParse = require('pdf-parse/lib/pdf-parse.js'); } catch (_) { throw error(501, 'Este servidor no puede leer PDF (falta pdf-parse). Pega el texto de la cotización.'); }
+    return (await pdfParse(buf)).text || '';
+  }
+  if (ext === 'docx') {
+    let mammoth; try { mammoth = require('mammoth'); } catch (_) { throw error(501, 'Este servidor no puede leer Word (falta mammoth). Pega el texto de la cotización.'); }
+    return (await mammoth.extractRawText({ buffer: buf })).value || '';
+  }
+  const t = buf.toString('utf8');
+  if (/[\x00-\x08]/.test(t.slice(0, 2000))) throw error(415, 'No puedo leer ese formato: sube PDF, Word (.docx) o texto.');
+  return t;
+}
+
+async function guardarCotizacion(db, config, { dealId, archivo, base64, texto, usuario, ahora = new Date() }) {
+  dealId = Number(dealId);
+  await asegurarColumnas(db);
+  usuario = R.usuarioValido(config, usuario);
+  const d = await leerDeal(db, dealId);
+  let t = String(texto || '');
+  if (!t.trim() && base64) t = await textoDeArchivo(archivo, Buffer.from(String(base64), 'base64'));
+  t = t.replace(/\r\n/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (t.length < 40) throw error(400, 'El documento quedó casi vacío al leerlo (¿es un PDF escaneado?). Pega el texto de la cotización.');
+  const max = reglas(config).cotizacionMax;
+  const cot = { archivo: archivo || null, texto: t.slice(0, max), chars: t.length, recortado: t.length > max, at: ahora.toISOString(), por: usuario };
+  await db.query(
+    `UPDATE public.deals SET data = (COALESCE(data, '{}'::jsonb) - 'cotizacionAnalisis') || jsonb_build_object('cotizacion', $2::jsonb),
+       quoted_at = COALESCE(quoted_at, $3), propuesta_tipo = COALESCE(propuesta_tipo, 'cotizacion') WHERE id = $1`,
+    [dealId, JSON.stringify(cot), ahora.toISOString()]);
+  // Si estaba antes de "propuesta", mandar la cotización lo lleva ahí.
+  const etapa = etapaDe(config, d);
+  if (['sin_calificar', 'calificado'].includes(etapa)) await ponerEtapa(db, dealId, d, 'propuesta', usuario, ahora, { tipo: 'cotizacion' });
+  return { deal_id: dealId, archivo: cot.archivo, chars: cot.chars, recortado: cot.recortado };
+}
+
+// Lo que el cliente pidió en el demo, en texto, para el análisis.
+function loQuePidio(data = {}) {
+  const ia = data.iaExtracted || {};
+  const campo = (k, label) => { const v = data[k] || ia[k]; return v && String(v).trim() ? `${label}: ${String(v).trim()}` : null; };
+  const partes = [
+    campo('lineaNegocio', 'Línea de negocio'), campo('segment', 'Segmento'),
+    campo('fichaCargos', 'Cargos que necesita cubrir (ficha de la SDR)'), campo('fichaCosto', 'Costo de la vacante abierta'), campo('fichaHerramientas', 'Herramientas que usa hoy'),
+    campo('dolor', 'Dolor principal'), campo('dolorCuantificar', 'Dolor cuantificado'), campo('dolorHistoria', 'Qué ha intentado'), campo('dolorImpacto', 'Impacto'),
+    campo('presupuesto', 'Presupuesto'), campo('decisor', 'Quién decide'), campo('procesoDecision', 'Proceso de decisión'), campo('fechaLimiteDecision', 'Fecha límite'),
+    campo('proximoPaso', 'Próximo paso acordado'), campo('pilotoCargo', 'Piloto propuesto'),
+    Array.isArray(data.idealRequests) && data.idealRequests.length ? 'Lo que el cliente pidió en su ideal:\n' + data.idealRequests.filter(x => x && x.text).map(x => `- ${x.text}${x.weHave === false ? ' (NO lo tenemos)' : ''}`).join('\n') : null,
+    ia.que_mostrar && Array.isArray(ia.que_mostrar) ? 'Qué se acordó mostrar: ' + ia.que_mostrar.map(x => x.item || x).join('; ') : null,
+  ].filter(Boolean);
+  return partes.join('\n');
+}
+
+async function analizarCotizacion(db, config, anthropic, { dealId, usuario, ahora = new Date() }) {
+  dealId = Number(dealId);
+  if (!anthropic) throw error(503, 'Sin ANTHROPIC_API_KEY: el análisis con IA no está disponible en este servidor.');
+  const d = await leerDeal(db, dealId);
+  const data = d.data || {};
+  if (!data.cotizacion || !data.cotizacion.texto) throw error(409, 'Primero sube la cotización.');
+  const pedido = loQuePidio(data);
+  if (pedido.length < 40) throw error(409, 'El deal no tiene el demo lleno (ni ficha de la SDR): no hay contra qué comparar la cotización.');
+  const prompt = `Eres el coach comercial de Peaku (headhunting tech, SaaS de reclutamiento, EOR y evaluaciones). Compara la cotización que la ejecutiva le mandó a un cliente con lo que ese cliente pidió y contó en la llamada de demo. Responde SOLO con un JSON válido, en español, sin texto alrededor:
+{
+  "cubre": ["lo que el cliente pidió y la cotización sí atiende, con la cita corta de la cotización"],
+  "falta": ["lo que el cliente pidió o le duele y la cotización NO menciona o no resuelve"],
+  "sobra": ["lo que la cotización ofrece que el cliente no pidió ni parece necesitar"],
+  "precio": "cómo se presenta el precio frente al dolor cuantificado y al presupuesto que dio el cliente (¿hay ancla?, ¿está dentro de lo que dijo?)",
+  "riesgos": ["riesgos de que no cierre, concretos"],
+  "ajustes": ["cambios puntuales a la cotización, en orden de importancia (máximo 5)"],
+  "alineacion": 0-100,
+  "resumen": "2 frases: qué tan alineada está y qué cambiar primero"
+}
+
+LO QUE EL CLIENTE PIDIÓ Y CONTÓ EN EL DEMO (empresa ${d.company || ''}):
+${pedido}
+
+COTIZACIÓN ENVIADA (${data.cotizacion.archivo || 'texto'}):
+${data.cotizacion.texto}`;
+  const msg = await anthropic.messages.create({ model: process.env.ANALYZE_MODEL || 'claude-opus-4-8', max_tokens: 2500, messages: [{ role: 'user', content: prompt }] });
+  const text = (msg.content && msg.content[0] && msg.content[0].text) || '';
+  let json = text.trim(); const fenced = json.match(/```(?:json)?\s*([\s\S]*?)```/); if (fenced) json = fenced[1].trim();
+  const ini = json.indexOf('{'), fin = json.lastIndexOf('}'); if (ini >= 0 && fin > ini) json = json.slice(ini, fin + 1);
+  let parsed; try { parsed = JSON.parse(json); } catch (_) { throw error(502, 'La IA no devolvió un análisis legible. Intenta de nuevo.'); }
+  const analisis = { ...parsed, at: ahora.toISOString(), por: R.usuarioValido(config, usuario), modelo: msg.model || null };
+  await db.query(`UPDATE public.deals SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object('cotizacionAnalisis', $2::jsonb) WHERE id = $1`, [dealId, JSON.stringify(analisis)]);
+  return analisis;
+}
+
+async function cotizacion(db, dealId) {
+  const d = await leerDeal(db, Number(dealId));
+  const data = d.data || {};
+  return { deal_id: d.id, cotizacion: data.cotizacion || null, analisis: data.cotizacionAnalisis || null, pedido: loQuePidio(data) };
+}
+
+module.exports = { ETAPAS, tablero, calificar, mover, etapaDe, alcanza, guardarCotizacion, analizarCotizacion, cotizacion, loQuePidio, _reiniciar: () => { columnasListas = false; } };

@@ -365,3 +365,12 @@ a.chip.fuego:hover { text-decoration: none; background: #ffe4cc; }
 /* Aviso de versión nueva: se queda hasta recargar */
 .toast.version-nueva { top: 112px; bottom: auto; background: var(--texto); display: flex; align-items: center; gap: 10px; z-index: 70; }
 .toast.version-nueva .btn { background: #fff; color: var(--texto); border-color: #fff; font-size: 12px; }
+/* Proyección de la silla */
+.kpi.bien b { color: var(--verde); } .kpi.medio b { color: var(--alerta); } .kpi.mal b { color: var(--mal); }
+.py-barra { height: 5px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+.py-barra i { display: block; height: 100%; background: var(--azul); }
+.py-barra i.bien { background: var(--verde); } .py-barra i.medio { background: var(--alerta); } .py-barra i.mal { background: var(--mal); }
+.py-tabla td, .py-tabla th { vertical-align: top; }
+.py-tabla tr.en-curso td { background: #f7fcff; }
+.py-tabla tfoot td { border-top: 2px solid var(--linea); }
+.py-ritmo { font-size: 12px; color: var(--azul-osc); white-space: nowrap; }

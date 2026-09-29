@@ -263,3 +263,32 @@ main:has(.emb-tablero) { max-width: 1400px; }
 .tb-criterios p { margin: 6px 0; font-size: 13px; line-height: 1.45; color: var(--peaku-gray); }
 details.tb-criterios { margin: 0 0 10px; }
 details.tb-criterios summary { cursor: pointer; color: var(--peaku-blue-dark); }
+
+/* Wishlist por necesidad */
+.wl-top { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
+.wl-top li { margin: 4px 0; }
+.wl-gap { margin-bottom: 14px; }
+.wl-tabla td { vertical-align: top; }
+.wl-tabla td.num, .wl-tabla th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.wl-tabla td.num b { font-size: 15px; }
+.wl-barra { height: 4px; background: var(--panel-2); border-radius: 2px; margin-top: 8px; max-width: 260px; overflow: hidden; }
+.wl-barra i { display: block; height: 100%; background: var(--peaku-blue); }
+.wl-detalle td { background: var(--panel-2); }
+.wl-pedidos li { padding: 5px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+.wl-pedidos li:last-child { border-bottom: 0; }
+
+/* Cotización enviada */
+.cot-drop { display: flex; flex-direction: column; gap: 2px; align-items: center; justify-content: center; text-align: center; padding: 18px 14px; border: 1.5px dashed var(--line); border-radius: 10px; cursor: pointer; margin: 0; font-weight: 400; }
+.cot-drop:hover { border-color: var(--peaku-blue); background: #f7fcff; }
+.cot-drop b { font-size: 14px; color: var(--text); }
+.cot-texto { white-space: pre-wrap; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--panel-2); border-radius: 8px; padding: 12px; max-height: 320px; overflow: auto; margin: 8px 0 0; }
+.cot-analisis { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.cot-bloque { margin-top: 12px; }
+.cot-bloque h3 { margin: 0 0 6px; }
+.cot-bloque li { display: flex; gap: 8px; align-items: flex-start; padding: 4px 0; font-size: 13.5px; }
+.cot-bloque .pill { flex: none; min-width: 22px; text-align: center; }
+.emb-cot { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--peaku-blue-dark); background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; text-align: left; }
+.emb-cot.falta { color: var(--warn); }
+.emb-cot:hover { text-decoration: underline; }
+.cot-bloque li, .wl-pedidos li { justify-content: flex-start; }
+.wl-pedidos li { display: flex; gap: 8px; align-items: baseline; }

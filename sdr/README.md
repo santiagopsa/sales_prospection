@@ -367,6 +367,38 @@ Se mueven arrastrando la tarjeta o con "Mover a…".
   el recorrido queda en `data.embudoHistorial`. Reglas en `EMBUDO` de `config.js`
   (`minimo_calificado`, `exigir_calificado`, `dias_cerrados`); `node sdr/cli.js embudo` muestra el conteo.
 
+## Proyección de la silla (Prospección → Proyección)
+
+`/sdr/#/proyeccion`: el plan del modelo financiero de la silla (hoja "silla-comercial") contra lo real,
+mes a mes desde `PROYECCION.inicio`. Plan: reuniones calificadas = `nivel` × rampa (25/50/75/100 %),
+llamadas del modelo = `llamadas_hora × horas_semana × semanas_mes`, clientes = calificadas ×
+`conversion_cliente`, ingreso = clientes × `ingreso_cliente_usd × ltv_meses`, costo por mes de
+`costo_silla_usd`. Real: llamadas y agendadas de los toques de la SDR, calificadas y comisión con la
+regla de la comisión, clientes = deals de la SDR ganados en el mes. En el mes en curso, "ritmo" es lo
+real llevado a fin de mes por días hábiles. `node sdr/cli.js proyeccion` imprime la tabla.
+
+## Qué se vendió y la cotización (Embudo y detalle del deal)
+
+- Al marcar un deal como **ganado** (en el embudo o en el detalle del deal del Sandler) hay que elegir
+  qué se vendió: una o varias líneas de `EMBUDO.productos` (SaaS, Headhunting, EOR, Evaluaciones).
+  Queda en `public.deals.productos`; el embudo lo muestra en la tarjeta.
+- **Cotización**: al pasar a "Prueba gratis o cotización" con cotización, se pide el documento (PDF,
+  Word o texto pegado). Se guarda como texto en `data.cotizacion` (recortado a
+  `EMBUDO.cotizacion_max_chars`) y lleva el deal a propuesta con `quoted_at`. En el detalle del deal,
+  "Analizar contra el demo" le pide a Claude comparar la cotización con lo que el cliente pidió
+  (dolor, presupuesto, ideal, ficha de la SDR) y guarda el resultado en `data.cotizacionAnalisis`:
+  cubre / falta / sobra / precio / riesgos / ajustes / alineación. Subir otra versión borra el análisis.
+  Rutas: `GET|POST /sdr/api/embudo/:id/cotizacion`, `POST …/cotizacion/analizar` (necesita
+  `ANTHROPIC_API_KEY`; el Sandler le pasa su cliente al módulo).
+
+## Wishlist por necesidad (Ventas → Wishlist)
+
+Los pedidos de los demos (uno por línea) se agrupan con Claude en necesidades recurrentes y se cuentan
+por tamaño de empresa (A/B/C), con "¿lo tenemos?" según lo que marcó la ejecutiva. `GET
+/api/wishlist/temas` en `server.js`; el resultado se guarda en `wishlist_temas` con un hash de los
+pedidos, así que solo se vuelve a clasificar cuando hay pedidos nuevos (o con `?refrescar=1`). La
+lista completa sigue en "Lista completa".
+
 ## Pasar al siguiente lead a mano
 
 Después de registrar un toque (llamada, WhatsApp, correo…) la app se queda en la ficha del lead para

@@ -245,7 +245,8 @@ app.get('/api/deals', async (req, res) => {
                score_fundamentals, score_nice_to_have,
                linea_negocio, calificacion_sandler,
                fecha_limite_decision, quoted_at, outcome, outcome_reason, closed_at,
-               canal_adquisicion, freelancer_nombre, created_at
+               canal_adquisicion, freelancer_nombre, created_at,
+               (to_jsonb(deals.*)->>'productos') AS productos
         FROM deals ORDER BY created_at DESC LIMIT 500`);
       return res.json(r.rows);
     }
@@ -269,10 +270,15 @@ app.get('/api/deals', async (req, res) => {
 app.patch('/api/deals/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const { outcome, outcome_reason, quoted_at } = req.body || {};
+    const { outcome, outcome_reason, quoted_at, productos } = req.body || {};
+    // Ganado exige la línea (o líneas) que se vendieron: SaaS, Headhunting, EOR, Evaluaciones.
+    const PRODUCTOS = (require('./sdr/config').EMBUDO || {}).productos || ['SaaS', 'Headhunting', 'EOR', 'Evaluaciones'];
+    const prods = Array.isArray(productos) ? productos.filter(x => PRODUCTOS.includes(x)) : null;
+    if (outcome === 'won' && !(prods && prods.length)) return res.status(400).json({ ok: false, error: 'Marca qué se vendió: ' + PRODUCTOS.join(', ') });
     if (pool) {
       const parts = [], vals = [];
       if (outcome) { vals.push(outcome); parts.push(`outcome=$${vals.length}`); }
+      if (prods && prods.length) { try { await pool.query(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS productos TEXT`); } catch (_) { /* ya está */ } vals.push(prods.join(', ')); parts.push(`productos=$${vals.length}`); }
       if (outcome_reason !== undefined) { vals.push(outcome_reason); parts.push(`outcome_reason=$${vals.length}`); }
       if (quoted_at !== undefined) { vals.push(quoted_at); parts.push(`quoted_at=$${vals.length}`); }
       if (outcome === 'won' || outcome === 'lost') { parts.push(`closed_at=NOW()`); }
@@ -285,6 +291,7 @@ app.patch('/api/deals/:id', async (req, res) => {
     const d = memory.deals.find(x => x.id === id);
     if (!d) return res.status(404).json({ ok: false, error: 'not found' });
     if (outcome) d.outcome = outcome;
+    if (prods && prods.length) d.productos = prods.join(', ');
     if (outcome_reason !== undefined) d.outcomeReason = outcome_reason;
     if (quoted_at !== undefined) d.quotedAt = quoted_at;
     if (outcome === 'won' || outcome === 'lost') d.closedAt = new Date().toISOString();
@@ -356,6 +363,71 @@ app.get('/api/wishlist', async (req, res) => {
     }
     res.json([...map.values()].sort((a, b) => b.count - a.count));
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Wishlist por temas: los pedidos, uno por línea, no dicen nada; aquí se agrupan por necesidad
+// (con Claude) y se cuentan por tamaño de empresa. El resultado se guarda (wishlist_temas) con un
+// hash de los pedidos: solo se vuelve a clasificar cuando hay pedidos nuevos o con ?refrescar=1.
+const SIN_PEDIDO = /^(no aplica|n\/a|na|ninguno|ninguna|nada|-|—)\.?$/i;
+function hashPedidos(filas) {
+  return require('crypto').createHash('md5').update(filas.map(f => `${f.id}:${f.segment || ''}:${f.item}`).join('|')).digest('hex');
+}
+function armarTemas(clasificacion, filas) {
+  const porId = new Map(filas.map(f => [f.id, f]));
+  const usados = new Set();
+  const temas = (clasificacion.temas || []).map(t => {
+    const items = (t.items || []).map(Number).filter(id => porId.has(id) && !usados.has(id));
+    items.forEach(id => usados.add(id));
+    const fs = items.map(id => porId.get(id));
+    const seg = { A: 0, B: 0, C: 0, '': 0 };
+    for (const f of fs) seg[f.segment && seg[f.segment] !== undefined ? f.segment : '']++;
+    const tenemos = fs.filter(f => f.we_have).length;
+    return {
+      nombre: String(t.nombre || 'Sin nombre').trim(), descripcion: String(t.descripcion || '').trim(), producto: String(t.producto || 'Otro').trim(),
+      total: fs.length, por_segmento: seg, tenemos, lo_tenemos: !fs.length ? 'no' : tenemos >= Math.ceil(fs.length / 2) ? 'si' : tenemos ? 'parcial' : 'no',
+      empresas: [...new Set(fs.map(f => f.company).filter(Boolean))].length,
+      pedidos: fs.map(f => ({ id: f.id, item: f.item, segment: f.segment, we_have: !!f.we_have, company: f.company, deal_id: f.deal_id })),
+    };
+  }).filter(t => t.total).sort((a, b) => b.total - a.total);
+  const sinTema = filas.filter(f => !usados.has(f.id)).map(f => ({ id: f.id, item: f.item, segment: f.segment, we_have: !!f.we_have, company: f.company, deal_id: f.deal_id }));
+  return { temas, sin_tema: sinTema };
+}
+app.get('/api/wishlist/temas', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'sin base de datos' });
+    await pool.query(`CREATE TABLE IF NOT EXISTS wishlist_temas (id SERIAL PRIMARY KEY, hash TEXT NOT NULL, resultado JSONB NOT NULL, modelo TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`);
+    const filas = (await pool.query(
+      `SELECT w.id, w.segment, TRIM(w.item) AS item, w.we_have, w.deal_id, d.company, d.linea_negocio
+       FROM wishlist w LEFT JOIN deals d ON d.id = w.deal_id
+       WHERE w.item IS NOT NULL AND TRIM(w.item) <> '' ORDER BY w.id`)).rows.filter(f => !SIN_PEDIDO.test(f.item));
+    if (!filas.length) return res.json({ temas: [], sin_tema: [], total: 0, generado_at: null });
+    const hash = hashPedidos(filas);
+    const cache = (await pool.query(`SELECT resultado, modelo, created_at FROM wishlist_temas WHERE hash = $1 ORDER BY id DESC LIMIT 1`, [hash])).rows[0];
+    if (cache && req.query.refrescar !== '1') return res.json({ ...armarTemas(cache.resultado, filas), total: filas.length, generado_at: cache.created_at, modelo: cache.modelo, cache: true });
+    if (!anthropic) {
+      const viejo = (await pool.query(`SELECT resultado, created_at FROM wishlist_temas ORDER BY id DESC LIMIT 1`)).rows[0];
+      if (viejo) return res.json({ ...armarTemas(viejo.resultado, filas), total: filas.length, generado_at: viejo.created_at, desactualizado: true });
+      return res.status(503).json({ error: 'Sin ANTHROPIC_API_KEY no se pueden agrupar los pedidos.' });
+    }
+    const lista = filas.map(f => `${f.id}\t${f.segment || '?'}\t${f.item.replace(/\s+/g, ' ').slice(0, 220)}`).join('\n');
+    const prompt = `Eres el analista de producto de Peaku (headhunting tech, SaaS de reclutamiento con IA, EOR, evaluaciones y pruebas, Peaku Verify). Abajo hay pedidos que los clientes dijeron en demos, uno por línea: id, segmento de la empresa (A = micro, B = pyme, C = grande) y el pedido textual.
+Agrúpalos en NECESIDADES recurrentes (temas), entendiendo el contexto: dos pedidos distintos en palabras pueden ser la misma necesidad (p. ej. "conexión con buk" y "integración con su ats" = integración con el ATS del cliente; "candidatos ya filtrados" y "evitar que se postule gente sin la experiencia" = filtro previo de candidatos). Reglas:
+- Entre 8 y 16 temas. Nombre corto (3-6 palabras), descripción de una frase con qué necesidad de fondo hay detrás.
+- Cada pedido va en UN solo tema. Los pedidos que solo son "mándame la propuesta / precios / referencias" van a un tema "Propuesta y precios"; los de modelo de pago (mensual sin permanencia, pago por necesidad, bolsa de créditos) a "Modelo de pago flexible".
+- Un pedido que no encaje en ningún tema se deja fuera (no inventes temas de un solo pedido salvo que sea claramente distinto).
+- producto: a qué línea de Peaku le toca: SaaS, Headhunting, EOR, Evaluaciones, Verify, Comercial (propuesta/precio) u Otro.
+Responde SOLO con JSON válido: {"temas":[{"nombre":"...","descripcion":"...","producto":"...","items":[ids]}]}
+
+PEDIDOS:
+${lista}`;
+    const msg = await anthropic.messages.create({ model: ANALYZE_MODEL, max_tokens: 4000, messages: [{ role: 'user', content: prompt }] });
+    const text = (msg.content && msg.content[0] && msg.content[0].text) || '';
+    let json = text.trim(); const fenced = json.match(/```(?:json)?\s*([\s\S]*?)```/); if (fenced) json = fenced[1].trim();
+    const ini = json.indexOf('{'), fin = json.lastIndexOf('}'); if (ini >= 0 && fin > ini) json = json.slice(ini, fin + 1);
+    let parsed; try { parsed = JSON.parse(json); } catch (e) { return res.status(502).json({ error: 'Claude devolvió JSON inválido', raw: text.slice(0, 1500) }); }
+    await pool.query(`INSERT INTO wishlist_temas (hash, resultado, modelo) VALUES ($1, $2::jsonb, $3)`, [hash, JSON.stringify(parsed), msg.model || ANALYZE_MODEL]);
+    res.json({ ...armarTemas(parsed, filas), total: filas.length, generado_at: new Date().toISOString(), modelo: msg.model || ANALYZE_MODEL, cache: false });
+  } catch (e) { console.error('[wishlist/temas]', e.message); res.status(500).json({ error: e.message }); }
 });
 
 // Health real: prueba una consulta trivial con timeout
@@ -556,7 +628,7 @@ try {
 // schema "sdr". Sin login por decisión de producto: quien tenga el enlace /sdr opera todo.
 try {
   const sdr = require('./sdr/app');
-  app.use('/sdr', sdr.router({ pool }));
+  app.use('/sdr', sdr.router({ pool, anthropic }));
   sdr.initSchema(pool).catch(e => console.error('[sdr] schema:', e.message));
   console.log('[sdr] montada en /sdr');
 } catch (e) {

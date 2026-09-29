@@ -12,13 +12,13 @@ const baseConfig = require('./config');
 const { rutas } = require('./rutas');
 const { initSchema } = require('./schema');
 
-function router({ pool, config = baseConfig }) {
+function router({ pool, config = baseConfig, anthropic = null }) {
   const express = require('express');
   const r = express.Router();
   // La página usa rutas relativas (sdr.css, api/…): /sdr sin barra final las resolvería contra la raíz.
   r.get('/', (req, res, next) => (req.originalUrl.split('?')[0].endsWith('/') ? next() : res.redirect(301, req.baseUrl + '/')));
   r.use(express.static(path.join(__dirname, 'public')));
-  for (const [metodo, ruta, handler] of rutas({ db: pool, config })) {
+  for (const [metodo, ruta, handler] of rutas({ db: pool, config, anthropic })) {
     r[metodo](ruta, async (req, res) => {
       try {
         res.json(await handler({ params: req.params, query: req.query, body: req.body, headers: req.headers }));

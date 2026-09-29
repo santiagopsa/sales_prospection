@@ -84,10 +84,46 @@ module.exports = {
   //     calificado ("solo se cotiza si la calificación es Completa").
   //   dias_cerrados: cuántos días se ven los ganados y perdidos en el tablero (después, en el historial).
   // Ver el efecto: node sdr/cli.js embudo   (conteo por etapa con estas reglas)
+  //   productos: qué se vendió; al marcar "ganado" hay que elegir al menos uno (puede ser varios).
+  //   cotizacion_max_chars: cuánto texto de la cotización se guarda y se le pasa al análisis.
   EMBUDO: {
     minimo_calificado: 'Completa',
     exigir_calificado: true,
     dias_cerrados: 60,
+    productos: ['SaaS', 'Headhunting', 'EOR', 'Evaluaciones'],
+    cotizacion_max_chars: 40000,
+  },
+
+  // ---------------------------------------------------------------------------
+  // Proyección de la silla comercial (Prospección → Proyección)
+  // ---------------------------------------------------------------------------
+  // Los supuestos del modelo financiero de la silla (hoja "silla-comercial"), para comparar mes a mes
+  // el plan con lo que Angie hace de verdad. Cambiar un número aquí mueve el plan; lo real sale de
+  // la base (toques, reuniones, calificación en el Sandler, deals ganados).
+  // Qué mueve cada uno:
+  //   inicio: mes 1 de la silla (la rampa cuenta desde aquí).
+  //   nivel: reuniones calificadas por mes a régimen. rampa: fracción del nivel en los meses 1, 2, 3
+  //     (después 100 %).
+  //   llamadas_hora × horas_semana × semanas_mes = llamadas del modelo al mes (el modelo no las
+  //     rampa). tasa_exito: llamadas → reunión calificada (0.4 % = 15 de 3 780).
+  //   conversion_cliente: reunión calificada → cliente. ingreso_cliente_usd y ltv_meses: valor de
+  //     cada cliente (US$ 200 × 12 = US$ 2 400 contratados).
+  //   costo_silla_usd: costo empresa por mes en US$ para los meses 1, 2, 3 y a régimen (básico +
+  //     comisión + prestaciones, hoja Detalle).
+  // Ver el efecto: node sdr/cli.js proyeccion --set PROYECCION.nivel=20
+  PROYECCION: {
+    inicio: '2026-09',
+    nivel: 15,
+    rampa: [0.25, 0.5, 0.75],
+    llamadas_hora: 21,
+    horas_semana: 40,
+    semanas_mes: 4.5,
+    tasa_exito: 0.004,
+    conversion_cliente: 0.10,
+    ingreso_cliente_usd: 200,
+    ltv_meses: 12,
+    costo_silla_usd: [1805, 1925, 2045, 2312],
+    moneda: 'US$',
   },
 
   // ---------------------------------------------------------------------------

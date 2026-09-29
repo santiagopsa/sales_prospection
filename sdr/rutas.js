@@ -15,7 +15,7 @@ const vox = require('./vox/servidor');
 const ritmo = require('./ritmo');
 const { ETAPAS, ETAPA_LABEL, CANALES, CANAL_LABEL } = D;
 
-function rutas({ db, config }) {
+function rutas({ db, config, anthropic = null }) {
   const sinDb = () => { if (!db) throw Object.assign(new Error('SDR necesita DATABASE_URL'), { status: 503 }); };
   return [
     ['get', '/api/meta', async () => ({
@@ -148,7 +148,11 @@ function rutas({ db, config }) {
     // Embudo de la ejecutiva (lo muestra el Sandler Coach): deals por etapa, calificar y mover.
     ['get', '/api/embudo', async () => { sinDb(); return require('./embudo').tablero(db, config); }],
     ['post', '/api/embudo/:id/calificar', async ({ params, body }) => { sinDb(); const b = body || {}; return require('./embudo').calificar(db, config, { dealId: params.id, items: b.items, usuario: b.usuario }); }],
-    ['post', '/api/embudo/:id/mover', async ({ params, body }) => { sinDb(); const b = body || {}; return require('./embudo').mover(db, config, { dealId: params.id, etapa: b.etapa, tipo: b.tipo, motivo: b.motivo, usuario: b.usuario }); }],
+    ['post', '/api/embudo/:id/mover', async ({ params, body }) => { sinDb(); const b = body || {}; return require('./embudo').mover(db, config, { dealId: params.id, etapa: b.etapa, tipo: b.tipo, motivo: b.motivo, productos: b.productos, usuario: b.usuario }); }],
+    // Cotización enviada: el documento (PDF/Word/texto) como texto, y su análisis contra el demo.
+    ['get', '/api/embudo/:id/cotizacion', async ({ params }) => { sinDb(); return require('./embudo').cotizacion(db, params.id); }],
+    ['post', '/api/embudo/:id/cotizacion', async ({ params, body }) => { sinDb(); const b = body || {}; return require('./embudo').guardarCotizacion(db, config, { dealId: params.id, archivo: b.archivo, base64: b.base64, texto: b.texto, usuario: b.usuario }); }],
+    ['post', '/api/embudo/:id/cotizacion/analizar', async ({ params, body }) => { sinDb(); return require('./embudo').analizarCotizacion(db, config, anthropic, { dealId: params.id, usuario: (body || {}).usuario }); }],
     // Tablero de la ejecutiva: reuniones de la SDR del mes y calificación con chulos.
     ['get', '/api/ejecutiva', async ({ query }) => { sinDb(); return require('./ejecutiva').tablero(db, config, { mes: query.mes }); }],
     ['post', '/api/leads/:id/calificacion', async ({ params, body }) => {
@@ -156,6 +160,8 @@ function rutas({ db, config }) {
       const b = body || {};
       return require('./ejecutiva').calificar(db, config, { leadId: params.id, items: b.items, limpiar: !!b.limpiar, usuario: b.usuario });
     }],
+    // Proyección de la silla comercial vs lo real (config.PROYECCION).
+    ['get', '/api/proyeccion', async ({ query }) => { sinDb(); return require('./proyeccion').seguimiento(db, config, { hasta: query.hasta }); }],
     ['get', '/api/comision', async ({ query }) => { sinDb(); return require('./comision').resumenMes(db, config, { mes: query.mes, usuario: query.usuario || null }); }],
     ['get', '/api/historial', async ({ query }) => { sinDb(); return ritmo.historialDia(db, config, { fecha: query.fecha, usuario: query.usuario || null }); }],
     ['get', '/api/semana', async ({ query }) => { sinDb(); return ritmo.resumenSemana(db, config, { fecha: /^\d{4}-\d{2}-\d{2}$/.test(query.fecha || '') ? query.fecha : undefined, usuario: query.usuario || null }); }],

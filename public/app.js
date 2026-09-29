@@ -164,6 +164,8 @@ function calificacion(d) {
 }
 function daysBetween(a, b) { return Math.floor((new Date(b).getTime() - new Date(a).getTime()) / 86400000); }
 
+const PRODUCTOS_PEAKU = ['SaaS', 'Headhunting', 'EOR', 'Evaluaciones'];   // qué se vendió (misma lista que EMBUDO.productos)
+
 // ---------- Router ----------
 function router() {
   // Sin ruta (la página principal) abre el tablero; #/ es el asistente de un deal nuevo.
@@ -175,7 +177,7 @@ function router() {
   if (hash.startsWith('#/embudo')) return renderEmbudo();
   if (hash.startsWith('#/deal/')) return renderDealDetail(hash.split('/')[2]);
   if (hash === '#/deals') return renderDeals();
-  if (hash === '#/wishlist') return renderWishlist();
+  if (hash.startsWith('#/wishlist')) return renderWishlist(new URLSearchParams(hash.split('?')[1] || ''));
   return renderWizard();
 }
 window.addEventListener('hashchange', router);
@@ -1675,6 +1677,8 @@ async function renderDealDetail(id) {
       </div>
     </div>
 
+    <div id="cotizacion-card"></div>
+
     ${iaReportHtml(d.iaExtracted)}
 
     <div class="card">
@@ -1764,6 +1768,7 @@ async function renderDealDetail(id) {
   el.querySelector('[data-del-detail]').addEventListener('click', async () => {
     await deleteDeal(row.id, () => { location.hash = '#/deals'; });
   });
+  pintarCotizacion(row.id);
   // Bindings del panel de outcome
   const wonBtn = el.querySelector('[data-outcome="won"]');
   const lostBtn = el.querySelector('[data-outcome="lost"]');
@@ -1798,6 +1803,7 @@ async function renderDealDetail(id) {
       `;
     }
     reasonSel.style.display = ''; reasonTxt.style.display = ''; saveBtn.style.display = '';
+    const $pr = el.querySelector('[data-productos]'); if ($pr) $pr.style.display = mode === 'won' ? '' : 'none';
   }
   const tomarBtn = el.querySelector('[data-tomar]');
   if (tomarBtn) tomarBtn.addEventListener('click', () => {
@@ -1816,9 +1822,11 @@ async function renderDealDetail(id) {
     const mode = el.querySelector('#outcome-panel').getAttribute('data-mode');
     const motivo = [reasonSel.value, reasonTxt.value.trim()].filter(Boolean).join(' — ');
     if (!mode || !motivo) { alert('Elige motivo y comentario.'); return; }
+    const productos = [...el.querySelectorAll('[data-productos] input:checked')].map(i => i.value);
+    if (mode === 'won' && !productos.length) { alert('Marca qué se vendió: ' + PRODUCTOS_PEAKU.join(', ') + '.'); return; }
     const r = await fetch(`/api/deals/${row.id}`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ outcome: mode, outcome_reason: motivo })
+      body: JSON.stringify({ outcome: mode, outcome_reason: motivo, productos })
     });
     const j = await r.json();
     if (j.ok) { alert(`Deal marcado como ${mode.toUpperCase()}.`); location.hash = '#/deals'; }
@@ -1837,6 +1845,7 @@ function renderOutcomeSection(row) {
           <div>
             <span class="pill ${row.outcome === 'won' ? 'good' : 'bad'}" style="font-size:14px;padding:6px 14px;">${row.outcome === 'won' ? '🏆 GANADO' : '❌ PERDIDO'}</span>
             <p class="muted" style="margin-top:8px;">Motivo: <strong>${esc(row.outcome_reason || '—')}</strong></p>
+            ${row.outcome === 'won' ? `<p class="muted" style="margin-top:4px;">Se vendió: ${row.productos ? String(row.productos).split(',').map(x => `<span class="pill good">${esc(x.trim())}</span>`).join(' ') : '<span class="pill warn">sin marcar</span>'}</p>` : ''}
           </div>
           <div class="muted" style="font-size:12px;">Cerrado el ${row.closed_at ? new Date(row.closed_at).toLocaleString() : '—'}</div>
         </div>
@@ -1852,6 +1861,8 @@ function renderOutcomeSection(row) {
         <div class="chip" data-outcome="lost">❌ Marcar como PERDIDO</div>
       </div>
       <label style="display:block;">Motivo (categoría)</label>
+      <div data-productos style="display:none;margin:10px 0 4px;"><div class="muted" style="font-size:12px;font-weight:600;margin-bottom:6px;">¿Qué se vendió? (una o varias)</div>
+        <div class="chips" style="margin:0">${PRODUCTOS_PEAKU.map(pr => `<label class="chip" style="padding:8px 12px;display:inline-flex;gap:6px;align-items:center;"><input type="checkbox" value="${pr}" style="margin:0;"> ${pr}</label>`).join('')}</div></div>
       <select data-outcome-reason-sel style="display:none;"></select>
       <label style="display:block;margin-top:8px;">Detalle adicional (contexto real)</label>
       <textarea data-outcome-reason placeholder="Ej. presentaron cotización a comité sin nosotros; se decidieron por Bumeran por precio." style="display:none;min-height:70px;"></textarea>
@@ -1880,16 +1891,59 @@ function barCell(pct) {
 }
 
 // ---------- Wishlist agregado ----------
-async function renderWishlist() {
-  h(`<h1>Wishlist por segmento</h1><p class="muted">Cargando...</p>`);
-  const r = await fetch('/api/wishlist').then(r=>r.json()).catch(() => []);
-  if (!r.length) { h(`<h1>Wishlist por segmento</h1><p class="muted">Aún no hay pedidos registrados. Llena algunos deals con la sección "Lo que pidió el cliente en su ideal".</p>`); return; }
+async function renderWishlist(params = new URLSearchParams((location.hash.split('?')[1] || ''))) {
+  const modo = params.get('ver') === 'lista' ? 'lista' : 'temas';
+  h(`<h1>Wishlist</h1><p class="muted">${modo === 'temas' ? 'Agrupando los pedidos por necesidad…' : 'Cargando...'}</p>`);
+  const tabs = `<div class="tb-filtros" style="margin:6px 0 14px"><a class="${modo === 'temas' ? 'active' : ''}" href="#/wishlist">Por necesidad</a><a class="${modo === 'lista' ? 'active' : ''}" href="#/wishlist?ver=lista">Lista completa</a></div>`;
+  if (modo === 'lista') return renderWishlistLista(tabs);
+  let r;
+  try { r = await fetch('/api/wishlist/temas' + (params.get('refrescar') ? '?refrescar=1' : '')).then(async x => { const j = await x.json(); if (!x.ok) throw new Error(j.error || x.status); return j; }); }
+  catch (e) { h(`<h1>Wishlist</h1>${tabs}<div class="card" style="border-left:4px solid var(--bad)">No se pudo agrupar: ${esc(e.message)}. <a href="#/wishlist?ver=lista">Ver la lista completa</a>.</div>`); return; }
+  if (!r.total) { h(`<h1>Wishlist</h1>${tabs}<p class="muted">Aún no hay pedidos registrados. Se llenan en el demo, en "Lo que pidió el cliente en su ideal".</p>`); return; }
+  const segs = ['A', 'B', 'C'];
+  const totalSeg = Object.fromEntries(segs.map(sg => [sg, r.temas.reduce((n, t) => n + t.por_segmento[sg], 0)]));
+  const tenemosPill = t => t.lo_tenemos === 'si' ? '<span class="pill good">Sí</span>' : t.lo_tenemos === 'parcial' ? `<span class="pill warn">Parcial ${t.tenemos}/${t.total}</span>` : '<span class="pill bad">No</span>';
+  const max = Math.max(1, ...r.temas.map(t => t.total));
+  const topSeg = sg => r.temas.filter(t => t.por_segmento[sg]).sort((a, b) => b.por_segmento[sg] - a.por_segmento[sg] || b.total - a.total).slice(0, 3);
+  const noTenemos = r.temas.filter(t => t.lo_tenemos !== 'si').sort((a, b) => (b.total - b.tenemos) - (a.total - a.tenemos)).slice(0, 4);
+  h(`
+    <div class="split"><div><h1>Wishlist</h1><p class="muted" style="margin:0">${r.total} pedidos de clientes en demos, agrupados en ${r.temas.length} necesidades${r.generado_at ? ` · clasificado ${new Date(r.generado_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}` : ''}${r.desactualizado ? ' · <span class="pill warn">hay pedidos nuevos sin clasificar</span>' : ''}</p></div>
+      <a class="btn ghost btn-sm" href="#/wishlist?refrescar=1" title="Vuelve a agrupar con la IA (se hace solo cuando hay pedidos nuevos)">↻ Volver a clasificar</a></div>
+    ${tabs}
+    <div class="tb-kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))">${segs.map(sg => `
+      <div class="card compact"><div class="muted"><span class="segment-badge ${sg}">${sg}</span> ${esc(SEGMENTS[sg].label)} · ${totalSeg[sg]} pedidos</div>
+        ${topSeg(sg).length ? `<ol class="wl-top">${topSeg(sg).map(t => `<li><b>${esc(t.nombre)}</b> <span class="muted">${t.por_segmento[sg]} · ${Math.round(t.por_segmento[sg] / Math.max(totalSeg[sg], 1) * 100)}%</span></li>`).join('')}</ol>` : '<p class="muted chico" style="margin:8px 0 0">Sin pedidos.</p>'}</div>`).join('')}
+    </div>
+    ${noTenemos.length ? `<div class="card compact wl-gap"><div class="muted">Lo que más piden y <b>no tenemos</b> (o solo a medias)</div>
+      <div class="chips" style="margin-top:8px">${noTenemos.map(t => `<span class="chip" style="cursor:default">${esc(t.nombre)} <b>${t.total - t.tenemos}</b></span>`).join('')}</div></div>` : ''}
+    <div class="card">
+      <table class="wl-tabla">
+        <thead><tr><th>Necesidad</th><th>Línea</th>${segs.map(sg => `<th class="num">${sg}</th>`).join('')}<th class="num">Total</th><th>¿Lo tenemos?</th></tr></thead>
+        <tbody>${r.temas.map((t, i) => `
+          <tr class="clickable wl-fila" data-i="${i}">
+            <td><b>${esc(t.nombre)}</b><div class="muted chico">${esc(t.descripcion)}</div><div class="wl-barra"><i style="width:${Math.round(t.total / max * 100)}%"></i></div></td>
+            <td><span class="pill">${esc(t.producto)}</span></td>
+            ${segs.map(sg => `<td class="num ${t.por_segmento[sg] ? '' : 'muted'}">${t.por_segmento[sg] || '·'}</td>`).join('')}
+            <td class="num"><b>${t.total}</b><div class="muted chico">${t.empresas} empresa${t.empresas === 1 ? '' : 's'}</div></td>
+            <td>${tenemosPill(t)}</td>
+          </tr>
+          <tr class="wl-detalle" data-d="${i}" hidden><td colspan="7"><ul class="list-clean wl-pedidos">${t.pedidos.map(p => `<li><span class="segment-badge ${p.segment || ''}">${p.segment || '?'}</span> ${esc(p.item)} <span class="muted chico">${p.company ? '· ' + esc(p.company) : ''}${p.deal_id ? ` · <a href="#/deal/${p.deal_id}">deal</a>` : ''} · ${p.we_have ? 'lo tenemos' : 'no lo tenemos'}</span></li>`).join('')}</ul></td></tr>`).join('')}
+        </tbody>
+      </table>
+      ${r.sin_tema.length ? `<details style="margin-top:12px"><summary class="muted chico" style="cursor:pointer">${r.sin_tema.length} pedidos sueltos que no encajaron en ningún tema</summary><ul class="list-clean wl-pedidos">${r.sin_tema.map(p => `<li><span class="segment-badge ${p.segment || ''}">${p.segment || '?'}</span> ${esc(p.item)} <span class="muted chico">${p.company ? '· ' + esc(p.company) : ''}</span></li>`).join('')}</ul></details>` : ''}
+    </div>
+    <p class="muted chico">Haz clic en una necesidad para ver los pedidos textuales y de qué empresa son. "¿Lo tenemos?" sale de lo que marcó la ejecutiva en cada pedido (mayoría = sí). La agrupación la hace la IA leyendo el contexto de cada pedido; se rehace sola cuando entran pedidos nuevos.</p>`);
+  el.querySelectorAll('.wl-fila').forEach(tr => tr.addEventListener('click', () => { const d = el.querySelector(`.wl-detalle[data-d="${tr.dataset.i}"]`); d.hidden = !d.hidden; }));
+}
 
+async function renderWishlistLista(tabs) {
+  const r = await fetch('/api/wishlist').then(r=>r.json()).catch(() => []);
+  if (!r.length) { h(`<h1>Wishlist</h1>${tabs}<p class="muted">Aún no hay pedidos registrados. Llena algunos deals con la sección "Lo que pidió el cliente en su ideal".</p>`); return; }
   const bySeg = { A: [], B: [], C: [], '': [] };
   for (const w of r) (bySeg[w.segment || ''] || bySeg['']).push(w);
-
   h(`
-    <h1>Wishlist por segmento <span class="muted" style="font-size:13px;">— qué piden los clientes que aún no tenemos</span></h1>
+    <h1>Wishlist <span class="muted" style="font-size:13px;">— cada pedido tal cual se anotó</span></h1>
+    ${tabs}
     ${['A','B','C'].map(seg => `
       <div class="card">
         <div class="split">
@@ -2127,7 +2181,9 @@ function embTarjeta(x, etapa) {
       ${etapa === 'propuesta' && x.propuesta_tipo ? `<span class="pill">${esc(embDatos.tipos_propuesta[x.propuesta_tipo] || x.propuesta_tipo)}</span>` : ''}
       ${x.reunion_pendiente ? `<span class="pill warn">Reunión ${tbFecha(x.reunion_ms)}</span>` : ''}
     </div>
+    ${etapa === 'ganado' && x.productos && x.productos.length ? `<div class="emb-chips">${x.productos.map(pr => `<span class="pill good">${esc(pr)}</span>`).join('')}</div>` : ''}
     ${x.motivo && (etapa === 'ganado' || etapa === 'perdido') ? `<div class="muted chico">${esc(x.motivo)}</div>` : ''}
+    ${['propuesta', 'interesado', 'ganado'].includes(etapa) ? (x.cotizacion ? `<a class="emb-cot" href="#/deal/${x.deal_id}" title="${esc(x.cotizacion.archivo)}">📄 Cotización${x.cotizacion.analizada ? ' · analizada' : ' · sin analizar'}</a>` : `<button type="button" class="emb-cot falta" data-cotizar="${x.deal_id}">📄 Subir la cotización</button>`) : ''}
     <div class="emb-pie">
       <span class="muted chico" title="Días en esta etapa">${x.dias_en_etapa === 0 ? 'hoy' : x.dias_en_etapa + ' d'}</span>
       ${etapa === 'sin_calificar' || etapa === 'calificado' ? `<button class="btn ${etapa === 'sin_calificar' ? '' : 'ghost'} btn-sm" data-calificar="${x.deal_id}">${etapa === 'sin_calificar' ? 'Calificar' : 'Variables'}</button>` : ''}
@@ -2170,6 +2226,16 @@ async function renderEmbudo() {
   });
   el.querySelectorAll('[data-mover]').forEach(s => s.addEventListener('change', () => { if (s.value) embMover(Number(s.dataset.mover), s.value); s.value = ''; }));
   el.querySelectorAll('[data-calificar]').forEach(b => b.addEventListener('click', () => embCalificar(Number(b.dataset.calificar))));
+  el.querySelectorAll('[data-cotizar]').forEach(b => b.addEventListener('click', () => embCotizacion(Number(b.dataset.cotizar))));
+}
+
+function embCotizacion(id) {
+  const x = embBuscar(id); if (!x) return;
+  const m = embModal(`<h2 style="margin-top:0">Cotización · ${esc(x.empresa)}</h2>
+    <p class="muted chico" style="margin:0 0 10px">Sube lo que se le mandó al cliente. Queda como texto en el deal y después se compara con lo que pidió en el demo.</p>
+    ${cotizacionFormHtml()}
+    <div class="btn-row"><button class="btn ghost" data-cerrar>Ahora no</button></div>`);
+  enlazarCotizacionForm(m.querySelector('.cot-form'), id, async () => { m.innerHTML = ''; await embRecargar(); });
 }
 
 const embBuscar = id => { for (const k of Object.keys(embDatos.columnas)) { const x = embDatos.columnas[k].find(z => z.deal_id === id); if (x) return x; } return null; };
@@ -2183,19 +2249,22 @@ async function embMover(id, etapa) {
   if (etapa === 'propuesta') {
     const m = embModal(`<h2 style="margin-top:0">${esc(x.empresa)} → ${esc(nombre)}</h2><p class="muted">¿Qué se le envió?</p>
       <div class="btn-row" style="justify-content:flex-start;margin-top:8px">${Object.entries(embDatos.tipos_propuesta).map(([k, v]) => `<button class="btn" data-tipo="${k}">${esc(v)}</button>`).join('')}<button class="btn ghost" data-cerrar>Cancelar</button></div>`);
-    m.querySelectorAll('[data-tipo]').forEach(b => b.addEventListener('click', async () => { m.innerHTML = ''; await embEnviar(id, { etapa, tipo: b.dataset.tipo }); }));
+    m.querySelectorAll('[data-tipo]').forEach(b => b.addEventListener('click', async () => { m.innerHTML = ''; await embEnviar(id, { etapa, tipo: b.dataset.tipo }); if (b.dataset.tipo === 'cotizacion') embCotizacion(id); }));
     return;
   }
   if (etapa === 'ganado' || etapa === 'perdido') {
     const m = embModal(`<h2 style="margin-top:0">${esc(x.empresa)} → ${esc(nombre)}</h2>
       ${etapa === 'perdido' ? '<p class="muted chico">"Un no limpio vale más que un quizás eterno." El motivo alimenta la métrica "Lead sin valor".</p>' : ''}
+      ${etapa === 'ganado' ? `<label>¿Qué se vendió? <span class="muted">(una o varias)</span></label><div class="chips" style="margin:0 0 4px">${(embDatos.productos || PRODUCTOS_PEAKU).map(pr => `<label class="chip" style="padding:8px 12px;display:inline-flex;gap:6px;align-items:center;"><input type="checkbox" value="${esc(pr)}" data-prod style="margin:0;"> ${esc(pr)}</label>`).join('')}</div>` : ''}
       <label>Motivo</label><select id="emb-motivo" style="width:100%"><option value="">— Selecciona —</option>${EMB_MOTIVOS[etapa].map(o => `<option>${esc(o)}</option>`).join('')}</select>
       <label>Comentario <span class="muted">(opcional)</span></label><input id="emb-coment" style="width:100%" />
       <div class="btn-row"><button class="btn ghost" data-cerrar>Cancelar</button><button class="btn ${etapa === 'ganado' ? 'green' : 'danger-solid'}" id="emb-ok">${etapa === 'ganado' ? '🏆 Marcar ganado' : 'Marcar perdido'}</button></div>`);
     m.querySelector('#emb-ok').addEventListener('click', async () => {
       const motivo = [m.querySelector('#emb-motivo').value, m.querySelector('#emb-coment').value.trim()].filter(Boolean).join(' — ');
       if (!motivo) { tbAvisar('Elige el motivo.', 'error'); return; }
-      m.innerHTML = ''; await embEnviar(id, { etapa, motivo });
+      const productos = [...m.querySelectorAll('[data-prod]:checked')].map(i => i.value);
+      if (etapa === 'ganado' && !productos.length) { tbAvisar('Marca qué se vendió.', 'error'); return; }
+      m.innerHTML = ''; await embEnviar(id, { etapa, motivo, productos });
     });
     return;
   }
@@ -2236,6 +2305,69 @@ function embCalificar(id, paraAvanzar = false) {
       tbAvisar([`${x.empresa}: ${r.calificacion || 'sin calificar'}.`, ...(r.avisos || [])].join(' '), r.etapa === 'calificado' || !paraAvanzar ? 'ok' : 'error');
     } catch (e) { tbAvisar(e.message, 'error'); }
     await embRecargar();
+  });
+}
+
+// ---------- Cotización enviada: el documento como texto y su análisis contra el demo ----------
+// Vive en el deal (data.cotizacion / data.cotizacionAnalisis) a través de /sdr/api/embudo/:id/cotizacion.
+function leerBase64(file) {
+  return new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(',')[1] || ''); fr.onerror = () => no(new Error('No se pudo leer el archivo')); fr.readAsDataURL(file); });
+}
+function cotizacionFormHtml(compacto = false) {
+  return `<div class="cot-form">
+    <label class="cot-drop"><input type="file" data-cot-file accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" hidden />
+      <b>Sube la cotización</b><span class="muted chico">PDF, Word o texto · se guarda como texto para compararla con lo que pidió en el demo</span></label>
+    <details ${compacto ? '' : 'open'} style="margin-top:8px"><summary class="muted chico" style="cursor:pointer">O pega el texto</summary>
+      <textarea data-cot-texto placeholder="Pega aquí el contenido de la propuesta" style="min-height:90px;margin-top:6px"></textarea>
+      <div style="margin-top:6px"><button class="btn secondary btn-sm" data-cot-guardar>Guardar texto</button></div></details>
+    <div class="muted chico" data-cot-msg></div>
+  </div>`;
+}
+function enlazarCotizacionForm($c, dealId, alTerminar) {
+  const $msg = $c.querySelector('[data-cot-msg]');
+  const enviar = async body => {
+    $msg.textContent = 'Leyendo el documento…';
+    try {
+      const r = await tbApi(`embudo/${dealId}/cotizacion`, { method: 'POST', body });
+      tbAvisar(`Cotización guardada${r.archivo ? ' (' + r.archivo + ')' : ''}: ${r.chars.toLocaleString('es-CO')} caracteres${r.recortado ? ', recortada' : ''}.`);
+      await alTerminar();
+    } catch (e) { $msg.textContent = ''; tbAvisar(e.message, 'error'); }
+  };
+  $c.querySelector('[data-cot-file]').addEventListener('change', async e => { const f = e.target.files[0]; if (!f) return; if (f.size > 8 * 1024 * 1024) return tbAvisar('El archivo pesa más de 8 MB.', 'error'); enviar({ archivo: f.name, base64: await leerBase64(f) }); });
+  $c.querySelector('[data-cot-guardar]').addEventListener('click', () => { const t = $c.querySelector('[data-cot-texto]').value.trim(); if (t.length < 40) return tbAvisar('Pega el texto completo de la cotización.', 'error'); enviar({ archivo: 'texto pegado', texto: t }); });
+}
+function analisisHtml(a) {
+  const lista = (t, xs, clase) => xs && xs.length ? `<div class="cot-bloque"><h3>${t}</h3><ul class="list-clean">${xs.map(x => `<li><span class="pill ${clase}">${clase === 'good' ? '✓' : clase === 'bad' ? '✗' : '·'}</span> ${esc(x)}</li>`).join('')}</ul></div>` : '';
+  const n = Number(a.alineacion), color = n >= 75 ? 'var(--peaku-green)' : n >= 50 ? 'var(--warn)' : 'var(--bad)';
+  return `<div class="cot-analisis">
+    <div class="split" style="align-items:flex-start"><div><div class="muted chico">Alineación propuesta ↔ demo</div><div style="font-size:34px;font-weight:700;letter-spacing:-.03em;color:${color}">${Number.isFinite(n) ? n + '%' : '—'}</div></div>
+      <p style="margin:0;max-width:60ch;font-size:14px">${esc(a.resumen || '')}</p></div>
+    ${lista('Lo que sí cubre', a.cubre, 'good')}${lista('Lo que pidió y falta', a.falta, 'bad')}${lista('Lo que sobra', a.sobra, '')}
+    ${a.precio ? `<div class="cot-bloque"><h3>Precio</h3><p style="margin:0;font-size:13.5px">${esc(a.precio)}</p></div>` : ''}
+    ${lista('Riesgos de que no cierre', a.riesgos, 'warn')}${lista('Ajustes sugeridos, en orden', a.ajustes, '')}
+    <div class="muted chico" style="margin-top:8px">Analizado ${a.at ? new Date(a.at).toLocaleString('es-CO') : ''}${a.por ? ' por ' + esc(a.por) : ''}.</div></div>`;
+}
+async function pintarCotizacion(dealId) {
+  const $c = document.getElementById('cotizacion-card'); if (!$c) return;
+  let r; try { r = await tbApi(`embudo/${dealId}/cotizacion`); } catch (e) { $c.innerHTML = ''; return; }
+  const c = r.cotizacion, a = r.analisis;
+  $c.innerHTML = `<div class="card">
+    <div class="split"><h2 style="margin:0">Cotización enviada</h2>${c ? `<span class="muted chico">${esc(c.archivo || 'texto')} · ${new Date(c.at).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}${c.por ? ' · ' + esc(c.por) : ''} · ${Number(c.chars).toLocaleString('es-CO')} caracteres</span>` : ''}</div>
+    ${c ? `<details style="margin-top:10px"><summary class="muted chico" style="cursor:pointer">Ver el texto de la cotización</summary><pre class="cot-texto">${esc(c.texto)}</pre></details>
+      ${a ? analisisHtml(a) : `<p class="muted" style="font-size:13px;margin:12px 0 8px">Todavía no se ha comparado con lo que el cliente pidió en el demo.</p>`}
+      <div class="btn-row" style="justify-content:flex-start;margin-top:12px">
+        <button class="btn" data-cot-analizar ${r.pedido && r.pedido.length >= 40 ? '' : 'disabled title="El deal no tiene el demo lleno: no hay contra qué comparar"'}>${a ? '↻ Volver a analizar' : '✦ Analizar contra el demo'}</button>
+        <button class="btn ghost btn-sm" data-cot-otra>Subir otra versión</button></div>
+      <div data-cot-otra-form hidden style="margin-top:10px">${cotizacionFormHtml(true)}</div>`
+    : `<p class="muted" style="font-size:13px;margin:6px 0 10px">Sube el documento que se le mandó al cliente. Queda guardado como texto y se puede comparar con lo que pidió en el demo.</p>${cotizacionFormHtml()}`}
+  </div>`;
+  const recargar = () => pintarCotizacion(dealId);
+  const $f = $c.querySelector('.cot-form'); if ($f && !c) enlazarCotizacionForm($f, dealId, recargar);
+  const $otra = $c.querySelector('[data-cot-otra]'); if ($otra) $otra.addEventListener('click', () => { const w = $c.querySelector('[data-cot-otra-form]'); w.hidden = !w.hidden; if (!w.dataset.listo) { enlazarCotizacionForm(w.querySelector('.cot-form'), dealId, recargar); w.dataset.listo = '1'; } });
+  const $an = $c.querySelector('[data-cot-analizar]'); if ($an) $an.addEventListener('click', async () => {
+    $an.disabled = true; $an.textContent = 'Analizando…';
+    try { await tbApi(`embudo/${dealId}/cotizacion/analizar`, { method: 'POST', body: {} }); tbAvisar('Análisis listo.'); await recargar(); }
+    catch (e) { tbAvisar(e.message, 'error'); $an.disabled = false; $an.textContent = '✦ Analizar contra el demo'; }
   });
 }
 

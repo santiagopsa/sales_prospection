@@ -204,6 +204,79 @@
       <p class="suave" style="font-size:12px;margin-top:14px">Cuenta como calificada la reunión que ${esc('la ejecutiva')} califica <b>${esc(r.reglas.califica_con.join(' o '))}</b> en el Sandler Coach. ${r.reglas.modo === 'escalon' ? 'Al alcanzar un tramo, todas las calificadas del mes se pagan a ese valor.' : 'Cada reunión se paga al valor de su tramo.'} Cuenta en el mes ${r.reglas.mes_por === 'reunion' ? 'de la fecha de la reunión' : 'en que se agendó'}. Reglas en <code>COMISION</code> de <code>config.js</code>.</p>`;
   }
 
+  // ---------------------------------------------------------------- proyección de la silla
+  // El plan del modelo financiero (config.PROYECCION) contra lo real, mes a mes.
+  async function vistaProyeccion(params) {
+    const qs = params.get('hasta') ? '?hasta=' + encodeURIComponent(params.get('hasta')) : '';
+    const r = await api('proyeccion' + qs);
+    const S = r.supuestos, m = r.moneda;
+    const actual = r.meses.find(x => x.en_curso) || r.meses[r.meses.length - 1];
+    const f1 = v => (v == null ? '—' : Number(v).toLocaleString('es-CO', { maximumFractionDigits: 1 }));
+    const f0 = v => (v == null ? '—' : Number(v).toLocaleString('es-CO', { maximumFractionDigits: 0 }));
+    const pct = (a, b) => (b ? Math.round((a / b) * 100) : null);
+    const tono = p => (p == null ? '' : p >= 100 ? 'bien' : p >= 70 ? 'medio' : 'mal');
+    const barra = (real, plan, clase = '') => `<div class="py-barra"><i class="${clase}" style="width:${Math.min(100, plan ? (real / plan) * 100 : 0)}%"></i></div>`;
+    const a = r.acumulado;
+    const tasaReal = a.llamadas ? a.real_calificadas / a.llamadas : null;
+    const agendPorLlamada = a.llamadas ? a.agendadas / a.llamadas : null;
+    const p = actual.plan, re = actual.real, ri = actual.ritmo;
+    const cumpleRitmo = p && ri ? pct(ri.calificadas, p.calificadas) : null;
+    $app.innerHTML = `
+      <div class="cabeza">
+        <div><h1>Proyección de la silla</h1>
+          <div class="suave">Plan del modelo financiero contra lo que ${esc(r.usuario || 'la SDR')} hace de verdad · desde ${esc(MES_LARGO(r.inicio))}${actual ? ` · mes ${actual.plan ? actual.plan.numero : '—'} de la silla` : ''}</div></div>
+        <div class="suave" style="font-size:12px">Supuestos en <code>PROYECCION</code> de <code>config.js</code></div>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi ${tono(actual.cumplimiento)}"><b>${re.calificadas}<small class="suave" style="display:inline;font-size:14px;margin-left:4px">/ ${f1(p ? p.calificadas : null)}</small></b><span>Reuniones calificadas · ${esc(MES_CORTO(actual.mes))}</span>
+          ${p ? barra(re.calificadas, p.calificadas, tono(actual.cumplimiento)) : ''}
+          <small>${actual.en_curso && ri ? `a este ritmo termina en ${f1(ri.calificadas)} (${cumpleRitmo == null ? '—' : cumpleRitmo + '% del plan'})` : actual.cumplimiento == null ? 'sin plan para este mes' : actual.cumplimiento + '% del plan'} · ${re.por_calificar} por calificar · ${re.programadas} programadas</small></div>
+        <div class="kpi"><b>${f0(re.agendadas)}</b><span>Reuniones agendadas · ${esc(MES_CORTO(actual.mes))}</span><small>${actual.en_curso && ri ? `ritmo: ${f0(ri.agendadas)} a fin de mes · ` : ''}${agendPorLlamada != null ? (agendPorLlamada * 100).toFixed(1) + '% de las llamadas' : ''}</small></div>
+        <div class="kpi ${p && re.llamadas ? tono(pct(ri ? ri.llamadas : re.llamadas, p.llamadas)) : ''}"><b>${f0(re.llamadas)}<small class="suave" style="display:inline;font-size:14px;margin-left:4px">/ ${f0(p ? p.llamadas : null)}</small></b><span>Llamadas · ${esc(MES_CORTO(actual.mes))}</span>
+          ${p ? barra(ri ? ri.llamadas : re.llamadas, p.llamadas, tono(pct(ri ? ri.llamadas : re.llamadas, p.llamadas))) : ''}
+          <small>${actual.en_curso && ri ? `ritmo: ${f0(ri.llamadas)} a fin de mes · ` : ''}el modelo asume ${f0(S.llamadas_mes)} (${S.llamadas_hora}/h × ${S.horas_semana} h × ${S.semanas_mes} sem)</small></div>
+        <div class="kpi"><b>${tasaReal == null ? '—' : (tasaReal * 100).toFixed(2) + '%'}<small class="suave" style="display:inline;font-size:14px;margin-left:4px">/ ${((S.tasa_exito || 0) * 100).toFixed(2)}%</small></b><span>Llamada → calificada</span><small>acumulado desde el inicio · el modelo asume ${((S.tasa_exito || 0) * 100).toFixed(2)}%</small></div>
+        <div class="kpi ${a.plan_clientes ? tono(pct(a.real_clientes, a.plan_clientes)) : ''}"><b>${a.real_clientes}<small class="suave" style="display:inline;font-size:14px;margin-left:4px">/ ${f1(a.plan_clientes)}</small></b><span>Clientes ganados · acumulado</span><small>${a.real_calificadas ? `${pct(a.real_clientes, a.real_calificadas)}% de las calificadas` : 'sin calificadas aún'} · el modelo asume ${Math.round((S.conversion_cliente || 0) * 100)}%</small></div>
+        <div class="kpi"><b>${esc(m)} ${f0(a.real_ingreso)}<small class="suave" style="display:inline;font-size:14px;margin-left:4px">/ ${f0(a.plan_ingreso)}</small></b><span>Ingreso contratado · acumulado</span><small>${esc(m)} ${S.ingreso_cliente_usd} × ${S.ltv_meses} meses por cliente · costo de la silla ${esc(m)} ${f0(a.plan_costo)}</small></div>
+      </div>
+
+      <div class="panel">
+        <h2>Mes a mes <span class="suave" style="font-weight:400">· plan / real${r.meses.some(x => x.en_curso) ? ' · ritmo = lo real llevado a fin de mes por días hábiles' : ''}</span></h2>
+        <div class="tabla-env"><table class="py-tabla">
+          <thead><tr><th>Mes</th><th>Rampa</th><th class="num">Calificadas</th><th class="num">Agendadas</th><th class="num">Llamadas</th><th class="num">Llamada → calif.</th><th class="num">Clientes</th><th class="num">Comisión</th><th class="num">Costo silla</th></tr></thead>
+          <tbody>${r.meses.map(x => {
+            const pl = x.plan, rl = x.real, rt = x.ritmo;
+            const celda = (real, plan, fmt = f1, ritmo = null) => `<td class="num"><b>${fmt(real)}</b>${ritmo != null ? ` <span class="py-ritmo" title="A este ritmo, a fin de mes">→ ${fmt(ritmo)}</span>` : ''}<span class="suave"> / ${fmt(plan)}</span></td>`;
+            return `<tr class="${x.en_curso ? 'en-curso' : ''}">
+              <td><b>${esc(MES_CORTO(x.mes))}</b>${x.en_curso ? ' <span class="chip hoy">en curso</span>' : ''}<div class="suave" style="font-size:11px">mes ${pl ? pl.numero : '—'} · ${rl.dias_activos} días con actividad de ${rl.habiles_mes} hábiles</div></td>
+              <td>${pl ? Math.round(pl.rampa * 100) + '%' : '—'}</td>
+              ${celda(rl.calificadas, pl && pl.calificadas, f1, rt && rt.calificadas)}
+              <td class="num"><b>${f0(rl.agendadas)}</b>${rt ? ` <span class="py-ritmo">→ ${f0(rt.agendadas)}</span>` : ''}<div class="suave" style="font-size:11px">${rl.por_calificar} por calificar · ${rl.programadas} programadas${rl.no_califica ? ` · ${rl.no_califica} no calif.` : ''}${rl.no_asistio ? ` · ${rl.no_asistio} no asistió` : ''}</div></td>
+              ${celda(rl.llamadas, pl && pl.llamadas, f0, rt && rt.llamadas)}
+              <td class="num"><b>${rl.tasa_exito == null ? '—' : (rl.tasa_exito * 100).toFixed(2) + '%'}</b><span class="suave"> / ${pl ? (pl.tasa_exito * 100).toFixed(2) + '%' : '—'}</span></td>
+              ${celda(rl.ganados, pl && pl.clientes, f1)}
+              <td class="num"><b>${esc(m)} ${f0(rl.comision)}</b><span class="suave"> / ${f0(pl && pl.comision)}</span></td>
+              <td class="num">${pl && pl.costo != null ? esc(m) + ' ' + f0(pl.costo) : '—'}</td>
+            </tr>`; }).join('')}</tbody>
+          <tfoot><tr><td><b>Acumulado</b></td><td></td>
+            <td class="num"><b>${f1(a.real_calificadas)}</b><span class="suave"> / ${f1(a.plan_calificadas)}</span></td>
+            <td class="num"><b>${f0(a.agendadas)}</b></td><td class="num"><b>${f0(a.llamadas)}</b></td>
+            <td class="num"><b>${tasaReal == null ? '—' : (tasaReal * 100).toFixed(2) + '%'}</b></td>
+            <td class="num"><b>${a.real_clientes}</b><span class="suave"> / ${f1(a.plan_clientes)}</span></td>
+            <td class="num"><b>${esc(m)} ${f0(a.real_comision)}</b></td><td class="num">${esc(m)} ${f0(a.plan_costo)}</td></tr></tfoot>
+        </table></div>
+        <p class="suave" style="font-size:12px;margin:10px 0 0">Ver más meses: <a href="#/proyeccion?hasta=${esc(tiempo12(actual.mes, 3))}">hasta ${esc(MES_CORTO(tiempo12(actual.mes, 3)))}</a> · <a href="#/proyeccion?hasta=${esc(tiempo12(r.inicio, 11))}">los 12 meses</a></p>
+      </div>
+
+      <div class="panel" style="margin-top:14px">
+        <h2>Cómo leerlo</h2>
+        <p class="suave" style="margin:0 0 8px">Lo que decide si la silla vale la pena son las <b>reuniones calificadas</b> (Completa en el Sandler) y los <b>clientes</b> que salen de ellas: el modelo asume ${S.nivel} calificadas al mes a régimen, con rampa ${(S.rampa || []).map(x => Math.round(x * 100) + '%').join(' → ')} → 100%, y ${Math.round((S.conversion_cliente || 0) * 100)}% de ellas cerrando a ${esc(m)} ${S.ingreso_cliente_usd}/mes por ${S.ltv_meses} meses.</p>
+        <p class="suave" style="margin:0">Las llamadas del modelo (${f0(S.llamadas_mes)} al mes) son un supuesto de esfuerzo, no una meta: si con menos llamadas salen las calificadas, la tasa llamada → calificada lo muestra. Cada número de esta página se cambia en <code>PROYECCION</code> de <code>sdr/config.js</code>.</p>
+      </div>`;
+  }
+  const tiempo12 = (mes, n) => { const [a, m] = mes.split('-').map(Number); const i = a * 12 + (m - 1) + n; return `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`; };
+
   // ---------------------------------------------------------------- cola
   async function vistaCola(params = new URLSearchParams()) {
     const qU = usuarioActual() ? '?usuario=' + encodeURIComponent(usuarioActual()) : '';
@@ -1775,6 +1848,7 @@
       else if (partes[0] === 'semana') await vistaSemana(new URLSearchParams(query));
       else if (partes[0] === 'historial') await vistaHistorial(partes[1]);
       else if (partes[0] === 'comision') await vistaComision(new URLSearchParams(query));
+      else if (partes[0] === 'proyeccion') await vistaProyeccion(new URLSearchParams(query));
       else if (partes[0] === 'reuniones') { location.href = '/#/tablero'; return; }   // el tablero de la ejecutiva vive en el Sandler Coach
       else if (partes[0] === 'lead' && partes[1]) {
         await vistaLead(partes[1]);
