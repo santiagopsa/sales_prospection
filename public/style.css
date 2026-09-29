@@ -260,3 +260,6 @@ main:has(.emb-tablero) { max-width: 1400px; }
 .emb-dialogo { width: 100%; max-width: 480px; margin: 0; }
 .emb-dialogo select, .emb-dialogo input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; box-sizing: border-box; }
 .emb-pie .muted { white-space: nowrap; }
+.tb-criterios p { margin: 6px 0; font-size: 13px; line-height: 1.45; color: var(--peaku-gray); }
+details.tb-criterios { margin: 0 0 10px; }
+details.tb-criterios summary { cursor: pointer; color: var(--peaku-blue-dark); }

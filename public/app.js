@@ -1078,10 +1078,10 @@ function stepBudget() {
 
       ${anclaBase ? `<div class="hint"><strong>Ancla del dolor cuantificado:</strong> "${esc(anclaBase)}"<br/>Úsalo aquí para presentar precio: <em>"si esto les cuesta X al mes, la modalidad de Peaku que resuelve esto arranca en Y."</em></div>` : `<div class="hint" style="background:#fef3e2;border-left-color:var(--warn);"><strong>⚠ No tienes ancla cuantificada.</strong> Sin número de dolor, cualquier precio se evalúa como gasto puro. Vuelve al embudo del dolor.</div>`}
 
-      <label>Presupuesto ${tip('¿Tiene presupuesto asignado? ¿Cuánto? ¿Comparado con qué alternativa?\n\nEj.: "50M COP/año en stack RRHH; hoy gastan 30M en agencias. Comparan con Bumeran."')}</label>
-      <textarea data-field="presupuesto" placeholder="Ej. 50M COP/año asignados; hoy gastan 30M en agencias.">${esc(state.presupuesto)}</textarea>
+      <label>Presupuesto ${tip('No preguntes cuánto gastan hoy: suena a que el precio depende de esa respuesta.\n\nPon tú el rango: "Nuestros planes van de X a Y según el volumen de vacantes, ¿eso está dentro de lo que manejan o está lejos?" y el momento: "¿Hay de dónde tomarlo este año o sería para el próximo?"\n\nCuenta como presupuesto si ya pagan por resolver esto (herramienta, agencia o alguien dedicado; se infiere de lo que cuentan) y el rango no les pareció lejos, con plata de este ciclo.')}</label>
+      <textarea data-field="presupuesto" placeholder="Ej. Pagan Computrabajo y una agencia; el rango de planes no les pareció lejos; sale del presupuesto de talento humano de este año.">${esc(state.presupuesto)}</textarea>
 
-      <label>Decisor / decisores ${tip('Nombres y roles. ¿Hay comité? ¿Pasa por compras? ¿Quién firma realmente?\n\nEj.: "María (TA, champion), Carlos (gte RRHH, aprueba), Lucía (compras)."')}</label>
+      <label>Decisor / decisores ${tip('Quién APRUEBA la compra, no quién usa la herramienta. Nombres y roles. ¿Hay comité? ¿Pasa por compras?\n\n"Lo reviso con mi jefe" no alcanza: pregunta "¿Quién más participa en la decisión y cómo la toman?"\n\nEj.: "María (TA, usa la herramienta), Carlos (gte RRHH, aprueba), Lucía (compras)."')}</label>
       <textarea data-field="decisor" placeholder="Ej. María (TA, champion), Carlos (gte RRHH, aprueba), Lucía (compras).">${esc(state.decisor)}</textarea>
 
       <label>Proceso de decisión ${tip('Pasos internos, plazos, criterios. Te dice cuándo cerrará y qué tienes que entregar.')}</label>
@@ -2067,7 +2067,8 @@ async function renderTablero(params, { conservar = false } = {}) {
     <div class="reuniones-lista">
       ${lista.length ? lista.map(x => tbFila(x, r.criterios)).join('') : `<p class="muted" style="text-align:center;padding:30px">${filtro[0] === 'pendientes' ? 'Nada por calificar. ✔' : 'No hay reuniones aquí.'}</p>`}
     </div>
-    <p class="muted chico" style="margin-top:14px">Criterios Sandler: <b>Dolor</b> (el cliente cuantificó el problema, contó la historia o el impacto), <b>Presupuesto</b>, <b>Decisión</b> (quién decide y cómo) y <b>Fecha límite</b> de decisión. 4 = Completa (cuenta para la comisión de ${esc(sdr)}) · 2-3 = Parcial · 0-1 = No califica. El chulo con borde punteado viene del demo llenado en el asistente; lo marcado aquí manda. Con la reunión en "Realizada" y los 4 chulos, el lead queda calificado.</p>`);
+    <div class="card compact tb-criterios"><h3 style="margin-top:0">Cuándo marcar cada chulo</h3>${r.criterios.map(c => `<p><b>${esc(c.label)}:</b> ${esc(c.ayuda)}</p>`).join('')}</div>
+    <p class="muted chico" style="margin-top:14px">4 = Completa (cuenta para la comisión de ${esc(sdr)}) · 2-3 = Parcial · 0-1 = No califica. El chulo con borde punteado viene del demo llenado en el asistente; lo marcado aquí manda. Con la reunión en "Realizada" y los 4 chulos, el lead queda calificado.</p>`);
 
   const recargar = async () => { const y = window.scrollY; await renderTablero(params, { conservar: true }); window.scrollTo(0, y); };
   el.querySelectorAll('.reunion-fila').forEach($f => {
@@ -2216,6 +2217,7 @@ function embCalificar(id, paraAvanzar = false) {
   const m = embModal(`<h2 style="margin-top:0">Calificar · ${esc(x.empresa)}</h2>
     <p class="muted chico">${paraAvanzar ? `Para pasar a <b>Calificados</b> marca lo que quedó claro en la reunión (${embDatos.reglas.minimo === 'Completa' ? 'las 4 variables' : 'al menos 2'}). ` : ''}Se guarda en el deal y cuenta para la comisión de ${esc(embDatos.sdr || 'la SDR')} si el lead es suyo.</p>
     <div class="chulos" style="margin:12px 0">${crit.map(c => `<label class="chulo ${x.items[c.clave] ? 'si' : ''}" title="${esc(c.ayuda)}"><input type="checkbox" data-k="${c.clave}" ${x.items[c.clave] ? 'checked' : ''} /><span>${esc(c.label)}</span></label>`).join('')}</div>
+    <details class="tb-criterios"><summary class="chico">Cuándo marcar cada uno</summary>${crit.map(c => `<p><b>${esc(c.label)}:</b> ${esc(c.ayuda)}</p>`).join('')}</details>
     <div id="emb-cal-res"></div>
     <div class="btn-row"><button class="btn ghost" data-cerrar>Cancelar</button><button class="btn" id="emb-cal-ok">Guardar</button></div>`);
   const pinta = () => {

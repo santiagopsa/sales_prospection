@@ -8,11 +8,16 @@
 // la ejecutiva lo haya marcado a mano en el tablero de /sdr: data.calificacionManual.items[criterio]
 // = true | false manda sobre el formulario. Al completar el demo en el Sandler, un criterio que el
 // formulario sí trae borra la marca manual de ese criterio (la evidencia escrita gana a un "no").
+// `ayuda`: la regla para marcar el chulo (se muestra en el tablero, el embudo y el asistente).
 const CRITERIOS = [
-  { clave: 'dolor', label: 'Dolor', ayuda: 'Dolor desarrollado: el cliente cuantificó el problema, contó la historia o el impacto (2 de 3)' },
-  { clave: 'presupuesto', label: 'Presupuesto', ayuda: 'Hay presupuesto o se habló de cuánto está dispuesto a invertir' },
-  { clave: 'decision', label: 'Decisión', ayuda: 'Se sabe quién decide y cómo es el proceso de decisión' },
-  { clave: 'fecha', label: 'Fecha límite', ayuda: 'Hay una fecha para tomar la decisión' },
+  { clave: 'dolor', label: 'Dolor',
+    ayuda: 'El cliente cuantificó el problema, contó qué ha intentado o describió el impacto (al menos 2 de las 3).' },
+  { clave: 'presupuesto', label: 'Presupuesto',
+    ayuda: 'Ya gastan en resolver esto (herramienta paga, agencia o alguien dedicado: se infiere, no se pregunta el monto) y nuestro rango de precios no les pareció lejos, con plata de este ciclo (no "para el presupuesto del próximo año").' },
+  { clave: 'decision', label: 'Decisión',
+    ayuda: 'Se sabe quién aprueba la compra (nombre o cargo; no necesariamente quien usa la herramienta) y cómo la aprueba (pasos, quién más opina, compras o comité). "Lo reviso con mi jefe" no alcanza.' },
+  { clave: 'fecha', label: 'Fecha límite',
+    ayuda: 'Hay una fecha acordada con el cliente para decidir ("¿para cuándo necesitan esto resuelto?").' },
 ];
 const CLAVES = CRITERIOS.map(c => c.clave);
 
