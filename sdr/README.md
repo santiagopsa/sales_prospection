@@ -339,6 +339,23 @@ enlace al tablero. `/sdr/#/reuniones` redirige allá.
   formulario del demo; al completar el demo, el criterio que el formulario sí trae reemplaza la marca
   manual. El detalle del deal muestra la calificación y sus 4 criterios.
 
+## Embudo de la ejecutiva (Sandler Coach → Embudo)
+
+`/#/embudo`: todos los deals del Sandler (de la SDR y de otros canales) en columnas:
+**Sin calificar → Calificados → Prueba gratis o cotización → Interesados → Ganados** (y Perdidos).
+Se mueven arrastrando la tarjeta o con "Mover a…".
+
+- **Calificados**: al moverlo se abren las 4 variables Sandler; con menos de las necesarias se queda en
+  "Sin calificar" con sus chulos guardados. Si el deal es de la SDR, es la misma calificación del tablero
+  (marca la reunión realizada, el lead calificado y cuenta para la comisión).
+- **Prueba gratis o cotización**: pide cuál; la cotización deja la fecha de cotización (indicador "cotizados").
+- **Ganado / Perdido**: piden motivo (el mismo del historial) y cierran el deal; moverlo de vuelta lo reabre.
+- Deals de antes sin etapa guardada: se deducen (ganado/perdido, cotizado → propuesta, calificación
+  suficiente → calificados). Los de la SDR cuya reunión no se hizo no aparecen hasta que se reagenden.
+- Columnas en `public.deals`: `etapa_embudo`, `etapa_embudo_at`, `propuesta_tipo` (las crea `embudo.js`);
+  el recorrido queda en `data.embudoHistorial`. Reglas en `EMBUDO` de `config.js`
+  (`minimo_calificado`, `exigir_calificado`, `dias_cerrados`); `node sdr/cli.js embudo` muestra el conteo.
+
 ## Pasar al siguiente lead a mano
 
 Después de registrar un toque (llamada, WhatsApp, correo…) la app se queda en la ficha del lead para

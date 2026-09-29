@@ -170,6 +170,7 @@ function router() {
   const hash = location.hash || '#/tablero';
   document.querySelectorAll('nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === hash.split('?')[0]));
   if (hash.startsWith('#/tablero')) return renderTablero(new URLSearchParams(hash.split('?')[1] || ''));
+  if (hash.startsWith('#/embudo')) return renderEmbudo();
   if (hash.startsWith('#/deal/')) return renderDealDetail(hash.split('/')[2]);
   if (hash === '#/deals') return renderDeals();
   if (hash === '#/wishlist') return renderWishlist();
@@ -2029,7 +2030,7 @@ async function renderTablero(params, { conservar = false } = {}) {
     <div class="split">
       <div><h1>Tablero de ${esc(r.ejecutiva || 'la ejecutiva')}</h1>
         <p class="muted" style="margin:0">${esc(tbMes(r.mes, true))} · <a href="${enlace({ mes: r.anterior })}">← mes anterior</a>${r.posterior <= r.hoy.slice(0, 7) ? ` · <a href="${enlace({ mes: r.posterior })}">mes siguiente →</a>` : ''}</p></div>
-      <div style="display:flex;gap:8px"><a class="btn btn-sm" href="#/">+ Nuevo deal</a><a class="btn ghost btn-sm" href="#/deals">Historial de deals</a></div>
+      <div style="display:flex;gap:8px"><a class="btn btn-sm" href="#/embudo">Embudo</a><a class="btn ghost btn-sm" href="#/">+ Nuevo deal</a><a class="btn ghost btn-sm" href="#/deals">Historial</a></div>
     </div>
     ${!r.sandler ? '<div class="card" style="border-left:4px solid var(--bad)">No encuentro la tabla de deals: los chulos no se pueden guardar.</div>' : ''}
     <h2>Cierre de ${esc(tbMes(r.mes))}</h2>
@@ -2095,6 +2096,142 @@ async function renderTablero(params, { conservar = false } = {}) {
         await recargar();
       } catch (e) { tbAvisar(e.message, 'error'); $b.disabled = false; }
     }));
+  });
+}
+
+// ---------- Embudo de la ejecutiva ----------
+// Los deals por etapa. Se mueven arrastrando la tarjeta o con "Mover a". Para "Calificados" hay que
+// marcar las 4 variables; "Prueba gratis o cotización" pide cuál; Ganado y Perdido piden motivo.
+// Datos y reglas: /sdr/api/embudo (sdr/embudo.js, reglas en EMBUDO de sdr/config.js).
+const EMB_COLOR = { sin_calificar: '#94a3b8', calificado: '#00C3FF', propuesta: '#6366f1', interesado: '#d97706', ganado: '#1D976C', perdido: '#dc2626' };
+const EMB_MOTIVOS = {
+  ganado: ['Dolor bien desarrollado y demo enfocada', 'Ancla de precio funcionó (ROI vs statu quo)', 'Piloto validó la solución', 'Champion interno empujó la decisión', 'Otro'],
+  perdido: ['Lead sin valor (no calificaba)', 'Precio / presupuesto', 'Se fueron con competidor', 'Timing / no era el momento', 'Decisión interna quedó frenada', 'Cliente no respondió (breakup día 30)', 'Otro'],
+};
+const EMB_CANAL = { sdr_interno: null, freelancer: 'Freelancer', inbound: 'Inbound', referido: 'Referido', evento: 'Evento', outbound: 'Outbound', otro: 'Otro' };
+let embDatos = null;
+
+function embTarjeta(x, etapa) {
+  const canal = x.canal === 'sdr_interno' ? (embDatos.sdr || 'SDR') : (EMB_CANAL[x.canal] || x.canal || '');
+  const puntos = embDatos.criterios.map(c => `<i class="${x.items[c.clave] ? 'si' : ''}" title="${esc(c.label)}"></i>`).join('');
+  const opciones = embDatos.etapas.filter(e => e.id !== etapa).map(e => `<option value="${e.id}">${esc(e.label)}</option>`).join('');
+  return `<div class="emb-card" draggable="true" data-deal="${x.deal_id}" data-etapa="${etapa}">
+    <a href="#/deal/${x.deal_id}" class="emb-emp">${esc(x.empresa || 'Sin empresa')}</a>
+    ${x.contacto || x.cargo ? `<div class="muted chico">${esc([x.contacto, x.cargo].filter(Boolean).join(' · '))}</div>` : ''}
+    <div class="emb-chips">
+      ${canal ? `<span class="pill">${esc(canal)}</span>` : ''}
+      ${x.calificacion ? calCell(x.calificacion) : ''}<span class="emb-puntos" title="${x.n} de 4 variables">${puntos}</span>
+      ${etapa === 'propuesta' && x.propuesta_tipo ? `<span class="pill">${esc(embDatos.tipos_propuesta[x.propuesta_tipo] || x.propuesta_tipo)}</span>` : ''}
+      ${x.reunion_pendiente ? `<span class="pill warn">Reunión ${tbFecha(x.reunion_ms)}</span>` : ''}
+    </div>
+    ${x.motivo && (etapa === 'ganado' || etapa === 'perdido') ? `<div class="muted chico">${esc(x.motivo)}</div>` : ''}
+    <div class="emb-pie">
+      <span class="muted chico" title="Días en esta etapa">${x.dias_en_etapa === 0 ? 'hoy' : x.dias_en_etapa + ' d'}</span>
+      ${etapa === 'sin_calificar' || etapa === 'calificado' ? `<button class="btn ${etapa === 'sin_calificar' ? '' : 'ghost'} btn-sm" data-calificar="${x.deal_id}">${etapa === 'sin_calificar' ? 'Calificar' : 'Variables'}</button>` : ''}
+      <select class="emb-mover" data-mover="${x.deal_id}" title="Mover a otra etapa"><option value="">Mover a…</option>${opciones}</select>
+    </div>
+  </div>`;
+}
+
+async function renderEmbudo() {
+  h(`<h1>Embudo</h1><p class="muted">Cargando...</p>`);
+  try { embDatos = await tbApi('embudo'); }
+  catch (e) { h(`<h1>Embudo</h1><div class="card" style="border-left:4px solid var(--bad)">No se pudo cargar: ${esc(e.message)}</div>`); return; }
+  const d = embDatos;
+  if (d.sin_tabla) { h(`<h1>Embudo</h1><p class="muted">No hay tabla de deals todavía.</p>`); return; }
+  const abiertos = ['sin_calificar', 'calificado', 'propuesta', 'interesado'].reduce((n, k) => n + d.conteo[k], 0);
+  h(`
+    <div class="split">
+      <div><h1>Embudo</h1><p class="muted" style="margin:0">${abiertos} deals abiertos · arrastra la tarjeta a otra etapa o usa "Mover a". Ganados y perdidos de los últimos ${d.reglas.diasCerrados} días.</p></div>
+      <div style="display:flex;gap:8px"><a class="btn btn-sm" href="#/">+ Nuevo deal</a><a class="btn ghost btn-sm" href="#/tablero">Tablero</a></div>
+    </div>
+    <div class="emb-tablero">${d.etapas.map(e => `
+      <section class="emb-col" data-col="${e.id}" style="--c:${EMB_COLOR[e.id]}">
+        <header><b>${esc(e.label)}</b><span>${d.conteo[e.id]}</span></header>
+        <div class="emb-lista">${d.columnas[e.id].map(x => embTarjeta(x, e.id)).join('') || '<p class="muted chico emb-vacio">—</p>'}</div>
+      </section>`).join('')}
+    </div>
+    <p class="muted chico">Para pasar a <b>Calificados</b> se marcan las variables Sandler (${d.reglas.minimo === 'Completa' ? 'las 4' : 'al menos 2'}: Dolor, Presupuesto, Decisión, Fecha límite).${d.reglas.exigir ? ' Sin calificar no se avanza a propuesta, interesados ni ganados.' : ''} Las reglas están en EMBUDO de sdr/config.js.</p>
+    <div id="emb-modal"></div>`);
+
+  // Arrastrar y soltar
+  let arrastrado = null;
+  el.querySelectorAll('.emb-card').forEach(c => {
+    c.addEventListener('dragstart', e => { arrastrado = c; c.classList.add('arrastrando'); e.dataTransfer.setData('text/plain', c.dataset.deal); });
+    c.addEventListener('dragend', () => { c.classList.remove('arrastrando'); el.querySelectorAll('.emb-col').forEach(k => k.classList.remove('encima')); });
+  });
+  el.querySelectorAll('.emb-col').forEach(col => {
+    col.addEventListener('dragover', e => { if (arrastrado && arrastrado.dataset.etapa !== col.dataset.col) { e.preventDefault(); col.classList.add('encima'); } });
+    col.addEventListener('dragleave', () => col.classList.remove('encima'));
+    col.addEventListener('drop', e => { e.preventDefault(); col.classList.remove('encima'); if (arrastrado) embMover(Number(arrastrado.dataset.deal), col.dataset.col); });
+  });
+  el.querySelectorAll('[data-mover]').forEach(s => s.addEventListener('change', () => { if (s.value) embMover(Number(s.dataset.mover), s.value); s.value = ''; }));
+  el.querySelectorAll('[data-calificar]').forEach(b => b.addEventListener('click', () => embCalificar(Number(b.dataset.calificar))));
+}
+
+const embBuscar = id => { for (const k of Object.keys(embDatos.columnas)) { const x = embDatos.columnas[k].find(z => z.deal_id === id); if (x) return x; } return null; };
+async function embRecargar() { const y = window.scrollY, sx = (el.querySelector('.emb-tablero') || {}).scrollLeft || 0; await renderEmbudo(); window.scrollTo(0, y); const t = el.querySelector('.emb-tablero'); if (t) t.scrollLeft = sx; }
+function embModal(html) { const m = document.getElementById('emb-modal'); m.innerHTML = `<div class="emb-velo"><div class="emb-dialogo card">${html}</div></div>`; m.querySelector('[data-cerrar]').addEventListener('click', () => { m.innerHTML = ''; }); return m; }
+
+async function embMover(id, etapa) {
+  const x = embBuscar(id); if (!x) return;
+  const nombre = (embDatos.etapas.find(e => e.id === etapa) || {}).label || etapa;
+  if (etapa === 'calificado') return embCalificar(id, true);
+  if (etapa === 'propuesta') {
+    const m = embModal(`<h2 style="margin-top:0">${esc(x.empresa)} → ${esc(nombre)}</h2><p class="muted">¿Qué se le envió?</p>
+      <div class="btn-row" style="justify-content:flex-start;margin-top:8px">${Object.entries(embDatos.tipos_propuesta).map(([k, v]) => `<button class="btn" data-tipo="${k}">${esc(v)}</button>`).join('')}<button class="btn ghost" data-cerrar>Cancelar</button></div>`);
+    m.querySelectorAll('[data-tipo]').forEach(b => b.addEventListener('click', async () => { m.innerHTML = ''; await embEnviar(id, { etapa, tipo: b.dataset.tipo }); }));
+    return;
+  }
+  if (etapa === 'ganado' || etapa === 'perdido') {
+    const m = embModal(`<h2 style="margin-top:0">${esc(x.empresa)} → ${esc(nombre)}</h2>
+      ${etapa === 'perdido' ? '<p class="muted chico">"Un no limpio vale más que un quizás eterno." El motivo alimenta la métrica "Lead sin valor".</p>' : ''}
+      <label>Motivo</label><select id="emb-motivo" style="width:100%"><option value="">— Selecciona —</option>${EMB_MOTIVOS[etapa].map(o => `<option>${esc(o)}</option>`).join('')}</select>
+      <label>Comentario <span class="muted">(opcional)</span></label><input id="emb-coment" style="width:100%" />
+      <div class="btn-row"><button class="btn ghost" data-cerrar>Cancelar</button><button class="btn ${etapa === 'ganado' ? 'green' : 'danger-solid'}" id="emb-ok">${etapa === 'ganado' ? '🏆 Marcar ganado' : 'Marcar perdido'}</button></div>`);
+    m.querySelector('#emb-ok').addEventListener('click', async () => {
+      const motivo = [m.querySelector('#emb-motivo').value, m.querySelector('#emb-coment').value.trim()].filter(Boolean).join(' — ');
+      if (!motivo) { tbAvisar('Elige el motivo.', 'error'); return; }
+      m.innerHTML = ''; await embEnviar(id, { etapa, motivo });
+    });
+    return;
+  }
+  await embEnviar(id, { etapa });
+}
+
+async function embEnviar(id, body) {
+  try {
+    await tbApi(`embudo/${id}/mover`, { method: 'POST', body: { ...body, usuario: embDatos.ejecutiva } });
+    tbAvisar(`Movido a ${(embDatos.etapas.find(e => e.id === body.etapa) || {}).label || body.etapa}.`);
+  } catch (e) {
+    tbAvisar(e.message, 'error');
+    if (/calific/i.test(e.message) && body.etapa !== 'perdido') { await embRecargar(); return embCalificar(id, true); }
+  }
+  await embRecargar();
+}
+
+function embCalificar(id, paraAvanzar = false) {
+  const x = embBuscar(id); if (!x) return;
+  const crit = embDatos.criterios;
+  const m = embModal(`<h2 style="margin-top:0">Calificar · ${esc(x.empresa)}</h2>
+    <p class="muted chico">${paraAvanzar ? `Para pasar a <b>Calificados</b> marca lo que quedó claro en la reunión (${embDatos.reglas.minimo === 'Completa' ? 'las 4 variables' : 'al menos 2'}). ` : ''}Se guarda en el deal y cuenta para la comisión de ${esc(embDatos.sdr || 'la SDR')} si el lead es suyo.</p>
+    <div class="chulos" style="margin:12px 0">${crit.map(c => `<label class="chulo ${x.items[c.clave] ? 'si' : ''}" title="${esc(c.ayuda)}"><input type="checkbox" data-k="${c.clave}" ${x.items[c.clave] ? 'checked' : ''} /><span>${esc(c.label)}</span></label>`).join('')}</div>
+    <div id="emb-cal-res"></div>
+    <div class="btn-row"><button class="btn ghost" data-cerrar>Cancelar</button><button class="btn" id="emb-cal-ok">Guardar</button></div>`);
+  const pinta = () => {
+    const n = [...m.querySelectorAll('.chulos input')].filter(i => i.checked).length;
+    m.querySelectorAll('.chulo').forEach(l => l.classList.toggle('si', l.querySelector('input').checked));
+    m.querySelector('#emb-cal-res').innerHTML = `Resultado: ${calCell(tbEtiqueta(n))} <span class="muted chico">${n}/4</span>`;
+  };
+  m.querySelectorAll('.chulos input').forEach(i => i.addEventListener('change', pinta)); pinta();
+  m.querySelector('#emb-cal-ok').addEventListener('click', async () => {
+    const items = {}; m.querySelectorAll('.chulos input').forEach(i => { items[i.dataset.k] = i.checked; });
+    m.innerHTML = '';
+    try {
+      const r = await tbApi(`embudo/${id}/calificar`, { method: 'POST', body: { items, usuario: embDatos.ejecutiva } });
+      tbAvisar([`${x.empresa}: ${r.calificacion || 'sin calificar'}.`, ...(r.avisos || [])].join(' '), r.etapa === 'calificado' || !paraAvanzar ? 'ok' : 'error');
+    } catch (e) { tbAvisar(e.message, 'error'); }
+    await embRecargar();
   });
 }
 

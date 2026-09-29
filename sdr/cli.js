@@ -4,6 +4,7 @@
 //
 //   node sdr/cli.js secuencia [--desde 2026-09-21]            fechas de las tareas de un lead nuevo
 //   node sdr/cli.js cola                                        orden de la cola de hoy con el desglose del puntaje
+//   node sdr/cli.js embudo                                      deals por etapa del embudo de la ejecutiva (reglas EMBUDO)
 //   node sdr/cli.js importar archivo.csv|.xlsx [--confirmar]   carga desde la terminal (sin --confirmar, simula)
 //   node sdr/cli.js lista-negra archivo.csv|.xlsx [--confirmar] carga la base de lista negra (empresa, teléfono, correo, dominio, motivo)
 //   node sdr/cli.js semana [--fecha 2026-09-22] [--usuario Angie]  resumen semanal (actividad, racha, tasas si MOSTRAR_RATIOS)
@@ -121,6 +122,13 @@ async function main() {
         const d = t.desglose;
         console.log(`  ${pad(n + 1, 4)}${pad(t.puntaje, 5)}${pad(`${d.etapa}+${d.canal}+${d.atraso}+${d.lista || 0}${t.diasVencida ? ` (${t.diasVencida}d)` : ''}`, 26)}${pad(CANAL_LABEL[t.canal], 10)}${pad(ETAPA_LABEL[t.etapa], 14)}${t.empresa}${t.lista ? `  [lista: ${t.lista.nombre}]` : ''}`);
       });
+    } else if (cmd === 'embudo') {
+      const r = await require('./embudo').tablero(db, config);
+      if (r.sin_tabla) console.log('No está la tabla public.deals del Sandler.');
+      else {
+        console.log(`\nEmbudo · calificado desde ${r.reglas.minimo} · ${r.reglas.exigir ? 'exige calificado para avanzar' : 'sin exigir calificado'} · cerrados de ${r.reglas.diasCerrados} días\n`);
+        for (const e of r.etapas) console.log(`  ${pad(e.label, 30)}${pad(r.conteo[e.id], 5)}${r.columnas[e.id].slice(0, 4).map(x => x.empresa).join(', ')}`);
+      }
     } else if (cmd === 'comision') {
       const r = await require('./comision').resumenMes(db, config, { mes: args.mes, usuario: args.usuario || null });
       const m = r.reglas.moneda, k = r.comision;

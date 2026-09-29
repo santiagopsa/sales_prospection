@@ -151,22 +151,7 @@ async function calificar(db, config, { leadId, items, limpiar = false, usuario, 
     await R.registrarEjecutiva(db, config, { leadId, accion: 'reunion_realizada', usuario, ahora, env });
     avisos.push('La reunión quedó como realizada.');
   }
-  const deal = (await db.query(`SELECT data FROM public.deals WHERE id = $1`, [dealId])).rows[0];
-  if (!deal) throw error(404, `El deal #${dealId} ya no existe en el Sandler.`);
-  const data = { ...(deal.data || {}) };
-  if (limpiar) delete data.calificacionManual;
-  else {
-    const it = {};
-    for (const k of CAL.CLAVES) it[k] = !!(items && items[k]);
-    data.calificacionManual = { items: it, por: usuario, at: ahora.toISOString() };
-  }
-  const cal = CAL.calificacionSandler(data);
-  // Sin marcas y sin demo llenado en el Sandler, la reunión vuelve a "por calificar".
-  const hayEvidencia = !!data.calificacionManual || !!(data.transcript && String(data.transcript).trim()) || Object.values(cal.formulario).some(Boolean);
-  const label = hayEvidencia ? cal.label : null;
-  await db.query(
-    `UPDATE public.deals SET data = $2::jsonb, calificacion_sandler = $3, executive = COALESCE(NULLIF(executive, ''), $4) WHERE id = $1`,
-    [dealId, JSON.stringify(data), label, usuario]);
+  const { label, cal } = await guardarEnDeal(db, dealId, { items, limpiar, usuario, ahora });
 
   const etapa = (await db.query(`SELECT etapa FROM ${T.leads} WHERE id = $1`, [leadId])).rows[0].etapa;
   if (label === 'Completa' && etapa === 'reunion_realizada') {
@@ -178,4 +163,25 @@ async function calificar(db, config, { leadId, items, limpiar = false, usuario, 
   return { lead_id: leadId, deal_id: dealId, calificacion: label, items: cal.items, fuente: cal.fuente, etapa: final, avisos };
 }
 
-module.exports = { tablero, calificar };
+// Guarda los chulos en el deal y recalcula calificacion_sandler. Sin marcas y sin demo llenado,
+// vuelve a "sin calificar" (null). La usan el tablero (con lead de la SDR) y el embudo (cualquier deal).
+async function guardarEnDeal(db, dealId, { items, limpiar = false, usuario = null, ahora = new Date() }) {
+  const deal = (await db.query(`SELECT data FROM public.deals WHERE id = $1`, [dealId])).rows[0];
+  if (!deal) throw error(404, `El deal #${dealId} ya no existe en el Sandler.`);
+  const data = { ...(deal.data || {}) };
+  if (limpiar) delete data.calificacionManual;
+  else {
+    const it = {};
+    for (const k of CAL.CLAVES) it[k] = !!(items && items[k]);
+    data.calificacionManual = { items: it, por: usuario, at: ahora.toISOString() };
+  }
+  const cal = CAL.calificacionSandler(data);
+  const hayEvidencia = !!data.calificacionManual || !!(data.transcript && String(data.transcript).trim()) || Object.values(cal.formulario).some(Boolean);
+  const label = hayEvidencia ? cal.label : null;
+  await db.query(
+    `UPDATE public.deals SET data = $2::jsonb, calificacion_sandler = $3, executive = COALESCE(NULLIF(executive, ''), $4) WHERE id = $1`,
+    [dealId, JSON.stringify(data), label, usuario]);
+  return { label, cal };
+}
+
+module.exports = { tablero, calificar, guardarEnDeal, hayDeals };

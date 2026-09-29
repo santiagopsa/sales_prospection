@@ -73,6 +73,24 @@ module.exports = {
   },
 
   // ---------------------------------------------------------------------------
+  // Embudo de la ejecutiva (Sandler Coach → Embudo)
+  // ---------------------------------------------------------------------------
+  // Etapas: sin_calificar → calificado → propuesta (prueba gratis o cotización) → interesado → ganado
+  // (y perdido, con motivo). Para entrar a "calificado" la ejecutiva marca las 4 variables Sandler.
+  // Qué mueve:
+  //   minimo_calificado: la calificación mínima para pasar a "calificado" ('Completa' = las 4
+  //     variables; 'Parcial' = 2 o más). Con menos, el deal se queda en "sin calificar" con sus chulos.
+  //   exigir_calificado: true = no se puede pasar a propuesta / interesado / ganado sin estar
+  //     calificado ("solo se cotiza si la calificación es Completa").
+  //   dias_cerrados: cuántos días se ven los ganados y perdidos en el tablero (después, en el historial).
+  // Ver el efecto: node sdr/cli.js embudo   (conteo por etapa con estas reglas)
+  EMBUDO: {
+    minimo_calificado: 'Completa',
+    exigir_calificado: true,
+    dias_cerrados: 60,
+  },
+
+  // ---------------------------------------------------------------------------
   // Metas diarias (visibles desde el día uno)
   // ---------------------------------------------------------------------------
   // Qué mueve: la barra de avance de la cola. No cambia ningún dato guardado.

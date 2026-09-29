@@ -142,6 +142,10 @@ function rutas({ db, config }) {
     ['get', '/api/listas', async () => { sinDb(); return require('./listas').listar(db, config); }],
     ['get', '/api/listas/:id', async ({ params }) => { sinDb(); return require('./listas').detalle(db, config, params.id); }],
     ['post', '/api/listas/:id', async ({ params, body }) => { sinDb(); return require('./listas').actualizar(db, config, params.id, body || {}); }],
+    // Embudo de la ejecutiva (lo muestra el Sandler Coach): deals por etapa, calificar y mover.
+    ['get', '/api/embudo', async () => { sinDb(); return require('./embudo').tablero(db, config); }],
+    ['post', '/api/embudo/:id/calificar', async ({ params, body }) => { sinDb(); const b = body || {}; return require('./embudo').calificar(db, config, { dealId: params.id, items: b.items, usuario: b.usuario }); }],
+    ['post', '/api/embudo/:id/mover', async ({ params, body }) => { sinDb(); const b = body || {}; return require('./embudo').mover(db, config, { dealId: params.id, etapa: b.etapa, tipo: b.tipo, motivo: b.motivo, usuario: b.usuario }); }],
     // Tablero de la ejecutiva: reuniones de la SDR del mes y calificación con chulos.
     ['get', '/api/ejecutiva', async ({ query }) => { sinDb(); return require('./ejecutiva').tablero(db, config, { mes: query.mes }); }],
     ['post', '/api/leads/:id/calificacion', async ({ params, body }) => {
