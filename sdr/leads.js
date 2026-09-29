@@ -74,7 +74,7 @@ async function detalleLead(db, id) {
 
 async function cargas(db, { limite = 20 } = {}) {
   const r = await db.query(
-    `SELECT id, archivo, filas, creados, duplicados, con_error, ${ms('created_at')} AS created_ms
+    `SELECT id, archivo, nombre, origen, prioridad, filas, creados, duplicados, con_error, ${ms('created_at')} AS created_ms
      FROM ${T.imports} ORDER BY created_at DESC LIMIT $1`, [Math.min(Number(limite) || 20, 100)]);
   return r.rows;
 }

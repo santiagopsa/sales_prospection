@@ -22,6 +22,7 @@ const T = {
   focos: `${SCHEMA}.focos`,
   informes: `${SCHEMA}.informes_semana`,
   calendly: `${SCHEMA}.calendly_eventos`,
+  lista_leads: `${SCHEMA}.lista_leads`,
 };
 
 const lista = xs => xs.map(x => `'${x}'`).join(',');
@@ -287,6 +288,23 @@ const MIGRACIONES = [
      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
    )`,
+
+  // ---- M8 · Listas priorizadas -----------------------------------------------------------
+  // Cada carga es una "lista" con nombre, quién la mandó y prioridad. Las de prioridad alta van
+  // primero en la cola mientras estén frescas (config.LISTAS.dias_caliente) y no estén cerradas.
+  // lista_leads: qué leads son de la lista, incluidos los que ya estaban en la app (duplicados).
+  `ALTER TABLE ${T.imports} ADD COLUMN IF NOT EXISTS nombre TEXT`,
+  `ALTER TABLE ${T.imports} ADD COLUMN IF NOT EXISTS origen TEXT`,
+  `ALTER TABLE ${T.imports} ADD COLUMN IF NOT EXISTS prioridad TEXT NOT NULL DEFAULT 'normal'`,
+  `ALTER TABLE ${T.imports} ADD COLUMN IF NOT EXISTS cerrada_at TIMESTAMPTZ`,
+  `CREATE TABLE IF NOT EXISTS ${T.lista_leads} (
+     import_id INT NOT NULL REFERENCES ${T.imports}(id) ON DELETE CASCADE,
+     lead_id INT NOT NULL REFERENCES ${T.leads}(id) ON DELETE CASCADE,
+     fila INT,
+     PRIMARY KEY (import_id, lead_id)
+   )`,
+  `CREATE INDEX IF NOT EXISTS sdr_lista_leads_lead ON ${T.lista_leads}(lead_id)`,
+  `INSERT INTO ${T.lista_leads} (import_id, lead_id) SELECT import_id, id FROM ${T.leads} WHERE import_id IS NOT NULL ON CONFLICT DO NOTHING`,
 ];
 
 async function initSchema(db, log = console) {

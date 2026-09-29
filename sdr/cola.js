@@ -16,8 +16,10 @@ function prioridad(tarea, config, ahora) {
     etapa: P.porEtapa[tarea.etapa] || 0,
     canal: P.porCanal[tarea.canal] || 0,
     atraso: Math.min(diasVencida, P.topeDiasVencido) * P.porDiaVencido,
+    // Lead de una lista fresca de prioridad alta (config.LISTAS).
+    lista: tarea.lista ? ((config.LISTAS || {}).puntos || 0) : 0,
   };
-  return { puntaje: desglose.etapa + desglose.canal + desglose.atraso, desglose, diasVencida };
+  return { puntaje: desglose.etapa + desglose.canal + desglose.atraso + desglose.lista, desglose, diasVencida };
 }
 
 const etapasDeAngie = JSON.stringify(ETAPAS_DE_ANGIE);
@@ -49,7 +51,9 @@ async function consultarCola(db, config, { ahora = new Date(), usuario = null } 
 
   // Un lead ya tocado hoy (llamó y no contestó, mandó el WhatsApp…) no compite con los que faltan
   // por contactar: va en su propia sección, con el siguiente paso claro.
+  const calientes = await require('./listas').calientesPorLead(db, config, r.rows.map(t => t.lead_id), { ahora });
   const tareas = r.rows.map(t => {
+    t = { ...t, lista: calientes.get(t.lead_id) || null };
     const p = prioridad(t, config, ahora);
     return { ...t, ...p, vencida: t.due_ms < inicioHoy.getTime(), tocado_hoy: t.ultimo_ms != null && t.ultimo_ms >= inicioHoy.getTime() };
   }).sort((a, b) => (a.tocado_hoy - b.tocado_hoy) || b.puntaje - a.puntaje || a.due_ms - b.due_ms || a.lead_id - b.lead_id);

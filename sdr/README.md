@@ -305,6 +305,20 @@ copiar su *ID único* → Admin de Workspace → Seguridad → Controles de API 
 agregar el ID con el scope `https://www.googleapis.com/auth/calendar` → en Render, Secret File con el JSON y la
 variable `GOOGLE_CALENDAR_KEY_FILE` apuntando a él.
 
+## Listas priorizadas (las que manda Luisa)
+
+Cada archivo que se carga es una **lista**: al cargar se le pone nombre, quién la manda y si es de
+**prioridad alta** (sale marcada sola cuando el origen está en `LISTAS.alta_por_defecto`, hoy Luisa).
+Los contactos que ya estaban en la app también quedan en la lista, sin duplicarse.
+
+- **Cola del día**: los leads de una lista de prioridad alta suman `LISTAS.puntos` (100) mientras la
+  lista tenga menos de `LISTAS.dias_caliente` días (14) y no esté cerrada: van primero, con la etiqueta
+  🔥 de la lista. Después compiten igual que el resto. `node sdr/cli.js cola` muestra el desglose.
+- **Marcar → Listas** (panel derecho): las listas activas con su avance (por tocar, en curso,
+  reuniones). Al entrar a una se ven sus contactos en orden de trabajo (por tocar en el orden del
+  archivo, luego en curso) y "▶ Trabajar esta lista": desde ahí el botón "Siguiente de la lista" de la
+  ficha sigue dentro de esa lista hasta "salir". También se cambia la prioridad o se cierra la lista.
+
 ## Tablero de la ejecutiva (Reuniones)
 
 `#/reuniones` (pestaña **Reuniones**; es la pantalla de entrada cuando el usuario elegido es de rol

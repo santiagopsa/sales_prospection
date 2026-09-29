@@ -116,10 +116,10 @@ async function main() {
       const c = await consultarCola(db, config, { usuario: args.usuario || null });
       const i = c.indicadores;
       console.log(`\nCola del ${c.fecha}: ${c.tareas.length} tareas · ${i.vencidas} vencidas · ${i.deHoy} de hoy · ${i.huerfanos} huérfanos\n`);
-      console.log(`  ${pad('#', 4)}${pad('pts', 5)}${pad('etapa+canal+atraso', 20)}${pad('canal', 10)}${pad('etapa', 14)}empresa`);
+      console.log(`  ${pad('#', 4)}${pad('pts', 5)}${pad('etapa+canal+atraso+lista', 26)}${pad('canal', 10)}${pad('etapa', 14)}empresa`);
       c.tareas.forEach((t, n) => {
         const d = t.desglose;
-        console.log(`  ${pad(n + 1, 4)}${pad(t.puntaje, 5)}${pad(`${d.etapa}+${d.canal}+${d.atraso}${t.diasVencida ? ` (${t.diasVencida}d)` : ''}`, 20)}${pad(CANAL_LABEL[t.canal], 10)}${pad(ETAPA_LABEL[t.etapa], 14)}${t.empresa}`);
+        console.log(`  ${pad(n + 1, 4)}${pad(t.puntaje, 5)}${pad(`${d.etapa}+${d.canal}+${d.atraso}+${d.lista || 0}${t.diasVencida ? ` (${t.diasVencida}d)` : ''}`, 26)}${pad(CANAL_LABEL[t.canal], 10)}${pad(ETAPA_LABEL[t.etapa], 14)}${t.empresa}${t.lista ? `  [lista: ${t.lista.nombre}]` : ''}`);
       });
     } else if (cmd === 'comision') {
       const r = await require('./comision').resumenMes(db, config, { mes: args.mes, usuario: args.usuario || null });

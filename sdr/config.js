@@ -57,6 +57,22 @@ module.exports = {
   },
 
   // ---------------------------------------------------------------------------
+  // Listas priorizadas (cada archivo cargado es una lista)
+  // ---------------------------------------------------------------------------
+  // Qué mueve: los leads de una lista de prioridad alta suman `puntos` al puntaje de la cola
+  // mientras la lista tenga menos de `dias_caliente` días y no esté cerrada. Con 100 van antes que
+  // cualquier otro (el máximo de PRIORIDAD es 40 + 10 + 21). Después compiten igual que el resto.
+  // `origenes`: quién puede mandar una lista (se elige al cargar). Las de `alta_por_defecto` salen
+  // marcadas como prioridad alta (se puede cambiar al cargar y después, en Marcar → Listas).
+  // Ver el efecto: node sdr/cli.js cola --set LISTAS.puntos=0 (sin prioridad por lista)
+  LISTAS: {
+    dias_caliente: 14,
+    puntos: 100,
+    origenes: ['Luisa', 'Apollo', 'Santiago', 'Otro'],
+    alta_por_defecto: ['Luisa'],
+  },
+
+  // ---------------------------------------------------------------------------
   // Metas diarias (visibles desde el día uno)
   // ---------------------------------------------------------------------------
   // Qué mueve: la barra de avance de la cola. No cambia ningún dato guardado.

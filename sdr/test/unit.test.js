@@ -82,7 +82,11 @@ test('Secuencia: días acumulados desde el toque anterior y fines de semana', ()
 test('Prioridad: etapa + canal + atraso con tope', () => {
   const ahora = new Date('2026-09-30T15:00:00Z');
   const t = (etapa, canal, fecha) => prioridad({ etapa, canal, due_ms: tiempo.instante(fecha, 8).getTime() }, config, ahora);
-  assert.deepStrictEqual(t('nuevo', 'llamada', '2026-09-30').desglose, { etapa: 10, canal: 10, atraso: 0 });
+  assert.deepStrictEqual(t('nuevo', 'llamada', '2026-09-30').desglose, { etapa: 10, canal: 10, atraso: 0, lista: 0 });
+  // Lead de una lista fresca de prioridad alta: suma LISTAS.puntos y le gana a todo lo demás.
+  const deLista = prioridad({ etapa: 'nuevo', canal: 'correo', due_ms: tiempo.instante('2026-09-30', 8).getTime(), lista: { id: 1 } }, config, ahora);
+  assert.strictEqual(deLista.desglose.lista, config.LISTAS.puntos);
+  assert.ok(deLista.puntaje > t('conversacion', 'llamada', '2026-09-01').puntaje);
   assert.strictEqual(t('nuevo', 'llamada', '2026-09-28').desglose.atraso, 6);
   assert.strictEqual(t('nuevo', 'llamada', '2026-09-01').desglose.atraso, 21);        // tope 7 días × 3
   assert.ok(t('conversacion', 'correo', '2026-09-30').puntaje > t('nuevo', 'llamada', '2026-09-28').puntaje);

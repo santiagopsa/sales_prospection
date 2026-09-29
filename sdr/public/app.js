@@ -420,6 +420,7 @@
       <div class="quien">
         <a class="btn ${t.canal === 'llamada' ? 'primario' : ''} accion" href="${href}">${ACCION[t.canal] || esc(etiqueta(meta.canales, t.canal))}</a>
         <b>${esc(t.empresa)}</b> <span class="suave">${esc([t.contacto, t.cargo].filter(Boolean).join(' · ') || 'Sin contacto')}${t.ciudad ? ' · ' + esc(t.ciudad) : ''}</span>
+        ${t.lista ? `<a class="chip fuego" href="#/marcar?lista=${t.lista.id}" title="Lista de prioridad alta: va primero en la cola">🔥 ${esc(t.lista.origen ? t.lista.origen + ' · ' : '')}${esc(t.lista.nombre || 'lista')}</a>` : ''}
         <div class="num">${esc(telVisible(t.telefono) || t.email || '')}</div>
         <div class="contexto suave">${esc(contextoToque(t))} · <span title="Paso ${t.paso} de los ${t.pasos_total} toques de la secuencia">toque ${t.paso} de ${t.pasos_total}</span></div>
       </div>
@@ -588,6 +589,11 @@
       <div class="cabeza"><div><h1>Cargar leads</h1>
         <div class="suave">CSV o Excel (.xlsx). Sirve la exportación de Apollo tal cual, o un archivo con empresa, contacto, cargo, teléfono, correo, ciudad y fuente.</div></div></div>
       <div id="msg"></div>
+      <form class="panel lista-datos" id="lista-datos" onsubmit="return false">
+        <div><label>Nombre de la lista</label><input name="nombre" placeholder="Si lo dejas vacío, el nombre del archivo" /></div>
+        <div><label>¿Quién la manda?</label><select name="origen"><option value="">—</option>${((meta.listas || {}).origenes || []).map(o => `<option>${esc(o)}</option>`).join('')}</select></div>
+        <label class="check"><input type="checkbox" name="alta" /> <span><b>Prioridad alta</b> · lista fresca: sus leads van primero en la cola ${(meta.listas || {}).diasCaliente || 14} días</span></label>
+      </form>
       <label class="soltar" id="soltar">
         <input type="file" id="archivo" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
         <b>Arrastra el archivo aquí o haz clic para elegirlo</b>
@@ -595,12 +601,15 @@
       </label>
       <div id="informe"></div>
       ${cargas.length ? `<div class="panel bloque"><h2>Cargas anteriores</h2><div class="tabla-env"><table>
-        <thead><tr><th>Fecha</th><th>Archivo</th><th class="num">Filas</th><th class="num">Creados</th><th class="num">Duplicados</th><th class="num">Con error</th></tr></thead>
-        <tbody>${cargas.map(c => `<tr><td>${fechaHora(c.created_ms)}</td><td>${esc(c.archivo || '—')}</td><td class="num">${c.filas}</td><td class="num">${c.creados}</td><td class="num">${c.duplicados}</td><td class="num">${c.con_error}</td></tr>`).join('')}</tbody>
+        <thead><tr><th>Fecha</th><th>Lista</th><th class="num">Filas</th><th class="num">Creados</th><th class="num">Duplicados</th><th class="num">Con error</th></tr></thead>
+        <tbody>${cargas.map(c => `<tr><td>${fechaHora(c.created_ms)}</td><td><a href="#/marcar?lista=${c.id}">${esc(c.nombre || c.archivo || '—')}</a>${c.origen ? ` <span class="suave">· ${esc(c.origen)}</span>` : ''}${c.prioridad === 'alta' ? ' <span class="chip fuego">alta</span>' : ''}</td><td class="num">${c.filas}</td><td class="num">${c.creados}</td><td class="num">${c.duplicados}</td><td class="num">${c.con_error}</td></tr>`).join('')}</tbody>
       </table></div></div>` : ''}`;
 
     const $soltar = document.getElementById('soltar');
     const $input = document.getElementById('archivo');
+    // Prioridad alta sugerida según quién manda la lista (LISTAS.alta_por_defecto).
+    const $ld = document.getElementById('lista-datos');
+    $ld.origen.addEventListener('change', () => { $ld.alta.checked = ((meta.listas || {}).altaPorDefecto || []).some(o => o.toLowerCase() === $ld.origen.value.toLowerCase()); });
     const tomar = async file => {
       if (!file) return;
       if (/\.xlsx$/i.test(file.name)) {
@@ -622,14 +631,16 @@
     $msg.innerHTML = '';
     $inf.innerHTML = '<p class="vacio">Revisando el archivo…</p>';
     let inf;
-    try { inf = await api('importar', { method: 'POST', body: { archivo, contenido, base64 } }); }
+    const $ld = document.getElementById('lista-datos');
+    const lista = () => ({ nombre: $ld.nombre.value.trim() || null, origen: $ld.origen.value || null, prioridad: $ld.alta.checked ? 'alta' : 'normal' });
+    try { inf = await api('importar', { method: 'POST', body: { archivo, contenido, base64, lista: lista() } }); }
     catch (e) { $inf.innerHTML = ''; $msg.innerHTML = pintarError(e); return; }
     $inf.innerHTML = pintarInforme(inf, true);
     const $ok = document.getElementById('confirmar');
     if ($ok) $ok.addEventListener('click', async () => {
       $ok.disabled = true; $ok.textContent = 'Cargando…';
       try {
-        const final = await api('importar', { method: 'POST', body: { archivo, contenido, base64, confirmar: true } });
+        const final = await api('importar', { method: 'POST', body: { archivo, contenido, base64, confirmar: true, lista: lista() } });
         $inf.innerHTML = pintarInforme(final, false);
       } catch (e) { $msg.innerHTML = pintarError(e); $ok.disabled = false; $ok.textContent = 'Reintentar'; }
     });
@@ -645,7 +656,8 @@
         <tbody>${filas.map(f => `<tr><td class="num">${f.fila}</td><td>${esc(f.empresa || '—')}</td><td>${esc(f.motivo || (f.avisos || []).join('; '))}${f.lead_id ? ` · <a href="#/lead/${f.lead_id}">ver</a>` : ''}</td></tr>`).join('')}</tbody>
       </table></div></div>` : '';
     return `
-      ${simulado ? '' : `<div class="panel bloque" style="border-color:var(--verde)"><b>Carga lista.</b> ${plural(creados, 'lead entró', 'leads entraron')} con su secuencia de toques. <a href="#/cola">Ir a la cola</a></div>`}
+      ${simulado ? '' : `<div class="panel bloque" style="border-color:var(--verde)"><b>Carga lista.</b> ${plural(creados, 'lead entró', 'leads entraron')} con su secuencia de toques. ${inf.import_id ? `<a href="#/marcar?lista=${inf.import_id}">Trabajar la lista</a> · ` : ''}<a href="#/cola">Ir a la cola</a></div>`}
+      ${inf.lista ? `<p class="suave" style="margin:0 0 12px">Lista <b>${esc(inf.lista.nombre || 'sin nombre')}</b>${inf.lista.origen ? ' de ' + esc(inf.lista.origen) : ''} · ${inf.lista.prioridad === 'alta' ? `<span class="chip fuego">prioridad alta</span> sus leads van primero en la cola ${(meta.listas || {}).diasCaliente || 14} días` : 'prioridad normal'}${inf.ya_estaban ? ` · ${plural(inf.ya_estaban, 'contacto ya estaba', 'contactos ya estaban')} en la app: quedan en la lista sin duplicarse` : ''}.</p>` : ''}
       <div class="resumen">
         <div class="kpi bien"><b>${creados}</b><span>${simulado ? 'Leads nuevos a crear' : 'Leads creados'}</span></div>
         <div class="kpi ${inf.duplicados.length ? 'alerta' : ''}"><b>${inf.duplicados.length}</b><span>Duplicados (no entran)</span></div>
@@ -929,6 +941,22 @@
   async function pintarSiguiente(leadId, tocado) {
     const $s = document.getElementById('siguiente-lead');
     if (!$s || rolActual() === 'ejecutiva') return;
+    // Trabajando una lista (Marcar → Listas): el siguiente sale de ella.
+    const idLista = listaActiva();
+    if (idLista) {
+      let d = null; try { d = await api('listas/' + encodeURIComponent(idLista)); } catch (_) { fijarLista(null); }
+      if (d) {
+        const sigL = d.leads.find(x => ['por_tocar', 'en_curso'].includes(x.estado) && !x.tocado_hoy && String(x.id) !== String(leadId));
+        if (!document.body.contains($s)) return;
+        $s.innerHTML = (sigL
+          ? `<a class="btn ${tocado ? 'primario pulso' : ''}" id="ir-siguiente" href="${hrefLead(sigL)}" title="Siguiente de la lista ${esc(d.nombre)}${sigL.telefono ? ' · marca de una vez' : ''}">Siguiente de la lista → ${esc(sigL.empresa || '')}${sigL.telefono ? ' 📞' : ''}</a>`
+          : `<a class="btn" href="#/marcar?lista=${d.id}">Lista al día ✔</a>`)
+          + `<div class="suave pequeno" style="margin-top:4px">${d.caliente ? '🔥 ' : ''}<a href="#/marcar?lista=${d.id}">${esc(d.nombre)}</a> · ${d.por_tocar} por tocar · <a href="#" id="salir-lista-ficha">salir</a></div>`;
+        const $x = document.getElementById('salir-lista-ficha');
+        if ($x) $x.addEventListener('click', e => { e.preventDefault(); fijarLista(null); pintarSiguiente(leadId, tocado); });
+        return;
+      }
+    }
     const qU = usuarioActual() ? '?usuario=' + encodeURIComponent(usuarioActual()) : '';
     let c; try { c = await api('cola' + qU); } catch (_) { return; }
     const pendientes = c.tareas.filter(t => !t.tocado_hoy && String(t.lead_id) !== String(leadId));
@@ -1572,11 +1600,85 @@
   }
 
   // ---------------------------------------------------------------- marcar
-  function vistaMarcar() {
+  // ---------------------------------------------------------------- listas
+  // Lista que Angie está trabajando: "Siguiente lead" en la ficha sigue dentro de ella.
+  const LISTA_KEY = 'sdr_lista_activa';
+  const listaActiva = () => { try { return localStorage.getItem(LISTA_KEY) || ''; } catch (_) { return ''; } };
+  const fijarLista = id => { try { if (id) localStorage.setItem(LISTA_KEY, String(id)); else localStorage.removeItem(LISTA_KEY); } catch (_) {} };
+  const ESTADO_EN_LISTA = { por_tocar: ['Por tocar', 'hoy'], en_curso: ['En curso', 'llamada'], reunion: ['Reunión', 'whatsapp'], pausa: ['En pausa', 'pausa'], descartado: ['Descartado', 'vencida'] };
+  const hrefLead = x => `#/lead/${x.id}${x.telefono ? '?llamar=1' : ''}`;
+
+  function tarjetaLista(x, activa) {
+    const pct = n => (x.total ? (n / x.total) * 100 : 0);
+    return `<a class="lista-card ${x.caliente ? 'caliente' : ''} ${x.cerrada_ms ? 'cerrada' : ''} ${activa ? 'activa' : ''}" href="#/marcar?lista=${x.id}">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><b>${esc(x.nombre)}</b>${x.caliente ? `<span class="chip fuego" title="Prioridad alta: sus leads van primero en la cola">🔥 ${plural(x.dias_restantes, 'día', 'días')}</span>` : x.cerrada_ms ? '<span class="chip hoy">cerrada</span>' : ''}</div>
+      <div class="suave pequeno">${x.origen ? esc(x.origen) + ' · ' : ''}${fecha(x.created_ms)} · ${plural(x.total, 'contacto', 'contactos')}${activa ? ' · <b>trabajándola</b>' : ''}</div>
+      <div class="avance"><i class="r" style="width:${pct(x.reuniones)}%"></i><i class="c" style="width:${pct(x.en_curso)}%"></i><i class="d" style="width:${pct(x.descartados + (x.en_pausa || 0))}%"></i></div>
+      <div class="suave pequeno"><b>${x.por_tocar}</b> por tocar · ${x.en_curso} en curso · <b>${x.reuniones}</b> ${x.reuniones === 1 ? 'reunión' : 'reuniones'}${x.tocados_hoy ? ` · ${x.tocados_hoy} hoy` : ''}</div>
+    </a>`;
+  }
+
+  async function pintarListas(params) {
+    const $p = document.getElementById('listas-panel');
+    if (!$p) return;
+    const id = params.get('lista');
+    try {
+      if (!id) {
+        const ls = await api('listas');
+        $p.innerHTML = `<h2>Listas <span class="suave pequeno">${ls.filter(x => x.caliente).length} con prioridad</span></h2>
+          ${ls.length ? ls.map(x => tarjetaLista(x, String(x.id) === listaActiva())).join('') : '<p class="suave">Todavía no hay listas. Cada archivo que se carga en <a href="#/importar">Cargar</a> es una lista.</p>'}
+          <p class="suave pequeno" style="margin:6px 0 0">🔥 = prioridad alta: van primero en la Cola del día mientras estén frescas. Entra a una para trabajarla en orden.</p>`;
+        return;
+      }
+      const d = await api('listas/' + encodeURIComponent(id));
+      const activa = String(d.id) === listaActiva();
+      const sig = d.leads.find(x => ['por_tocar', 'en_curso'].includes(x.estado) && !x.tocado_hoy);
+      $p.innerHTML = `<div class="suave pequeno"><a href="#/marcar?todas=1">← Todas las listas</a></div>
+        <h2 style="margin-top:6px">${esc(d.nombre)}</h2>
+        <div class="suave pequeno">${d.origen ? 'De ' + esc(d.origen) + ' · ' : ''}cargada ${fecha(d.created_ms)}${d.caliente ? ` · <span class="chip fuego">🔥 prioridad alta · ${plural(d.dias_restantes, 'día', 'días')}</span>` : d.cerrada_ms ? ' · cerrada' : d.prioridad === 'alta' ? ' · prioridad alta (ya no está fresca)' : ''}</div>
+        <div class="suave pequeno" style="margin-top:4px"><b>${d.por_tocar}</b> por tocar · ${d.en_curso} en curso · <b>${d.reuniones}</b> reuniones · ${d.descartados} descartados${d.en_pausa ? ` · ${d.en_pausa} en pausa` : ''}</div>
+        <div class="acciones" style="margin:10px 0 6px;flex-wrap:wrap">
+          ${sig ? `<a class="btn primario" id="trabajar" href="${hrefLead(sig)}">${activa ? '▶ Seguir' : '▶ Trabajar esta lista'}</a>` : '<span class="suave">Nada pendiente hoy en esta lista ✔</span>'}
+          ${activa ? '<button class="btn chico" id="salir-lista">Salir de la lista</button>' : ''}
+        </div>
+        <div class="acciones" style="margin:0 0 4px;flex-wrap:wrap">
+          <button class="btn chico" data-lista-acc="${d.prioridad === 'alta' ? 'normal' : 'alta'}">${d.prioridad === 'alta' ? 'Quitar prioridad alta' : '🔥 Prioridad alta'}</button>
+          <button class="btn chico fantasma" data-lista-acc="${d.cerrada_ms ? 'reabrir' : 'cerrar'}">${d.cerrada_ms ? 'Reabrir' : 'Cerrar lista'}</button>
+        </div>
+        <ul class="lista-leads">${d.leads.map(x => {
+          const e = ESTADO_EN_LISTA[x.estado] || [x.estado, 'hoy'];
+          const hecho = !['por_tocar', 'en_curso'].includes(x.estado) || x.tocado_hoy;
+          return `<li class="${hecho ? 'hecho' : ''}">
+            <span class="chip ${e[1]}">${x.tocado_hoy && !['reunion', 'descartado'].includes(x.estado) ? 'Hoy ✓' : e[0]}</span>
+            <div class="q"><a href="#/lead/${x.id}"><b>${esc(x.empresa)}</b></a><span class="suave">${esc([x.contacto, x.cargo].filter(Boolean).join(' · ') || '—')}${x.ultimo_ms ? ' · ' + esc(meta.resultadoLabel[x.ultimo_resultado] || x.ultimo_resultado || '') + ' ' + fecha(x.ultimo_ms) : ''}</span></div>
+            ${x.telefono && !hecho ? `<a class="btn chico" data-trabajar href="${hrefLead(x)}" title="Llamar a ${esc(telVisible(x.telefono))}">📞</a>` : ''}
+          </li>`;
+        }).join('')}</ul>`;
+      const entrar = () => fijarLista(d.id);
+      $p.querySelectorAll('#trabajar, [data-trabajar]').forEach(a => a.addEventListener('click', entrar));
+      const $salir = document.getElementById('salir-lista');
+      if ($salir) $salir.addEventListener('click', () => { fijarLista(null); pintarListas(params); });
+      $p.querySelectorAll('[data-lista-acc]').forEach(b => b.addEventListener('click', async () => {
+        const a = b.dataset.listaAcc;
+        b.disabled = true;
+        try {
+          await api('listas/' + d.id, { method: 'POST', body: a === 'alta' || a === 'normal' ? { prioridad: a } : a === 'cerrar' ? { cerrar: true } : { reabrir: true } });
+          avisar(a === 'alta' ? 'Prioridad alta: sus leads van primero en la cola.' : a === 'normal' ? 'Prioridad normal.' : a === 'cerrar' ? 'Lista cerrada: ya no suma prioridad.' : 'Lista reabierta.');
+          await pintarListas(params);
+        } catch (e) { avisar(e.message, 'error'); b.disabled = false; }
+      }));
+    } catch (e) {
+      if (/no encontrada/i.test(e.message) && id === listaActiva()) { fijarLista(null); return pintarListas(new URLSearchParams()); }
+      $p.innerHTML = pintarError(e);
+    }
+  }
+
+  function vistaMarcar(params = new URLSearchParams()) {
     const campo = 'font:inherit;width:100%;padding:8px 10px;border:1px solid var(--linea);border-radius:8px;box-sizing:border-box';
     $app.innerHTML = `
-      <div class="cabeza"><div><h1>Marcar</h1><div class="suave">Un número que no está en ninguna lista. Si el número ya es de un lead, abre su ficha. Si la empresa ya existe, lo conecta con ella; si no, la crea con la secuencia normal.</div></div></div>
-      <form class="panel" id="frm-marcar" style="max-width:560px" autocomplete="off">
+      <div class="cabeza"><div><h1>Marcar</h1><div class="suave">Un número suelto o una lista completa. Si el número ya es de un lead, abre su ficha. Si la empresa ya existe, lo conecta con ella; si no, la crea con la secuencia normal.</div></div></div>
+      <div class="marcar-grid"><div>
+      <form class="panel" id="frm-marcar" autocomplete="off">
         <label class="suave" style="display:block;font-size:12px;font-weight:600;margin-bottom:4px">Teléfono</label>
         <input name="telefono" inputmode="tel" autofocus required placeholder="300 123 4567 · +52 55 1234 5678" style="font:inherit;font-size:20px;width:100%;padding:10px 12px;border:1px solid var(--linea);border-radius:9px;box-sizing:border-box" />
         <div class="dos" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
@@ -1588,7 +1690,11 @@
         <div id="conexion" class="calendly-aviso" hidden></div>
         <div class="acciones"><button class="btn primario grande" type="submit">📞 Llamar</button><button class="btn" type="button" id="solo-crear">Solo abrir la ficha</button></div>
         <div id="marcar-error"></div>
-      </form>`;
+      </form></div>
+      <aside class="panel listas-panel" id="listas-panel"><p class="suave">Cargando listas…</p></aside>
+      </div>`;
+    // Panel de listas: la elegida, la que se está trabajando, o todas.
+    pintarListas(params.get('lista') || params.get('todas') || !listaActiva() ? params : new URLSearchParams({ lista: listaActiva() }));
     const $f = document.getElementById('frm-marcar');
     const $emp = $f.querySelector('input[name=empresa]'), $con = $f.querySelector('input[name=contacto]');
     const $sug = document.getElementById('empresas-sug'), $cx = document.getElementById('conexion');
@@ -1787,7 +1893,7 @@
       else if (partes[0] === 'lista-negra') await vistaListaNegra();
       else if (partes[0] === 'fallos') await vistaFallos();
       else if (partes[0] === 'llamada' && partes[1]) await vistaLlamada(partes[1]);
-      else if (partes[0] === 'marcar') vistaMarcar();
+      else if (partes[0] === 'marcar') vistaMarcar(new URLSearchParams(query));
       else if (partes[0] === 'semana') await vistaSemana(new URLSearchParams(query));
       else if (partes[0] === 'historial') await vistaHistorial(partes[1]);
       else if (partes[0] === 'comision') await vistaComision(new URLSearchParams(query));

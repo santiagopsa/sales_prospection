@@ -33,6 +33,7 @@ function rutas({ db, config }) {
       verTranscripcion: config.VER_TRANSCRIPCION || [],
       tiposCompromiso: Object.entries(config.TIPOS_COMPROMISO || {}).map(([id, t]) => ({ id, label: t.label, canal: t.canal, descripcion: t.descripcion })),
       calendarioActivo: cal.activo(process.env),
+      listas: { origenes: (config.LISTAS || {}).origenes || [], altaPorDefecto: (config.LISTAS || {}).alta_por_defecto || [], diasCaliente: (config.LISTAS || {}).dias_caliente || 14 },
       calendly: require('./calendly').activo(config) ? { url: config.CALENDLY.url, origen: new URL(config.CALENDLY.url).origin, ejecutiva: config.CALENDLY.ejecutiva, permitirManual: !!config.CALENDLY.permitir_manual, horaDeCalendly: !!require('./calendly').token(process.env), mensaje: config.CALENDLY.mensaje || '' } : null,
     })],
     // Toque de Angie: llamada (con resultado obligatorio) o WhatsApp / correo / LinkedIn de un clic.
@@ -137,6 +138,10 @@ function rutas({ db, config }) {
     // Prueba de la delegación: crea y borra un evento en el calendario del usuario dado.
     ['post', '/api/calendario/reintentar', async () => { sinDb(); return C.reintentarPendientes(db, config, process.env); }],
     ['post', '/api/calendario/probar', async ({ body }) => cal.probar(process.env, config, (body || {}).usuario || 'Angie')],
+    // Listas (cada carga): prioridad, avance y leads en orden de trabajo.
+    ['get', '/api/listas', async () => { sinDb(); return require('./listas').listar(db, config); }],
+    ['get', '/api/listas/:id', async ({ params }) => { sinDb(); return require('./listas').detalle(db, config, params.id); }],
+    ['post', '/api/listas/:id', async ({ params, body }) => { sinDb(); return require('./listas').actualizar(db, config, params.id, body || {}); }],
     // Tablero de la ejecutiva: reuniones de la SDR del mes y calificación con chulos.
     ['get', '/api/ejecutiva', async ({ query }) => { sinDb(); return require('./ejecutiva').tablero(db, config, { mes: query.mes }); }],
     ['post', '/api/leads/:id/calificacion', async ({ params, body }) => {
@@ -176,10 +181,10 @@ function rutas({ db, config }) {
     ['get', '/api/cargas/:id', async ({ params }) => { sinDb(); return L.detalleCarga(db, params.id); }],
     ['post', '/api/importar', async ({ body }) => {
       sinDb();
-      const { archivo, contenido, base64, confirmar } = body || {};
+      const { archivo, contenido, base64, confirmar, lista } = body || {};
       const entrada = base64 ? Buffer.from(String(base64), 'base64') : contenido;
       if (!entrada) throw Object.assign(new Error('Falta el contenido del archivo'), { status: 400 });
-      return importar(db, config, { archivo, contenido: entrada, simular: !confirmar, usuario: (body || {}).usuario });
+      return importar(db, config, { archivo, contenido: entrada, simular: !confirmar, usuario: (body || {}).usuario, lista });
     }],
   ];
 }

@@ -13,8 +13,9 @@ const MAX_FILAS = 5000; // una carga más grande casi siempre es el archivo equi
 
 function error(status, message) { return Object.assign(new Error(message), { status }); }
 
-async function importar(db, config, { archivo, contenido, simular = true, usuario = null, ahora = new Date() }) {
+async function importar(db, config, { archivo, contenido, simular = true, usuario = null, lista = null, ahora = new Date() }) {
   usuario = require('./resultados').usuarioValido(config, usuario);
+  lista = datosLista(config, lista, archivo);
   const leido = leerArchivo(contenido, archivo || '', config);
   if (leido.error) throw error(400, leido.error);
   if (leido.filas.length + leido.errores.length > MAX_FILAS) {
@@ -84,9 +85,15 @@ async function importar(db, config, { archivo, contenido, simular = true, usuari
     avisos: leido.filas.filter(f => f.avisos.length).map(f => ({ fila: f.fila, empresa: f.lead.empresa, avisos: f.avisos })),
     secuencia: plan.map(p => ({ paso: p.paso, canal: p.canal, fecha: p.fecha })),
     simulado: !!simular,
+    lista,
+    // Los que ya estaban en la app también quedan en la lista (para trabajarla completa).
+    ya_estaban: duplicados.filter(d => d.lead_id).length,
   };
   if (simular || !aCrear.length) {
-    if (!simular) informe.import_id = await registrarCarga(db, informe);
+    if (!simular) {
+      informe.import_id = await registrarCarga(db, informe, null, ahora);
+      await enlazarLista(db, informe);
+    }
     return informe;
   }
 
@@ -96,7 +103,7 @@ async function importar(db, config, { archivo, contenido, simular = true, usuari
   const tareas = plan.map(p => ({ paso: p.paso, canal: p.canal, due_at: p.due_at.toISOString() }));
   const r = await db.query(
     `WITH imp AS (
-       INSERT INTO ${T.imports} (archivo, filas, usuario) VALUES ($1, $2, $5) RETURNING id
+       INSERT INTO ${T.imports} (archivo, filas, usuario, nombre, origen, prioridad, created_at) VALUES ($1, $2, $5, $6, $7, $8, $9) RETURNING id
      ), entrada AS (
        SELECT * FROM jsonb_to_recordset($3::jsonb) AS x(
          fila INT, empresa TEXT, contacto TEXT, cargo TEXT, telefono TEXT, telefono_original TEXT,
@@ -116,7 +123,7 @@ async function importar(db, config, { archivo, contenido, simular = true, usuari
      SELECT (SELECT id FROM imp) AS import_id,
             (SELECT COALESCE(json_agg(json_build_object('id', id, 'telefono', telefono, 'email', email)), '[]'::json) FROM nuevos) AS nuevos,
             (SELECT COUNT(*) FROM tareas)::int AS tareas`,
-    [archivo || null, informe.filas, JSON.stringify(entrada), JSON.stringify(tareas), usuario],
+    [archivo || null, informe.filas, JSON.stringify(entrada), JSON.stringify(tareas), usuario, lista.nombre, lista.origen, lista.prioridad, ahora.toISOString()],
   );
   const { import_id, nuevos } = r.rows[0];
   const idPor = new Map();
@@ -129,12 +136,38 @@ async function importar(db, config, { archivo, contenido, simular = true, usuari
   informe.duplicados.sort((a, b) => a.fila - b.fila);
   informe.import_id = import_id;
   await registrarCarga(db, informe, import_id);
+  await enlazarLista(db, informe);
   return informe;
+}
+
+// Nombre, origen y prioridad de la lista. Sin prioridad explícita, alta si el origen está en
+// LISTAS.alta_por_defecto.
+function datosLista(config, lista, archivo) {
+  const L = config.LISTAS || {};
+  const l = lista || {};
+  const origen = l.origen ? String(l.origen).trim().slice(0, 60) || null : null;
+  const prioridad = l.prioridad === 'alta' || l.prioridad === 'normal' ? l.prioridad
+    : (origen && (L.alta_por_defecto || []).some(o => o.toLowerCase() === origen.toLowerCase()) ? 'alta' : 'normal');
+  const nombre = (l.nombre && String(l.nombre).trim().slice(0, 120)) || (archivo ? String(archivo).replace(/\.(csv|xlsx)$/i, '') : null);
+  return { nombre, origen, prioridad };
+}
+
+// Los leads de la lista: los creados y los que ya estaban (duplicados con lead).
+async function enlazarLista(db, informe) {
+  if (!informe.import_id) return;
+  const filas = [...informe.creados.map(c => ({ lead_id: c.id, fila: c.fila })), ...informe.duplicados.filter(d => d.lead_id).map(d => ({ lead_id: d.lead_id, fila: d.fila }))];
+  if (!filas.length) return;
+  try {
+    await db.query(
+      `INSERT INTO ${T.lista_leads} (import_id, lead_id, fila)
+       SELECT $1, x.lead_id, x.fila FROM jsonb_to_recordset($2::jsonb) AS x(lead_id INT, fila INT)
+       ON CONFLICT DO NOTHING`, [informe.import_id, JSON.stringify(filas)]);
+  } catch (e) { console.error('[sdr] no se enlazó la lista:', e.message); }
 }
 
 // Deja el informe guardado con la carga. Si esto falla, los leads ya entraron; solo se
 // pierde el resumen, y por eso no se propaga el error.
-async function registrarCarga(db, informe, id = null) {
+async function registrarCarga(db, informe, id = null, ahora = new Date()) {
   const detalle = JSON.stringify({ columnas: informe.columnas, duplicados: informe.duplicados, listaNegra: informe.listaNegra, errores: informe.errores, avisos: informe.avisos });
   try {
     if (id) {
@@ -144,8 +177,9 @@ async function registrarCarga(db, informe, id = null) {
       return id;
     }
     const r = await db.query(
-      `INSERT INTO ${T.imports} (archivo, filas, creados, duplicados, con_error, detalle) VALUES ($1,$2,0,$3,$4,$5::jsonb) RETURNING id`,
-      [informe.archivo, informe.filas, informe.duplicados.length, informe.errores.length, detalle]);
+      `INSERT INTO ${T.imports} (archivo, filas, creados, duplicados, con_error, detalle, nombre, origen, prioridad, created_at) VALUES ($1,$2,0,$3,$4,$5::jsonb,$6,$7,$8,$9) RETURNING id`,
+      [informe.archivo, informe.filas, informe.duplicados.length, informe.errores.length, detalle,
+        informe.lista ? informe.lista.nombre : null, informe.lista ? informe.lista.origen : null, informe.lista ? informe.lista.prioridad : 'normal', ahora.toISOString()]);
     return r.rows[0].id;
   } catch (e) {
     console.error('[sdr] no se guardó el resumen de la carga:', e.message);
