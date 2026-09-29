@@ -137,6 +137,13 @@ function rutas({ db, config }) {
     // Prueba de la delegación: crea y borra un evento en el calendario del usuario dado.
     ['post', '/api/calendario/reintentar', async () => { sinDb(); return C.reintentarPendientes(db, config, process.env); }],
     ['post', '/api/calendario/probar', async ({ body }) => cal.probar(process.env, config, (body || {}).usuario || 'Angie')],
+    // Tablero de la ejecutiva: reuniones de la SDR del mes y calificación con chulos.
+    ['get', '/api/ejecutiva', async ({ query }) => { sinDb(); return require('./ejecutiva').tablero(db, config, { mes: query.mes }); }],
+    ['post', '/api/leads/:id/calificacion', async ({ params, body }) => {
+      sinDb();
+      const b = body || {};
+      return require('./ejecutiva').calificar(db, config, { leadId: params.id, items: b.items, limpiar: !!b.limpiar, usuario: b.usuario });
+    }],
     ['get', '/api/comision', async ({ query }) => { sinDb(); return require('./comision').resumenMes(db, config, { mes: query.mes, usuario: query.usuario || null }); }],
     ['get', '/api/historial', async ({ query }) => { sinDb(); return ritmo.historialDia(db, config, { fecha: query.fecha, usuario: query.usuario || null }); }],
     ['get', '/api/semana', async ({ query }) => { sinDb(); return ritmo.resumenSemana(db, config, { fecha: /^\d{4}-\d{2}-\d{2}$/.test(query.fecha || '') ? query.fecha : undefined, usuario: query.usuario || null }); }],
@@ -146,7 +153,18 @@ function rutas({ db, config }) {
       return L.listarLeads(db, { etapa: query.etapa, huerfanos: query.huerfanos === '1', pausados: query.pausados === '1', q: query.q });
     }],
     ['get', '/api/leads/buscar', async ({ query }) => { sinDb(); return L.buscarLeads(db, query.q, { limite: query.limite }); }],
-    ['get', '/api/leads/:id', async ({ params }) => { sinDb(); return L.detalleLead(db, params.id); }],
+    ['get', '/api/leads/:id', async ({ params }) => {
+      sinDb();
+      const l = await L.detalleLead(db, params.id);
+      try { l.misma_empresa = await require('./fusion').mismaEmpresa(db, l); } catch (e) { l.misma_empresa = []; }
+      return l;
+    }],
+    // Fusionar: el lead de la URL queda y absorbe a `origen_id` (que se borra).
+    ['post', '/api/leads/:id/fusionar', async ({ params, body }) => {
+      sinDb();
+      const b = body || {};
+      return require('./fusion').fusionarLeads(db, config, { destinoId: params.id, origenId: b.origen_id, usuario: b.usuario });
+    }],
     ['post', '/api/leads/:id/editar', async ({ params, body }) => { sinDb(); const b = body || {}; return L.editarLead(db, config, params.id, b, require('./resultados').usuarioValido(config, b.usuario)); }],
     // Fallos de marcación: lo que el operador no cursó, el reporte de Angie y la revisión de Santiago.
     ['get', '/api/llamadas/fallidas', async () => { sinDb(); return L.fallosDeMarcacion(db); }],

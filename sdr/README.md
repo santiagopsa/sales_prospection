@@ -305,6 +305,40 @@ copiar su *ID único* → Admin de Workspace → Seguridad → Controles de API 
 agregar el ID con el scope `https://www.googleapis.com/auth/calendar` → en Render, Secret File con el JSON y la
 variable `GOOGLE_CALENDAR_KEY_FILE` apuntando a él.
 
+## Tablero de la ejecutiva (Reuniones)
+
+`#/reuniones` (pestaña **Reuniones**; es la pantalla de entrada cuando el usuario elegido es de rol
+`ejecutiva`). Las reuniones que agendó la SDR en el mes (por fecha de la reunión, igual que la comisión):
+
+- **Indicadores**: agendadas, por calificar (ya pasaron sin calificación, con la más vieja en días),
+  asistencia (realizadas vs no asistieron), % de calificación Completa, las que avanzaron a propuesta
+  (cotizadas / ganadas / perdidas en el Sandler) y la comisión de la SDR.
+- **Qué se logró**: cuántas reuniones calificadas tienen cada criterio y cuál falta más (lo que la SDR
+  debe dejar más claro antes de agendar).
+- **Una fila por reunión** con 4 chulos: Dolor, Presupuesto, Decisión, Fecha límite. Se guarda al hacer
+  clic en `public.deals.data.calificacionManual` y se recalcula `calificacion_sandler` (4 = Completa,
+  2-3 = Parcial, 0-1 = No califica): la comisión y el historial del Sandler lo ven de una vez. Si la
+  reunión seguía "agendada", queda realizada; con Completa el lead pasa a "calificado". "Quitar" borra
+  los chulos. Los botones Realizada / No asistió están en la misma fila.
+- La regla vive en `calificacion.js` y la usa también `server.js`. Lo marcado a mano manda sobre el
+  formulario del demo; cuando luego se completa el demo en el Sandler, el criterio que el formulario sí
+  trae reemplaza la marca manual (un chulo con borde punteado viene del demo).
+
+## Pasar al siguiente lead a mano
+
+Después de registrar un toque (llamada, WhatsApp, correo…) la app se queda en la ficha del lead para
+hacer más toques. El botón **Siguiente lead → Empresa** (arriba a la derecha, parpadea tras un toque)
+abre el siguiente de la cola y marca si es llamada. Desde la cola, "Hecha" sigue recargando la cola.
+
+## Fusionar leads duplicados
+
+En la ficha, **Misma empresa** lista los otros contactos con el mismo nombre de empresa normalizado
+("Acme S.A.S." = "ACME"). "Fusionar aquí" pasa todo del otro lead a esta ficha y lo borra: toques,
+llamadas, compromisos, reservas de Calendly y los datos que falten; los teléfonos quedan como principal
+y segundo (los que sobren y los correos extra quedan en los datos). Manda la etapa más avanzada (un
+descartado nunca le gana a uno vivo) con su secuencia pendiente, su reunión y su deal.
+"Fusionar con otro lead…" busca un duplicado con otro nombre. Queda el rastro en "Fusionado".
+
 ## Sacar un lead de la cola: descartar, pausar, lista negra
 Desde la cola (botón **Sacar** en la tarjeta), desde la ficha (**Sacar de la cola**) o como resultado
 **Descartado** de una llamada. Siempre pide una razón cerrada y, según la razón, propone qué hacer:

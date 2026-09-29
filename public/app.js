@@ -152,6 +152,10 @@ function calificacion(d) {
     decision: has(d.decisor) && has(d.procesoDecision),
     fecha: has(d.fechaLimiteDecision),
   };
+  // Criterios que la ejecutiva marcó a mano en el tablero de /sdr (misma regla que sdr/calificacion.js):
+  // la marca manda salvo que el formulario ya traiga el criterio.
+  const man = (d.calificacionManual && d.calificacionManual.items) || {};
+  for (const k of Object.keys(items)) if (!items[k] && typeof man[k] === 'boolean') items[k] = man[k];
   const done = Object.values(items).filter(Boolean).length;
   let label = 'No califica';
   if (done >= 4) label = 'Completa';

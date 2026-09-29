@@ -108,20 +108,11 @@ function painFunnelOk(d) {
   const n = [c, h, i].filter(Boolean).length;
   return { c, h, i, count: n, ok: n >= 2 };
 }
-// Calificación Sandler: Completa requiere dolor desarrollado + presupuesto + decisión + fecha límite
-function calificacionSandler(d) {
-  const pf = painFunnelOk(d);
-  const dolorOk = pf.ok || has(d.dolor); // acepta dolor viejo como parcial
-  const budget = has(d.presupuesto);
-  const decision = has(d.decisor) && has(d.procesoDecision);
-  const fecha = has(d.fechaLimiteDecision);
-  const items = [dolorOk && pf.ok, budget, decision, fecha];
-  const done = items.filter(Boolean).length;
-  let label = 'No califica';
-  if (done >= 4) label = 'Completa';
-  else if (done >= 2) label = 'Parcial';
-  return { label, done, of: 4, pf, dolorOk, budget, decision, fecha };
-}
+// Calificación Sandler: Completa requiere dolor desarrollado + presupuesto + decisión + fecha límite.
+// La regla vive en sdr/calificacion.js (la usa también el tablero de la ejecutiva en /sdr, donde se
+// pueden marcar los criterios a mano: data.calificacionManual manda sobre el formulario).
+const CALIFICACION = require('./sdr/calificacion');
+function calificacionSandler(d) { return CALIFICACION.calificacionSandler(d); }
 function scoreDeal(d) {
   // Fundamentales del nuevo proceso: contrato previo, segmentación, dolor desarrollado (embudo 2/3),
   // presupuesto, decisor, proceso de decisión, fecha límite de decisión.
@@ -217,11 +208,14 @@ app.post('/api/deals', async (req, res) => {
 app.put('/api/deals/:id/completar', async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const d = req.body || {};
+    let d = req.body || {};
     delete d.sdrDealId;
+    if (!pool) return res.status(503).json({ ok: false, error: 'sin base de datos' });
+    // Conserva los criterios que la ejecutiva marcó a mano en el tablero de /sdr.
+    const guardado = await pool.query(`SELECT data FROM deals WHERE id=$1`, [id]);
+    if (guardado.rows.length) d = CALIFICACION.fusionarAlCompletar(d, guardado.rows[0].data || {});
     const s = scoreDeal(d);
     const fechaLim = (d.fechaLimiteDecision && String(d.fechaLimiteDecision).match(/^\d{4}-\d{2}-\d{2}$/)) ? d.fechaLimiteDecision : null;
-    if (!pool) return res.status(503).json({ ok: false, error: 'sin base de datos' });
     const r = await pool.query(
       `UPDATE deals SET executive=$1, company=$2, segment=$3, has_ats=$4, data=$5,
          score_fundamentals=$6, score_nice_to_have=$7, linea_negocio=$8, calificacion_sandler=$9, fecha_limite_decision=$10,

@@ -473,4 +473,4 @@ async function agregarAListaNegra(db, config, { telefono, email, empresa, domini
   });
 }
 
-module.exports = { registrarToque, registrarEjecutiva, reagendarReunion, agregarAListaNegra, sacarDeCola, mesesReintento, actividadDelDia, siguienteEtapa, enTransaccion, usuarioValido, usuariosSdr, filtroUsuario, paramUsuario };
+module.exports = { registrarToque, registrarEjecutiva, crearDeal, cambiarEtapa, leerLead, reagendarReunion, agregarAListaNegra, sacarDeCola, mesesReintento, actividadDelDia, siguienteEtapa, enTransaccion, usuarioValido, usuariosSdr, filtroUsuario, paramUsuario };
