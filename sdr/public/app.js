@@ -204,124 +204,6 @@
       <p class="suave" style="font-size:12px;margin-top:14px">Cuenta como calificada la reunión que ${esc('la ejecutiva')} califica <b>${esc(r.reglas.califica_con.join(' o '))}</b> en el Sandler Coach. ${r.reglas.modo === 'escalon' ? 'Al alcanzar un tramo, todas las calificadas del mes se pagan a ese valor.' : 'Cada reunión se paga al valor de su tramo.'} Cuenta en el mes ${r.reglas.mes_por === 'reunion' ? 'de la fecha de la reunión' : 'en que se agendó'}. Reglas en <code>COMISION</code> de <code>config.js</code>.</p>`;
   }
 
-  // ---------------------------------------------------------------- tablero de la ejecutiva
-  // Las reuniones que agendó la SDR en el mes, con indicadores y la calificación Sandler en 4 chulos
-  // que la ejecutiva llena a mano (se guardan en el deal del Sandler al hacer clic).
-  const COMERCIAL = { abierta: ['Abierta', 'hoy'], cotizada: ['Cotizada', 'llamada'], ganada: ['Ganada', 'whatsapp'], perdida: ['Perdida', 'vencida'] };
-  const FILTROS_REUNION = [
-    ['todas', 'Todas', () => true],
-    ['pendientes', 'Por calificar', x => x.estado === 'por_calificar'],
-    ['programadas', 'Programadas', x => x.estado === 'programada'],
-    ['evaluadas', 'Calificadas', x => !!x.calificacion],
-    ['no', 'No se hicieron', x => x.estado === 'no_asistio' || x.estado === 'cancelada'],
-  ];
-  const nombreEjecutiva = () => ((meta.usuarios || []).find(u => u.rol === 'ejecutiva') || { nombre: 'la ejecutiva' }).nombre;
-  const nombreSdr = () => ((meta.usuarios || []).find(u => u.rol === 'sdr') || { nombre: 'la SDR' }).nombre;
-  const claseCal = c => !c ? '' : /^completa$/i.test(c) ? 'completa' : /^parcial$/i.test(c) ? 'parcial' : 'nocal';
-
-  function filaReunion(x, criterios) {
-    const est = ESTADO_REUNION[x.estado] || { label: x.estado, clase: 'hoy' };
-    const n = criterios.filter(c => x.items[c.clave]).length;
-    const bloqueo = x.puede_calificar ? '' : (x.estado === 'programada' ? 'Se califica después de la reunión (o márcala realizada)' : 'La reunión no se hizo');
-    const chulos = criterios.map(c => `<label class="chulo ${x.items[c.clave] ? 'si' : ''} ${x.fuente[c.clave] === 'sandler' ? 'de-sandler' : ''}" title="${esc(bloqueo || c.ayuda + (x.fuente[c.clave] === 'sandler' ? ' · viene del demo llenado en el Sandler' : ''))}">
-        <input type="checkbox" data-k="${c.clave}" ${x.items[c.clave] ? 'checked' : ''} ${x.puede_calificar ? '' : 'disabled'} /><span>${esc(c.label)}</span></label>`).join('');
-    const com = x.comercial && COMERCIAL[x.comercial];
-    return `<div class="reunion-fila ${x.estado}" data-lead="${x.lead_id}">
-      <div class="rf-info">
-        <div><span class="chip ${est.clase}">${est.label}</span>${com && x.comercial !== 'abierta' ? ` <span class="chip ${com[1]}" title="${esc(x.motivo || '')}">${com[0]}</span>` : ''}</div>
-        <a href="#/lead/${x.lead_id}"><b>${esc(x.empresa || 'Sin empresa')}</b></a>
-        <div class="suave">${esc([x.contacto, x.cargo].filter(Boolean).join(' · ') || '—')}</div>
-        <div class="suave pequeno">${x.reunion_ms ? '📅 ' + fechaHora(x.reunion_ms) : 'Sin fecha'} · agendó ${esc(x.agendo || '—')} el ${fecha(x.agendada_ms)}</div>
-      </div>
-      <div class="rf-cal">
-        <div class="chulos">${chulos}</div>
-        <div class="rf-res"><span class="cal-pill ${claseCal(x.calificacion)}" ${x.calificacion && claseCal(x.calificacion) !== claseCal(n >= 4 ? 'Completa' : n >= 2 ? 'Parcial' : 'No califica') ? 'title="Calificada en el Sandler con otra regla o sin los campos del demo; marca los chulos para dejarla al día"' : ''}>${x.calificacion ? esc(x.calificacion) + (claseCal(x.calificacion) === claseCal(n >= 4 ? 'Completa' : n >= 2 ? 'Parcial' : 'No califica') ? ` · ${n}/4` : '') : x.puede_calificar ? 'Sin calificar' : '—'}</span>
-          ${x.manual ? `<small class="suave">marcado por ${esc(x.manual.por || '—')} ${fechaHora(x.manual.ms)}</small>` : x.formulario_sandler ? '<small class="suave">del demo en el Sandler</small>' : ''}
-          <small class="guardado" hidden></small></div>
-      </div>
-      <div class="rf-acc">
-        ${x.etapa === 'reunion_agendada' && x.estado !== 'cancelada' ? `<button class="btn chico" data-acc="reunion_realizada">✓ Realizada</button><button class="btn chico" data-acc="no_show">No asistió</button>` : ''}
-        ${x.deal_id ? `<a class="btn chico" href="/#/deal/${x.deal_id}" target="_blank" rel="noopener" title="Abre el deal #${x.deal_id} en el Sandler Coach">Sandler ↗</a>` : ''}
-        ${x.manual ? `<button class="btn chico fantasma" data-acc="limpiar" title="Quita los chulos marcados a mano">Quitar</button>` : ''}
-      </div>
-    </div>`;
-  }
-
-  // Las que se calificaron en esta visita siguen a la vista aunque ya no cumplan el filtro
-  // (al marcar el primer chulo una reunión deja de estar "por calificar" y no debe desaparecer).
-  const editadasReunion = new Set();
-  async function vistaReuniones(params, { conservar = false } = {}) {
-    if (!conservar) editadasReunion.clear();
-    const qs = new URLSearchParams(); if (params.get('mes')) qs.set('mes', params.get('mes'));
-    const r = await api('ejecutiva' + (qs.toString() ? '?' + qs : ''));
-    const k = r.kpis;
-    const filtro = FILTROS_REUNION.find(f => f[0] === params.get('f')) || (k.por_calificar ? FILTROS_REUNION[1] : FILTROS_REUNION[0]);
-    const lista = r.reuniones.filter(x => filtro[2](x) || editadasReunion.has(x.lead_id));
-    const enlace = extra => { const p = new URLSearchParams(); p.set('mes', r.mes); for (const [a, b] of Object.entries(extra)) p.set(a, b); return '#/reuniones?' + p; };
-    const pct = v => (v == null ? '—' : v + '%');
-    const barra = c => { const p = c.de ? Math.round((c.si / c.de) * 100) : 0; return `<div class="crit"><span>${esc(c.label)}</span><div class="crit-b"><i style="width:${p}%"></i></div><b class="num">${c.de ? `${c.si}/${c.de}` : '—'}</b></div>`; };
-    const debil = k.evaluadas ? k.criterios.slice().sort((a, b) => a.si - b.si)[0] : null;
-    $app.innerHTML = `
-      <div class="cabeza">
-        <div><h1>Reuniones de ${esc(nombreSdr())} · ${esc(MES_LARGO(r.mes))}</h1>
-          <div class="suave">Tablero de ${esc(nombreEjecutiva())} · <a href="${enlace({ mes: r.anterior })}">← mes anterior</a>${r.posterior <= r.hoy.slice(0, 7) ? ` · <a href="${enlace({ mes: r.posterior })}">mes siguiente →</a>` : ''}</div></div>
-        <a class="btn" href="/#/deals" target="_blank" rel="noopener">Historial del Sandler ↗</a>
-      </div>
-      ${!r.sandler ? '<div class="error">No encuentro la tabla del Sandler Coach (public.deals): los chulos no se pueden guardar aquí.</div>' : ''}
-      ${k.por_calificar ? `<div class="aviso-pend">⏳ <b>${plural(k.por_calificar, 'reunión ya pasó', 'reuniones ya pasaron')} sin calificar</b>${k.dias_pendiente_mas_vieja ? ` (la más vieja hace ${plural(k.dias_pendiente_mas_vieja, 'día', 'días')})` : ''}. Marca los chulos de lo que quedó claro en la reunión: se guarda al hacer clic.</div>` : ''}
-      ${r.pendientes_anteriores.length ? `<div class="aviso-pend suave">También quedan sin calificar: ${r.pendientes_anteriores.map(p => `<a href="${enlace({ mes: p.mes, f: 'pendientes' })}">${p.n} de ${esc(MES_CORTO(p.mes))}</a>`).join(' · ')}</div>` : ''}
-      <div class="kpis seis">
-        <div class="kpi"><b>${k.reuniones}</b><span>Reuniones agendadas</span><small>${k.programadas} programadas por venir</small></div>
-        <div class="kpi ${k.por_calificar ? 'alerta' : ''}"><b>${k.por_calificar}</b><span>Por calificar</span><small>ya pasaron y no tienen calificación</small></div>
-        <div class="kpi"><b>${pct(k.asistencia_pct)}</b><span>Asistencia</span><small>${k.realizadas} realizadas · ${k.no_asistio} no asistieron${k.canceladas ? ` · ${k.canceladas} canceladas` : ''}</small></div>
-        <div class="kpi"><b>${pct(k.completa_pct)}</b><span>Calificación completa</span><small>${k.completas} Completa · ${k.parciales} Parcial · ${k.no_califica} No califica</small></div>
-        <div class="kpi"><b>${k.cotizadas + k.ganadas + k.perdidas}</b><span>Avanzaron a propuesta</span><small>${k.cotizadas} cotizadas · ${k.ganadas} ganadas · ${k.perdidas} perdidas</small></div>
-        <a class="kpi" href="#/comision?mes=${r.mes}"><b>${plata(r.comision.moneda, r.comision.total)}</b><span>Comisión de ${esc(nombreSdr())}</span><small>${plural(r.comision.calificadas, 'reunión', 'reuniones')} ${esc(r.comision.califica_con.join(' o '))}</small></a>
-      </div>
-      <div class="panel criterios-panel">
-        <h2>Qué se logró en las reuniones calificadas</h2>
-        ${k.evaluadas ? `<div class="crits">${k.criterios.map(barra).join('')}</div>
-          ${debil && debil.si < debil.de ? `<p class="suave pequeno" style="margin:8px 0 0">Lo que más falta: <b>${esc(debil.label)}</b> (${debil.de - debil.si} de ${debil.de}). Es lo que ${esc(nombreSdr())} tiene que dejar más claro antes de agendar.</p>` : ''}`
-          : '<p class="suave" style="margin:0">Todavía no hay reuniones calificadas este mes.</p>'}
-      </div>
-      <div class="filtros-reunion">${FILTROS_REUNION.map(f => { const c = r.reuniones.filter(f[2]).length; return `<a class="${f === filtro ? 'activo' : ''}" href="${enlace({ f: f[0] })}">${f[1]} <span class="num">${c}</span></a>`; }).join('')}</div>
-      <div class="reuniones-lista" id="reuniones-lista">
-        ${lista.length ? lista.map(x => filaReunion(x, r.criterios)).join('') : `<p class="vacio">${filtro[0] === 'pendientes' ? 'Nada por calificar. ✔' : 'No hay reuniones aquí.'}</p>`}
-      </div>
-      <p class="suave pequeno" style="margin-top:14px">Criterios Sandler: <b>Dolor</b> (el cliente cuantificó el problema, contó la historia o el impacto), <b>Presupuesto</b>, <b>Decisión</b> (quién decide y cómo) y <b>Fecha límite</b> de decisión. 4 = Completa (cuenta para la comisión) · 2-3 = Parcial · 0-1 = No califica. El chulo con borde punteado viene del demo llenado en el Sandler; lo marcado aquí manda.</p>`;
-
-    const recargar = async () => { const y = window.scrollY; await vistaReuniones(params, { conservar: true }); window.scrollTo(0, y); };
-    $app.querySelectorAll('.reunion-fila').forEach($f => {
-      const id = $f.dataset.lead;
-      const x = r.reuniones.find(z => String(z.lead_id) === id);
-      $f.querySelectorAll('.chulos input').forEach($c => $c.addEventListener('change', async () => {
-        editadasReunion.add(x.lead_id);
-        const items = {};
-        $f.querySelectorAll('.chulos input').forEach(i => { items[i.dataset.k] = i.checked; });
-        $f.querySelectorAll('.chulos input').forEach(i => { i.disabled = true; });
-        const $g = $f.querySelector('.guardado'); $g.hidden = false; $g.textContent = 'Guardando…';
-        try {
-          const res = await api(`leads/${id}/calificacion`, { method: 'POST', body: { items } });
-          avisar(`${x.empresa || 'Reunión'}: ${res.calificacion || 'sin calificar'}${res.avisos && res.avisos.length ? ' · ' + res.avisos.join(' ') : ''}`);
-          await recargar();
-        } catch (e) { avisar(e.message, 'error'); await recargar(); }
-      }));
-      $f.querySelectorAll('[data-acc]').forEach($b => $b.addEventListener('click', async () => {
-        const acc = $b.dataset.acc;
-        editadasReunion.add(x.lead_id);
-        if (acc === 'no_show' && !window.confirm(`¿${x.empresa || 'El prospecto'} no se presentó? Vuelve a ${nombreSdr()} para recuperarla.`)) return;
-        if (acc === 'limpiar' && !window.confirm('¿Quitar los chulos marcados a mano? La reunión vuelve a "por calificar" si no hay demo llenado en el Sandler.')) return;
-        $b.disabled = true;
-        try {
-          if (acc === 'limpiar') await api(`leads/${id}/calificacion`, { method: 'POST', body: { limpiar: true } });
-          else await api(`leads/${id}/ejecutiva`, { method: 'POST', body: { accion: acc } });
-          avisar(acc === 'reunion_realizada' ? 'Reunión realizada: ya puedes marcar los chulos.' : acc === 'no_show' ? 'Marcada como no asistió.' : 'Chulos quitados.');
-          await recargar();
-        } catch (e) { avisar(e.message, 'error'); $b.disabled = false; }
-      }));
-    });
-  }
-
   // ---------------------------------------------------------------- cola
   async function vistaCola(params = new URLSearchParams()) {
     const qU = usuarioActual() ? '?usuario=' + encodeURIComponent(usuarioActual()) : '';
@@ -1029,11 +911,8 @@
               <p class="suave" style="font-size:12px;margin:0">${l.telefono ? `<a href="${waLink(l.telefono)}" target="_blank" rel="noopener">Abrir WhatsApp ↗</a>` : ''}${l.email ? ` · <a href="mailto:${esc(l.email)}">Escribir correo ↗</a>` : ''}</p>`
             : l.etapa === 'descartado' ? `<p class="suave" style="margin:0 0 10px">Lead descartado${l.en_lista_negra ? ' y en lista negra: para volver a llamarlo hay que <a href="#/lista-negra">quitarlo de la lista</a> primero' : ''}.</p>
               ${l.en_lista_negra ? '' : '<div class="acciones" style="margin-top:0"><button class="btn" data-ejecutiva="reactivar" title="Vuelve a la cola con una secuencia corta desde hoy">Reactivar</button></div>'}`
-            : `<p class="suave" style="margin:0 0 10px">Desde aquí decide la ejecutiva comercial.</p>
+            : `<p class="suave" style="margin:0 0 10px">${l.etapa === 'reunion_agendada' ? 'Reunión agendada' : etiqueta(meta.etapas, l.etapa)}: la reunión, si se hizo y su calificación las marca ${esc(((meta.usuarios || []).find(u => u.rol === 'ejecutiva') || { nombre: 'la ejecutiva' }).nombre)} en su <a href="/#/tablero" target="_blank" rel="noopener">tablero del Sandler Coach ↗</a>.</p>
               <div class="acciones" style="margin-top:0">
-                ${l.etapa === 'reunion_agendada' ? `<button class="btn primario" data-ejecutiva="reunion_realizada">Reunión realizada</button>
-                <button class="btn" data-ejecutiva="no_show">No se presentó</button>` : ''}
-                ${['reunion_agendada', 'reunion_realizada'].includes(l.etapa) ? `<button class="btn primario" data-ejecutiva="calificado">Calificado</button>` : ''}
                 <button class="btn" id="compromiso" title="Una tarea con fecha y hora sobre este lead">Compromiso</button>
                 ${meta.calendly && ['reunion_agendada', 'reunion_realizada'].includes(l.etapa) ? `<button class="btn" id="link-calendly" title="${l.etapa === 'reunion_agendada' ? 'Para reagendar: si reserva otro horario, la reunión se mueve sola (con el token de Calendly)' : 'Para una segunda reunión'}">📅 Calendly</button>` : ''}
                 ${l.etapa !== 'calificado' ? `<button class="btn peligro" id="descartar">Descartar</button>` : ''}
@@ -1883,8 +1762,7 @@
 
   // ---------------------------------------------------------------- router
   async function render() {
-    // La ejecutiva entra directo a su tablero; la SDR, a la cola.
-    const [ruta, query] = (location.hash.replace(/^#\/?/, '') || (rolActual() === 'ejecutiva' ? 'reuniones' : 'cola')).split('?');
+    const [ruta, query] = (location.hash.replace(/^#\/?/, '') || 'cola').split('?');
     const partes = ruta.split('/');
     document.querySelectorAll('.barra nav a').forEach(a => a.classList.toggle('activo', a.dataset.r === partes[0]));
     try {
@@ -1897,7 +1775,7 @@
       else if (partes[0] === 'semana') await vistaSemana(new URLSearchParams(query));
       else if (partes[0] === 'historial') await vistaHistorial(partes[1]);
       else if (partes[0] === 'comision') await vistaComision(new URLSearchParams(query));
-      else if (partes[0] === 'reuniones') await vistaReuniones(new URLSearchParams(query));
+      else if (partes[0] === 'reuniones') { location.href = '/#/tablero'; return; }   // el tablero de la ejecutiva vive en el Sandler Coach
       else if (partes[0] === 'lead' && partes[1]) {
         await vistaLead(partes[1]);
         const llamarA = new URLSearchParams(query).get('llamar');

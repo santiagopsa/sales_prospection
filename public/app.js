@@ -166,8 +166,10 @@ function daysBetween(a, b) { return Math.floor((new Date(b).getTime() - new Date
 
 // ---------- Router ----------
 function router() {
-  const hash = location.hash || '#/';
-  document.querySelectorAll('nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === hash));
+  // Sin ruta (la página principal) abre el tablero; #/ es el asistente de un deal nuevo.
+  const hash = location.hash || '#/tablero';
+  document.querySelectorAll('nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === hash.split('?')[0]));
+  if (hash.startsWith('#/tablero')) return renderTablero(new URLSearchParams(hash.split('?')[1] || ''));
   if (hash.startsWith('#/deal/')) return renderDealDetail(hash.split('/')[2]);
   if (hash === '#/deals') return renderDeals();
   if (hash === '#/wishlist') return renderWishlist();
@@ -1644,6 +1646,16 @@ async function renderDealDetail(id) {
       Guardado: <strong>${new Date(row.created_at).toLocaleString()}</strong>
     </p>
 
+    ${(() => {
+      // Calificación Sandler: la que cuenta (la del formulario o los chulos del tablero).
+      const c = calificacion(d), man = (d.calificacionManual && d.calificacionManual.items) || {};
+      const nombres = { dolor: 'Dolor', presupuesto: 'Presupuesto', decision: 'Decisión', fecha: 'Fecha límite' };
+      const label = row.calificacion_sandler || (Object.values(c.items).some(Boolean) ? c.label : null);
+      return `<div class="card compact"><div class="split"><div><strong style="font-size:13px;color:var(--peaku-gray);">Calificación Sandler:</strong> ${calCell(label)}</div>
+        <div class="chips" style="margin:0">${Object.entries(c.items).map(([k, v]) => `<span class="pill ${v ? 'good' : ''}" title="${typeof man[k] === 'boolean' ? 'marcado en el tablero' : 'del formulario del demo'}">${v ? '✓' : '✗'} ${nombres[k]}</span>`).join('')}</div></div>
+        ${d.calificacionManual ? `<p class="muted" style="font-size:12px;margin:8px 0 0">Chulos marcados en el <a href="#/tablero">tablero</a> por ${esc(d.calificacionManual.por || '—')}${d.calificacionManual.at ? ' · ' + new Date(d.calificacionManual.at).toLocaleString('es-CO') : ''}.</p>` : ''}</div>`;
+    })()}
+
     <div class="card">
       <h2>Resumen de calidad del proceso</h2>
       <div class="score-grid" style="margin-top: 6px;">
@@ -1903,4 +1915,187 @@ function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;',
 function tip(text) { return `<span class="tip" tabindex="0" data-tip="${esc(text)}">i</span>`; }
 
 // kick off
+
+// ---------- Tablero de la ejecutiva: reuniones que trae la SDR ----------
+// Indicadores del mes y la calificación Sandler de cada reunión en 4 chulos que se llenan a mano.
+// Los datos salen del módulo SDR (/sdr/api/ejecutiva) y cada chulo se guarda en el deal (misma regla
+// que el formulario del demo: sdr/calificacion.js).
+const TB_ESTADO = {
+  calificada: ['Calificada', 'good'], por_calificar: ['Por calificar', 'warn'], programada: ['Programada', ''],
+  no_califica: ['No calificó', 'bad'], no_asistio: ['No asistió', 'bad'], cancelada: ['Cancelada', 'bad'],
+};
+const TB_COMERCIAL = { cotizada: ['Cotizada', ''], ganada: ['Ganada', 'good'], perdida: ['Perdida', 'bad'] };
+const TB_FILTROS = [
+  ['todas', 'Todas', () => true],
+  ['pendientes', 'Por calificar', x => x.estado === 'por_calificar'],
+  ['programadas', 'Programadas', x => x.estado === 'programada'],
+  ['evaluadas', 'Calificadas', x => !!x.calificacion],
+  ['no', 'No se hicieron', x => x.estado === 'no_asistio' || x.estado === 'cancelada'],
+];
+const tbFechaHora = ms => ms == null ? '—' : new Date(ms).toLocaleString('es-CO', { timeZone: 'America/Bogota', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+const tbFecha = ms => ms == null ? '—' : new Date(ms).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: 'numeric', month: 'short' });
+const tbMes = (mes, largo) => new Date(mes + '-15T12:00:00-05:00').toLocaleDateString('es-CO', largo ? { month: 'long', year: 'numeric' } : { month: 'long' });
+const tbPlural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+const tbEtiqueta = n => n >= 4 ? 'Completa' : n >= 2 ? 'Parcial' : 'No califica';
+const tbEditadas = new Set();   // calificadas en esta visita: siguen a la vista aunque cambien de filtro
+let tbToast = null;
+function tbAvisar(texto, tipo = 'ok') {
+  if (tbToast) tbToast.remove();
+  const t = tbToast = document.createElement('div');
+  t.className = 'tb-toast ' + tipo; t.textContent = texto; document.body.appendChild(t);
+  setTimeout(() => t.remove(), tipo === 'ok' ? 4000 : 8000);
+}
+async function tbApi(ruta, opciones = {}) {
+  const r = await fetch('/sdr/api/' + ruta, {
+    method: opciones.method || 'GET',
+    headers: opciones.body ? { 'content-type': 'application/json' } : undefined,
+    body: opciones.body ? JSON.stringify(opciones.body) : undefined,
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
+  return j;
+}
+
+// Indicadores de cierre del mes (fecha de Bogotá) sobre todos los deals del Sandler.
+function tbCierre(deals, mes) {
+  const mesDe = v => v ? new Date(v).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }).slice(0, 7) : null;
+  const esSdr = d => d.canal_adquisicion === 'sdr_interno';
+  const abiertos = deals.filter(d => !d.outcome || d.outcome === 'open');
+  const cerradosMes = deals.filter(d => (d.outcome === 'won' || d.outcome === 'lost') && mesDe(d.closed_at) === mes);
+  const ganados = cerradosMes.filter(d => d.outcome === 'won').length;
+  const perdidas = cerradosMes.filter(d => d.outcome === 'lost');
+  const sinValor = perdidas.filter(d => /lead sin valor|no calific/i.test(d.outcome_reason || '')).length;
+  const nuevos = deals.filter(d => mesDe(d.created_at) === mes);
+  const hoy = Date.now();
+  return {
+    abiertos: abiertos.length, abiertosCotizados: abiertos.filter(d => d.quoted_at).length, abiertosSdr: abiertos.filter(esSdr).length,
+    nuevos: nuevos.length, nuevosSdr: nuevos.filter(esSdr).length,
+    cotizados: deals.filter(d => mesDe(d.quoted_at) === mes).length,
+    ganados, perdidos: perdidas.length,
+    tasa: cerradosMes.length ? Math.round((ganados / cerradosMes.length) * 100) : null,
+    sinValorPct: perdidas.length ? Math.round((sinValor / perdidas.length) * 100) : null,
+    estancados: abiertos.map(d => ({ ...d, dias: Math.floor((hoy - new Date(d.created_at).getTime()) / 86400000) })).filter(d => d.dias > 30).sort((a, b) => b.dias - a.dias),
+  };
+}
+
+function tbFila(x, criterios) {
+  const est = TB_ESTADO[x.estado] || [x.estado, ''];
+  const n = criterios.filter(c => x.items[c.clave]).length;
+  const bloqueo = x.puede_calificar ? '' : (x.estado === 'programada' ? 'Se califica después de la reunión (o márcala realizada)' : 'La reunión no se hizo');
+  const coincide = x.calificacion && x.calificacion.toLowerCase() === tbEtiqueta(n).toLowerCase();
+  const chulos = criterios.map(c => `<label class="chulo ${x.items[c.clave] ? 'si' : ''} ${x.fuente[c.clave] === 'sandler' ? 'de-sandler' : ''}" title="${esc(bloqueo || c.ayuda + (x.fuente[c.clave] === 'sandler' ? ' · viene del demo llenado en el Sandler' : ''))}">
+      <input type="checkbox" data-k="${c.clave}" ${x.items[c.clave] ? 'checked' : ''} ${x.puede_calificar ? '' : 'disabled'} /><span>${esc(c.label)}</span></label>`).join('');
+  const com = TB_COMERCIAL[x.comercial];
+  return `<div class="reunion-fila ${x.estado}" data-lead="${x.lead_id}">
+    <div class="rf-info">
+      <div><span class="pill ${est[1]}">${est[0]}</span>${com ? ` <span class="pill ${com[1]}" title="${esc(x.motivo || '')}">${com[0]}</span>` : ''}</div>
+      ${x.deal_id ? `<a href="#/deal/${x.deal_id}"><b>${esc(x.empresa || 'Sin empresa')}</b></a>` : `<b>${esc(x.empresa || 'Sin empresa')}</b>`}
+      <div class="muted">${esc([x.contacto, x.cargo].filter(Boolean).join(' · ') || '—')}</div>
+      <div class="muted chico">${x.reunion_ms ? '📅 ' + tbFechaHora(x.reunion_ms) : 'Sin fecha'} · agendó ${esc(x.agendo || '—')} el ${tbFecha(x.agendada_ms)}</div>
+    </div>
+    <div class="rf-cal">
+      <div class="chulos">${chulos}</div>
+      <div class="rf-res">${x.calificacion ? calCell(x.calificacion) + (coincide ? ` <span class="muted chico">${n}/4</span>` : '') : `<span class="pill">${x.puede_calificar ? 'Sin calificar' : '—'}</span>`}
+        ${x.manual ? `<span class="muted chico">marcado por ${esc(x.manual.por || '—')} ${tbFechaHora(x.manual.ms)}</span>` : x.formulario_sandler ? '<span class="muted chico">del demo en el Sandler</span>' : ''}</div>
+    </div>
+    <div class="rf-acc">
+      ${x.etapa === 'reunion_agendada' && x.estado !== 'cancelada' ? `<button class="btn secondary btn-sm" data-acc="reunion_realizada">✓ Realizada</button><button class="btn secondary btn-sm" data-acc="no_show">No asistió</button>` : ''}
+      ${x.deal_id ? `<a class="btn secondary btn-sm" href="#/deal/${x.deal_id}" title="Deal #${x.deal_id}: ficha de Angie, demo completo y cierre">Deal →</a>` : ''}
+      <a class="btn ghost btn-sm" href="/sdr/#/lead/${x.lead_id}" target="_blank" rel="noopener" title="Historial de toques de Angie">SDR ↗</a>
+      ${x.manual ? `<button class="btn ghost btn-sm" data-acc="limpiar" title="Quita los chulos marcados a mano">Quitar</button>` : ''}
+    </div>
+  </div>`;
+}
+
+async function renderTablero(params, { conservar = false } = {}) {
+  if (!conservar) { tbEditadas.clear(); h(`<h1>Tablero</h1><p class="muted">Cargando...</p>`); }
+  let r, deals;
+  try {
+    [r, deals] = await Promise.all([
+      tbApi('ejecutiva' + (params.get('mes') ? '?mes=' + encodeURIComponent(params.get('mes')) : '')),
+      fetch('/api/deals').then(x => x.json()).catch(() => []),
+    ]);
+  }
+  catch (e) { h(`<h1>Tablero</h1><div class="card" style="border-left:4px solid var(--bad)">No se pudo cargar: ${esc(e.message)}</div>`); return; }
+  const k = r.kpis, sdr = r.sdr || 'la SDR';
+  const filtro = TB_FILTROS.find(f => f[0] === params.get('f')) || (k.por_calificar ? TB_FILTROS[1] : TB_FILTROS[0]);
+  const lista = r.reuniones.filter(x => filtro[2](x) || tbEditadas.has(x.lead_id));
+  const enlace = extra => { const p = new URLSearchParams(); p.set('mes', r.mes); for (const [a, b] of Object.entries(extra)) p.set(a, b); return '#/tablero?' + p; };
+  const pct = v => (v == null ? '—' : v + '%');
+  const debil = k.evaluadas ? k.criterios.slice().sort((a, b) => a.si - b.si)[0] : null;
+  const ci = tbCierre(Array.isArray(deals) ? deals : [], r.mes);
+  const barra = c => { const p = c.de ? Math.round((c.si / c.de) * 100) : 0; return `<div class="crit"><span>${esc(c.label)}</span><div class="crit-b"><i style="width:${p}%"></i></div><b>${c.de ? `${c.si}/${c.de}` : '—'}</b></div>`; };
+  h(`
+    <div class="split">
+      <div><h1>Tablero de ${esc(r.ejecutiva || 'la ejecutiva')}</h1>
+        <p class="muted" style="margin:0">${esc(tbMes(r.mes, true))} · <a href="${enlace({ mes: r.anterior })}">← mes anterior</a>${r.posterior <= r.hoy.slice(0, 7) ? ` · <a href="${enlace({ mes: r.posterior })}">mes siguiente →</a>` : ''}</p></div>
+      <div style="display:flex;gap:8px"><a class="btn btn-sm" href="#/">+ Nuevo deal</a><a class="btn ghost btn-sm" href="#/deals">Historial de deals</a></div>
+    </div>
+    ${!r.sandler ? '<div class="card" style="border-left:4px solid var(--bad)">No encuentro la tabla de deals: los chulos no se pueden guardar.</div>' : ''}
+    <h2>Cierre de ${esc(tbMes(r.mes))}</h2>
+    <div class="tb-kpis">
+      <div class="card compact"><div class="muted">Deals abiertos</div><div class="num">${ci.abiertos}</div><div class="muted chico">${ci.abiertosCotizados} ya cotizados · ${ci.abiertosSdr} traídos por ${esc(sdr)}</div></div>
+      <div class="card compact"><div class="muted">Nuevos en el mes</div><div class="num">${ci.nuevos}</div><div class="muted chico">${ci.nuevosSdr} de ${esc(sdr)} · ${ci.nuevos - ci.nuevosSdr} de otros canales</div></div>
+      <div class="card compact"><div class="muted">Cotizados en el mes</div><div class="num">${ci.cotizados}</div><div class="muted chico">solo se cotiza con calificación Completa</div></div>
+      <div class="card compact"><div class="muted">Ganados</div><div class="num" style="color:var(--peaku-green)">${ci.ganados}</div><div class="muted chico">${ci.perdidos} perdidos en el mes</div></div>
+      <div class="card compact"><div class="muted">Tasa de cierre</div><div class="num">${pct(ci.tasa)}</div><div class="muted chico">ganados / cerrados del mes</div></div>
+      <div class="card compact ${ci.sinValorPct != null && ci.sinValorPct >= 20 ? 'alerta' : ''}"><div class="muted">"Lead sin valor"</div><div class="num">${pct(ci.sinValorPct)}</div><div class="muted chico">de las perdidas del mes · meta &lt;20%</div></div>
+    </div>
+    ${ci.estancados.length ? `<div class="card"><h3 style="margin-top:0">Abiertos sin cerrar hace más de 30 días</h3>
+      <table><tbody>${ci.estancados.slice(0, 8).map(d => `<tr class="clickable" onclick="location.hash='#/deal/${d.id}'"><td><b>${esc(d.company || '—')}</b></td><td>${calCell(d.calificacion_sandler)}</td><td class="muted">${d.quoted_at ? 'cotizado ' + tbFecha(new Date(d.quoted_at).getTime()) : 'sin cotizar'}</td><td class="muted" style="text-align:right">${d.dias} días</td></tr>`).join('')}</tbody></table>
+      ${ci.estancados.length > 8 ? `<p class="muted chico" style="margin:8px 0 0">y ${ci.estancados.length - 8} más en el <a href="#/deals">historial</a>. "Un no limpio vale más que un quizás eterno."</p>` : ''}</div>` : ''}
+
+    <h2>Reuniones que trae ${esc(sdr)}</h2>
+    ${k.por_calificar ? `<div class="tb-aviso">⏳ <b>${tbPlural(k.por_calificar, 'reunión ya pasó', 'reuniones ya pasaron')} sin calificar</b>${k.dias_pendiente_mas_vieja ? ` (la más vieja hace ${tbPlural(k.dias_pendiente_mas_vieja, 'día', 'días')})` : ''}. Marca los chulos de lo que quedó claro en la reunión: se guarda al hacer clic.</div>` : ''}
+    ${r.pendientes_anteriores.length ? `<div class="tb-aviso suave">También quedan sin calificar: ${r.pendientes_anteriores.map(p => `<a href="${enlace({ mes: p.mes, f: 'pendientes' })}">${p.n} de ${esc(tbMes(p.mes))}</a>`).join(' · ')}</div>` : ''}
+    <div class="tb-kpis">
+      <div class="card compact"><div class="muted">Reuniones agendadas</div><div class="num">${k.reuniones}</div><div class="muted chico">${k.programadas} programadas por venir</div></div>
+      <div class="card compact ${k.por_calificar ? 'alerta' : ''}"><div class="muted">Por calificar</div><div class="num">${k.por_calificar}</div><div class="muted chico">ya pasaron sin calificación</div></div>
+      <div class="card compact"><div class="muted">Asistencia</div><div class="num">${pct(k.asistencia_pct)}</div><div class="muted chico">${k.realizadas} realizadas · ${k.no_asistio} no asistieron${k.canceladas ? ` · ${k.canceladas} canceladas` : ''}</div></div>
+      <div class="card compact"><div class="muted">Calificación completa</div><div class="num">${pct(k.completa_pct)}</div><div class="muted chico">${k.completas} Completa · ${k.parciales} Parcial · ${k.no_califica} No califica</div></div>
+      <div class="card compact"><div class="muted">Avanzaron a propuesta</div><div class="num">${k.cotizadas + k.ganadas + k.perdidas}</div><div class="muted chico">${k.cotizadas} cotizadas · ${k.ganadas} ganadas · ${k.perdidas} perdidas</div></div>
+      <a class="card compact" href="/sdr/#/comision?mes=${r.mes}" target="_blank" rel="noopener"><div class="muted">Comisión de ${esc(sdr)}</div><div class="num">${esc(r.comision.moneda)} ${Number(r.comision.total).toLocaleString('es-CO')}</div><div class="muted chico">${tbPlural(r.comision.calificadas, 'reunión', 'reuniones')} ${esc(r.comision.califica_con.join(' o '))}</div></a>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Qué se logró en las reuniones calificadas</h3>
+      ${k.evaluadas ? `<div class="crits">${k.criterios.map(barra).join('')}</div>
+        ${debil && debil.si < debil.de ? `<p class="muted chico" style="margin:10px 0 0">Lo que más falta: <b>${esc(debil.label)}</b> (${debil.de - debil.si} de ${debil.de}). Es lo que ${esc(sdr)} tiene que dejar más claro antes de agendar.</p>` : ''}`
+        : '<p class="muted" style="margin:0">Todavía no hay reuniones calificadas este mes.</p>'}
+    </div>
+    <div class="tb-filtros">${TB_FILTROS.map(f => `<a class="${f === filtro ? 'active' : ''}" href="${enlace({ f: f[0] })}">${f[1]} <span>${r.reuniones.filter(f[2]).length}</span></a>`).join('')}</div>
+    <div class="reuniones-lista">
+      ${lista.length ? lista.map(x => tbFila(x, r.criterios)).join('') : `<p class="muted" style="text-align:center;padding:30px">${filtro[0] === 'pendientes' ? 'Nada por calificar. ✔' : 'No hay reuniones aquí.'}</p>`}
+    </div>
+    <p class="muted chico" style="margin-top:14px">Criterios Sandler: <b>Dolor</b> (el cliente cuantificó el problema, contó la historia o el impacto), <b>Presupuesto</b>, <b>Decisión</b> (quién decide y cómo) y <b>Fecha límite</b> de decisión. 4 = Completa (cuenta para la comisión de ${esc(sdr)}) · 2-3 = Parcial · 0-1 = No califica. El chulo con borde punteado viene del demo llenado en el asistente; lo marcado aquí manda. Con la reunión en "Realizada" y los 4 chulos, el lead queda calificado.</p>`);
+
+  const recargar = async () => { const y = window.scrollY; await renderTablero(params, { conservar: true }); window.scrollTo(0, y); };
+  el.querySelectorAll('.reunion-fila').forEach($f => {
+    const id = $f.dataset.lead;
+    const x = r.reuniones.find(z => String(z.lead_id) === id);
+    $f.querySelectorAll('.chulos input').forEach($c => $c.addEventListener('change', async () => {
+      tbEditadas.add(x.lead_id);
+      const items = {};
+      $f.querySelectorAll('.chulos input').forEach(i => { items[i.dataset.k] = i.checked; i.disabled = true; });
+      try {
+        const res = await tbApi(`leads/${id}/calificacion`, { method: 'POST', body: { items, usuario: r.ejecutiva } });
+        tbAvisar(`${x.empresa || 'Reunión'}: ${res.calificacion || 'sin calificar'}${res.avisos && res.avisos.length ? ' · ' + res.avisos.join(' ') : ''}`);
+      } catch (e) { tbAvisar(e.message, 'error'); }
+      await recargar();
+    }));
+    $f.querySelectorAll('[data-acc]').forEach($b => $b.addEventListener('click', async () => {
+      const acc = $b.dataset.acc;
+      tbEditadas.add(x.lead_id);
+      if (acc === 'no_show' && !confirm(`¿${x.empresa || 'El prospecto'} no se presentó? Vuelve a ${sdr} para recuperarla.`)) return;
+      if (acc === 'limpiar' && !confirm('¿Quitar los chulos marcados a mano? La reunión vuelve a "por calificar" si no hay demo llenado.')) return;
+      $b.disabled = true;
+      try {
+        if (acc === 'limpiar') await tbApi(`leads/${id}/calificacion`, { method: 'POST', body: { limpiar: true, usuario: r.ejecutiva } });
+        else await tbApi(`leads/${id}/ejecutiva`, { method: 'POST', body: { accion: acc, usuario: r.ejecutiva } });
+        tbAvisar(acc === 'reunion_realizada' ? 'Reunión realizada: ya puedes marcar los chulos.' : acc === 'no_show' ? 'Marcada como no asistió.' : 'Chulos quitados.');
+        await recargar();
+      } catch (e) { tbAvisar(e.message, 'error'); $b.disabled = false; }
+    }));
+  });
+}
+
 router();

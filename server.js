@@ -245,8 +245,8 @@ app.get('/api/deals', async (req, res) => {
                score_fundamentals, score_nice_to_have,
                linea_negocio, calificacion_sandler,
                fecha_limite_decision, quoted_at, outcome, outcome_reason, closed_at,
-               created_at
-        FROM deals ORDER BY created_at DESC LIMIT 200`);
+               canal_adquisicion, freelancer_nombre, created_at
+        FROM deals ORDER BY created_at DESC LIMIT 500`);
       return res.json(r.rows);
     }
     return res.json(memory.deals.slice().reverse().map(d => ({

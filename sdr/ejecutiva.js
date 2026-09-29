@@ -119,6 +119,9 @@ async function tablero(db, config, { mes, ahora = new Date() } = {}) {
     comision: { calificadas: res.conteo.calificadas, total: res.comision.total, moneda: res.reglas.moneda, califica_con: res.reglas.califica_con, potencial: res.potencial.total },
     criterios: CAL.CRITERIOS,
     sandler: await hayDeals(db),
+    // Nombres para la pantalla y para dejar registrado quién califica.
+    ejecutiva: ((config.USUARIOS || []).find(u => u.rol === 'ejecutiva') || {}).nombre || null,
+    sdr: ((config.USUARIOS || []).find(u => u.rol === 'sdr') || {}).nombre || null,
   };
 }
 

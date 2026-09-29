@@ -319,24 +319,25 @@ Los contactos que ya estaban en la app también quedan en la lista, sin duplicar
   archivo, luego en curso) y "▶ Trabajar esta lista": desde ahí el botón "Siguiente de la lista" de la
   ficha sigue dentro de esa lista hasta "salir". También se cambia la prioridad o se cierra la lista.
 
-## Tablero de la ejecutiva (Reuniones)
+## Tablero de la ejecutiva (en el Sandler Coach)
 
-`#/reuniones` (pestaña **Reuniones**; es la pantalla de entrada cuando el usuario elegido es de rol
-`ejecutiva`). Las reuniones que agendó la SDR en el mes (por fecha de la reunión, igual que la comisión):
+La calificación de las reuniones es de la ejecutiva y vive en su página, el Sandler Coach: pestaña
+**Tablero** (`/#/tablero`, es la página de entrada del Sandler; `#/` sigue siendo el asistente de un deal
+nuevo). La app SDR ya no tiene botones de "realizada / no asistió / calificado" en la ficha: muestra el
+enlace al tablero. `/sdr/#/reuniones` redirige allá.
 
-- **Indicadores**: agendadas, por calificar (ya pasaron sin calificación, con la más vieja en días),
-  asistencia (realizadas vs no asistieron), % de calificación Completa, las que avanzaron a propuesta
-  (cotizadas / ganadas / perdidas en el Sandler) y la comisión de la SDR.
-- **Qué se logró**: cuántas reuniones calificadas tienen cada criterio y cuál falta más (lo que la SDR
-  debe dejar más claro antes de agendar).
-- **Una fila por reunión** con 4 chulos: Dolor, Presupuesto, Decisión, Fecha límite. Se guarda al hacer
-  clic en `public.deals.data.calificacionManual` y se recalcula `calificacion_sandler` (4 = Completa,
-  2-3 = Parcial, 0-1 = No califica): la comisión y el historial del Sandler lo ven de una vez. Si la
-  reunión seguía "agendada", queda realizada; con Completa el lead pasa a "calificado". "Quitar" borra
-  los chulos. Los botones Realizada / No asistió están en la misma fila.
-- La regla vive en `calificacion.js` y la usa también `server.js`. Lo marcado a mano manda sobre el
-  formulario del demo; cuando luego se completa el demo en el Sandler, el criterio que el formulario sí
-  trae reemplaza la marca manual (un chulo con borde punteado viene del demo).
+- **Cierre del mes** (sobre todos los deals del Sandler): abiertos, nuevos (de la SDR y de otros canales),
+  cotizados, ganados, tasa de cierre, "lead sin valor" y los abiertos de más de 30 días.
+- **Reuniones que trae la SDR** (por fecha de la reunión, igual que la comisión): por calificar, asistencia,
+  % Completa, las que avanzaron a propuesta y la comisión de la SDR; qué criterio falta más.
+- **Una fila por reunión** con 4 chulos: Dolor, Presupuesto, Decisión, Fecha límite, y los botones
+  Realizada / No asistió. Cada clic se guarda en `public.deals.data.calificacionManual` y recalcula
+  `calificacion_sandler` (4 = Completa, 2-3 = Parcial, 0-1 = No califica). Si la reunión seguía
+  "agendada", queda realizada; con Completa el lead pasa a "calificado". "Quitar" borra los chulos.
+- La página lee `/sdr/api/ejecutiva` y guarda con `/sdr/api/leads/:id/calificacion` (módulo `ejecutiva.js`).
+  La regla vive en `calificacion.js` y la usa también `server.js`: lo marcado a mano manda sobre el
+  formulario del demo; al completar el demo, el criterio que el formulario sí trae reemplaza la marca
+  manual. El detalle del deal muestra la calificación y sus 4 criterios.
 
 ## Pasar al siguiente lead a mano
 
