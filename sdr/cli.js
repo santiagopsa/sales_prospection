@@ -6,6 +6,7 @@
 //   node sdr/cli.js cola                                        orden de la cola de hoy con el desglose del puntaje
 //   node sdr/cli.js proyeccion                                  plan de la silla vs real, mes a mes (reglas PROYECCION)
 //   node sdr/cli.js embudo                                      deals por etapa del embudo de la ejecutiva (reglas EMBUDO)
+//   node sdr/cli.js invitados <lead_id>                         reunión del lead: formulario de Calendly, invitados y si aceptaron (Google)
 //   node sdr/cli.js importar archivo.csv|.xlsx [--confirmar]   carga desde la terminal (sin --confirmar, simula)
 //   node sdr/cli.js lista-negra archivo.csv|.xlsx [--confirmar] carga la base de lista negra (empresa, teléfono, correo, dominio, motivo)
 //   node sdr/cli.js semana [--fecha 2026-09-22] [--usuario Angie]  resumen semanal (actividad, racha, tasas si MOSTRAR_RATIOS)
@@ -128,6 +129,23 @@ async function main() {
       console.log(`\nProyección de la silla desde ${r.inicio} · nivel ${r.supuestos.nivel} calificadas/mes · ${r.supuestos.llamadas_mes} llamadas/mes del modelo\n`);
       console.log(`  ${pad('mes', 9)}${pad('plan calif', 11)}${pad('real', 6)}${pad('ritmo', 7)}${pad('agend', 7)}${pad('llamadas', 10)}${pad('clientes', 10)}${pad('comisión', 10)}costo`);
       for (const m of r.meses) console.log(`  ${pad(m.mes, 9)}${pad(m.plan ? m.plan.calificadas.toFixed(1) : '—', 11)}${pad(m.real.calificadas, 6)}${pad(m.ritmo ? m.ritmo.calificadas : '', 7)}${pad(m.real.agendadas, 7)}${pad(`${m.real.llamadas}/${m.plan ? m.plan.llamadas : '—'}`, 10)}${pad(`${m.real.ganados}/${m.plan ? m.plan.clientes.toFixed(1) : '—'}`, 10)}${pad(`${m.real.comision}/${m.plan ? m.plan.comision : '—'}`, 10)}${m.plan && m.plan.costo != null ? m.plan.costo : '—'}`);
+    } else if (cmd === 'invitados') {
+      const CAL = require('./calendly');
+      const leadId = Number(args._[1]);
+      if (!leadId) throw new Error('Falta el lead: node sdr/cli.js invitados 123');
+      const r = await CAL.refrescarInvitados(db, config, process.env, { leadId });
+      const m = await CAL.reunionDe(db, leadId);
+      if (!m) { console.log('El lead no tiene reserva de Calendly registrada.'); }
+      else {
+        console.log(`\nReunión ${m.inicio ? new Date(m.inicio).toLocaleString('es-CO', { timeZone: 'America/Bogota' }) : 'sin hora'} · reservó ${m.reservo.nombre || ''} <${m.reservo.email || ''}>`);
+        for (const x of m.respuestas) console.log(`  ${x.pregunta}: ${x.respuesta}`);
+        if (m.acompanantes.length) console.log(`  Acompañantes: ${m.acompanantes.join(', ')}`);
+        console.log(`  Invitados (${m.invitados_fuente || 'sin mirar'}${m.calendario ? ', calendario ' + m.calendario : ''}):`);
+        for (const i of m.invitados || []) console.log(`    ${pad(i.estado, 14)} ${i.email}${i.nombre ? ' · ' + i.nombre : ''}${i.organizador ? ' (organiza)' : ''}`);
+        if (m.invitados_motivo) console.log(`    ${m.invitados_motivo}`);
+      }
+      if (r.omitido) console.log(r.omitido);
+      if (r.errores && r.errores.length) console.log('Errores:', r.errores.join('\n'));
     } else if (cmd === 'embudo') {
       const r = await require('./embudo').tablero(db, config);
       if (r.sin_tabla) console.log('No está la tabla public.deals del Sandler.');

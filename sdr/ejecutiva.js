@@ -118,7 +118,15 @@ async function tablero(db, config, { mes, ahora = new Date() } = {}) {
     for (const l of r.rows) leads[l.id] = l;
   }
   const deals = await dealsPorId(db, res.reuniones.map(x => x.deal_id).filter(Boolean));
-  const reuniones = res.reuniones.map(x => fila(x, leads[x.lead_id], x.deal_id ? deals[x.deal_id] : null, ahora));
+  // Invitados de la reserva de Calendly y si aceptaron (lo trae la sincronización desde Google Calendar).
+  const invitados = {};
+  if (ids.length) {
+    const r = await db.query(
+      `SELECT DISTINCT ON (lead_id) lead_id, invitados, respuestas FROM ${T.calendly}
+       WHERE lead_id IN (SELECT jsonb_array_elements_text($1::jsonb)::int) AND estado = 'registrado' ORDER BY lead_id, created_at DESC`, [JSON.stringify(ids)]);
+    for (const x of r.rows) invitados[x.lead_id] = { lista: x.invitados ? x.invitados.lista || [] : null, fuente: x.invitados ? x.invitados.fuente : null, respuestas: x.respuestas ? x.respuestas.respuestas || [] : [] };
+  }
+  const reuniones = res.reuniones.map(x => ({ ...fila(x, leads[x.lead_id], x.deal_id ? deals[x.deal_id] : null, ahora), invitados: invitados[x.lead_id] || null }));
 
   const n = f => reuniones.filter(f).length;
   const evaluadas = reuniones.filter(x => x.calificacion);

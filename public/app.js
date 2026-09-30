@@ -2035,6 +2035,22 @@ function tbCierre(deals, mes) {
   };
 }
 
+// Invitados a la reunión y si aceptaron (Google Calendar, vía la sincronización de Calendly del SDR),
+// más lo que respondieron en el formulario de Calendly. Solo para reuniones que aún no pasan.
+const TB_RSVP = { acepto: ['aceptó', 'ok'], rechazo: ['rechazó', 'bad'], tal_vez: ['tal vez', 'warn'], sin_responder: ['sin responder', ''] };
+function tbInvitados(x) {
+  const inv = x.invitados;
+  if (!inv) return '';
+  const partes = [];
+  if (inv.lista) {
+    const gente = inv.lista.filter(i => !i.yo && !i.organizador);
+    if (gente.length) partes.push(gente.map(i => { const [lab, cls] = TB_RSVP[i.estado] || TB_RSVP.sin_responder; return `<span class="rsvp ${cls}" title="${esc(i.email)}">${esc(i.nombre && i.nombre !== i.email ? i.nombre : i.email.split('@')[0])} · ${lab}</span>`; }).join(' '));
+    else if (inv.fuente === 'google') partes.push('<span class="muted">sin invitados en el evento</span>');
+  }
+  if (inv.respuestas && inv.respuestas.length) partes.push(inv.respuestas.map(r => `<span class="muted" title="${esc(r.pregunta)}">${esc(r.pregunta.length > 28 ? r.pregunta.slice(0, 26) + '…' : r.pregunta)}: <b>${esc(r.respuesta)}</b></span>`).join(' · '));
+  return partes.length ? `<div class="chico rf-inv">${partes.join(' · ')}</div>` : '';
+}
+
 function tbFila(x, criterios) {
   const est = TB_ESTADO[x.estado] || [x.estado, ''];
   const n = criterios.filter(c => x.items[c.clave]).length;
@@ -2049,6 +2065,7 @@ function tbFila(x, criterios) {
       ${x.deal_id ? `<a href="#/deal/${x.deal_id}"><b>${esc(x.empresa || 'Sin empresa')}</b></a>` : `<b>${esc(x.empresa || 'Sin empresa')}</b>`}
       <div class="muted">${esc([x.contacto, x.cargo].filter(Boolean).join(' · ') || '—')}</div>
       <div class="muted chico">${x.reunion_ms ? '📅 ' + tbFechaHora(x.reunion_ms) : 'Sin fecha'} · agendó ${esc(x.agendo || '—')} el ${tbFecha(x.agendada_ms)}</div>
+      ${tbInvitados(x)}
     </div>
     <div class="rf-cal">
       <div class="chulos">${chulos}</div>

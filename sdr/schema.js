@@ -305,6 +305,13 @@ const MIGRACIONES = [
    )`,
   `CREATE INDEX IF NOT EXISTS sdr_lista_leads_lead ON ${T.lista_leads}(lead_id)`,
   `INSERT INTO ${T.lista_leads} (import_id, lead_id) SELECT import_id, id FROM ${T.leads} WHERE import_id IS NOT NULL ON CONFLICT DO NOTHING`,
+
+  // ---- M9 · Invitados de la reunión --------------------------------------------------------
+  // respuestas: lo que Calendly sabe de la reserva (formulario, acompañantes, link de la reunión).
+  // invitados: quién está invitado al evento de Google Calendar y si aceptó (fuente, lista, cuándo se miró).
+  `ALTER TABLE ${T.calendly} ADD COLUMN IF NOT EXISTS respuestas JSONB`,
+  `ALTER TABLE ${T.calendly} ADD COLUMN IF NOT EXISTS invitados JSONB`,
+  `ALTER TABLE ${T.calendly} ADD COLUMN IF NOT EXISTS invitados_at TIMESTAMPTZ`,
 ];
 
 async function initSchema(db, log = console) {

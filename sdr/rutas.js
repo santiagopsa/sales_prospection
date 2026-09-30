@@ -37,7 +37,7 @@ function rutas({ db, config, anthropic = null }) {
       tiposCompromiso: Object.entries(config.TIPOS_COMPROMISO || {}).map(([id, t]) => ({ id, label: t.label, canal: t.canal, descripcion: t.descripcion })),
       calendarioActivo: cal.activo(process.env),
       listas: { origenes: (config.LISTAS || {}).origenes || [], altaPorDefecto: (config.LISTAS || {}).alta_por_defecto || [], diasCaliente: (config.LISTAS || {}).dias_caliente || 14 },
-      calendly: require('./calendly').activo(config) ? { url: config.CALENDLY.url, origen: new URL(config.CALENDLY.url).origin, ejecutiva: config.CALENDLY.ejecutiva, permitirManual: !!config.CALENDLY.permitir_manual, horaDeCalendly: !!require('./calendly').token(process.env), mensaje: config.CALENDLY.mensaje || '' } : null,
+      calendly: require('./calendly').activo(config) ? { url: config.CALENDLY.url, origen: new URL(config.CALENDLY.url).origin, ejecutiva: config.CALENDLY.ejecutiva, permitirManual: !!config.CALENDLY.permitir_manual, horaDeCalendly: !!require('./calendly').token(process.env), mensaje: config.CALENDLY.mensaje || '', sincronizar_min: config.CALENDLY.sincronizar_min || 10 } : null,
     })],
     // Toque de Angie: llamada (con resultado obligatorio) o WhatsApp / correo / LinkedIn de un clic.
     ['post', '/api/leads/:id/toques', async ({ params, body }) => {
@@ -175,7 +175,16 @@ function rutas({ db, config, anthropic = null }) {
       sinDb();
       const l = await L.detalleLead(db, params.id);
       try { l.misma_empresa = await require('./fusion').mismaEmpresa(db, l); } catch (e) { l.misma_empresa = []; }
+      // La reserva de Calendly vigente: formulario, invitados y quién aceptó (de Google Calendar).
+      try { l.reunion = await require('./calendly').reunionDe(db, l.id); } catch (e) { l.reunion = null; }
       return l;
+    }],
+    // Vuelve a mirar en Google Calendar quién está invitado a la reunión del lead y si aceptó.
+    ['post', '/api/leads/:id/reunion/invitados', async ({ params }) => {
+      sinDb();
+      const CAL = require('./calendly');
+      const r = await CAL.refrescarInvitados(db, config, process.env, { leadId: Number(params.id) });
+      return { ...r, reunion: await CAL.reunionDe(db, params.id) };
     }],
     // Fusionar: el lead de la URL queda y absorbe a `origen_id` (que se borra).
     ['post', '/api/leads/:id/fusionar', async ({ params, body }) => {

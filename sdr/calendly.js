@@ -55,30 +55,109 @@ async function api(env, url, { fetchFn = fetch } = {}) {
 async function resolver(env, { event_uri, invitee_uri }, opts = {}) {
   if (!/^https:\/\/api\.calendly\.com\/scheduled_events\//.test(event_uri || '')) throw error(400, 'URI de Calendly inválida');
   const ev = (await api(env, event_uri, opts)).resource || {};
-  let inv = null;
-  if (invitee_uri) inv = (await api(env, invitee_uri, opts)).resource || null;
-  else {
-    const l = await api(env, `${event_uri}/invitees?count=5`, opts);
-    inv = (l.collection || []).find(i => i.status === 'active') || (l.collection || [])[0] || null;
-  }
+  // Todos los invitados de la reserva (normalmente uno), con lo que respondieron en el formulario
+  // ("Vacantes activas: 3", teléfono…) y los acompañantes que agregó (event_guests).
+  const l = await api(env, `${event_uri}/invitees?count=20`, opts);
+  const todos = l.collection || [];
+  let inv = invitee_uri ? todos.find(i => i.uri === invitee_uri) : null;
+  if (!inv && invitee_uri) inv = (await api(env, invitee_uri, opts)).resource || null;
+  if (!inv) inv = todos.find(i => i.status === 'active') || todos[0] || null;
+  const invitados = todos.map(i => ({
+    email: i.email || null, nombre: i.name || null, estado: i.status === 'canceled' ? 'cancelado' : 'activo',
+    telefono: i.text_reminder_number || null, no_show: !!i.no_show,
+    respuestas: (i.questions_and_answers || []).filter(x => x.answer).map(x => ({ pregunta: x.question, respuesta: x.answer })),
+  }));
+  const acompanantes = (ev.event_guests || []).map(g => g.email).filter(Boolean);
   return {
     uri: event_uri, invitee_uri: inv ? inv.uri : invitee_uri || null,
     inicio: ev.start_time || null, fin: ev.end_time || null, estado: ev.status || null, nombre_evento: ev.name || null,
     enlace_reunion: ev.location && (ev.location.join_url || ev.location.location) || null,
     email: inv ? inv.email : null, nombre: inv ? inv.name : null, tracking: inv ? inv.tracking || null : null,
     motivo_cancelacion: ev.cancellation ? ev.cancellation.reason || null : null,
+    invitados, acompanantes,
+    respuestas: inv ? (inv.questions_and_answers || []).filter(x => x.answer).map(x => ({ pregunta: x.question, respuesta: x.answer })) : [],
   };
 }
 
+// Lo que Calendly sabe de la reserva aparte de la hora: respuestas del formulario y acompañantes.
+function respuestasDe(e) {
+  if (!e || (!e.respuestas && !e.acompanantes && !e.invitados)) return null;
+  return { respuestas: e.respuestas || [], acompanantes: e.acompanantes || [], invitados: e.invitados || [], enlace_reunion: e.enlace_reunion || null, nombre_evento: e.nombre_evento || null };
+}
+
 async function registrarEvento(db, e) {
+  const resp = respuestasDe(e);
   await db.query(
-    `INSERT INTO ${T.calendly} (uri, invitee_uri, lead_id, inicio, email, nombre, tracking, origen, estado)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO ${T.calendly} (uri, invitee_uri, lead_id, inicio, email, nombre, tracking, origen, estado, respuestas)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      ON CONFLICT (uri) DO UPDATE SET invitee_uri = COALESCE(EXCLUDED.invitee_uri, ${T.calendly}.invitee_uri),
        lead_id = COALESCE(EXCLUDED.lead_id, ${T.calendly}.lead_id), inicio = COALESCE(EXCLUDED.inicio, ${T.calendly}.inicio),
+       respuestas = COALESCE(EXCLUDED.respuestas, ${T.calendly}.respuestas),
        estado = EXCLUDED.estado, updated_at = NOW()`,
     [e.uri, e.invitee_uri || null, e.lead_id || null, e.inicio || null, e.email || null, e.nombre || null,
-      e.tracking ? JSON.stringify(e.tracking) : null, e.origen, e.estado || 'registrado']);
+      e.tracking ? JSON.stringify(e.tracking) : null, e.origen, e.estado || 'registrado', resp ? JSON.stringify(resp) : null]);
+}
+
+// Quién está invitado a la reunión y si aceptó. Calendly no lo sabe (solo sabe quién reservó); lo
+// sabe Google Calendar, donde Calendly creó el evento en el calendario de la ejecutiva. Se busca ese
+// evento por la hora y el correo del invitado (CALENDLY.calendarios_invitados dice en qué
+// calendarios buscar, en orden) y se guarda la lista con la respuesta de cada uno.
+async function refrescarInvitados(db, config, env, { uri, leadId, ahora = new Date(), fetchFn, forzar = false } = {}) {
+  const cal = require('./calendario');
+  if (!cal.activo(env)) return { omitido: 'sin llave de Google Calendar' };
+  const opts = fetchFn ? { fetchFn } : {};
+  const calendarios = (config.CALENDLY || {}).calendarios_invitados || [config.CALENDLY && config.CALENDLY.ejecutiva].filter(Boolean);
+  const cond = uri ? 'uri = $1' : leadId ? 'lead_id = $1' : 'inicio > $1';
+  const arg = uri || leadId || new Date(ahora.getTime() - 86400000).toISOString();
+  // Sin uri ni lead: las reuniones vigentes (desde ayer) que no se han mirado en la última hora.
+  const filas = (await db.query(
+    `SELECT uri, lead_id, inicio, email, nombre, respuestas, invitados, invitados_at FROM ${T.calendly}
+     WHERE ${cond} AND estado <> 'cancelado' AND inicio IS NOT NULL ${uri || leadId || forzar ? '' : 'AND (invitados_at IS NULL OR invitados_at < NOW() - INTERVAL \'55 minutes\')'}
+     ORDER BY inicio DESC LIMIT ${uri || leadId ? 1 : 40}`, [arg])).rows;
+  const res = { revisadas: 0, encontradas: 0, errores: [] };
+  for (const f of filas) {
+    res.revisadas++;
+    // Reservas de antes de guardar respuestas: se completan desde Calendly una vez.
+    if (!f.respuestas && token(env)) {
+      try {
+        const e = await resolver(env, { event_uri: f.uri }, opts);
+        f.respuestas = respuestasDe(e);
+        await db.query(`UPDATE ${T.calendly} SET respuestas = $2 WHERE uri = $1`, [f.uri, JSON.stringify(f.respuestas)]);
+      } catch (e) { res.errores.push(`${f.uri}: ${e.message}`); }
+    }
+    const r = f.respuestas || {};
+    const emails = [...(r.acompanantes || []), ...((r.invitados || []).map(i => i.email))];
+    let hallado = null, error = null;
+    for (const quien of calendarios) {
+      try {
+        hallado = await cal.buscarEvento(env, config, quien, { inicio: f.inicio, email: f.email, nombre: f.nombre, emails }, opts);
+        if (hallado) break;
+      } catch (e) { error = e.message; }
+    }
+    if (hallado) res.encontradas++; else if (error) res.errores.push(`${f.uri}: ${error}`);
+    const inv = hallado
+      ? { fuente: 'google', calendario: hallado.calendario, evento_id: hallado.id, enlace: hallado.htmlLink, titulo: hallado.titulo, enlace_reunion: hallado.enlace_reunion, organizador: hallado.organizador, lista: hallado.invitados, at: ahora.toISOString() }
+      : { fuente: 'ninguna', motivo: error || 'No encontré el evento en Google Calendar', lista: [], at: ahora.toISOString() };
+    await db.query(`UPDATE ${T.calendly} SET invitados = $2, invitados_at = $3, updated_at = NOW() WHERE uri = $1`, [f.uri, JSON.stringify(inv), ahora.toISOString()]);
+  }
+  return res;
+}
+
+// La reunión vigente de un lead con lo que se sabe de ella: hora, respuestas del formulario de
+// Calendly, invitados y si aceptaron (de Google). null si el lead no tiene reserva registrada.
+async function reunionDe(db, leadId) {
+  const f = (await db.query(
+    `SELECT uri, inicio, email, nombre, estado, respuestas, invitados, invitados_at, ${'(EXTRACT(EPOCH FROM inicio) * 1000)::float8'} AS inicio_ms
+     FROM ${T.calendly} WHERE lead_id = $1 AND estado = 'registrado' ORDER BY created_at DESC LIMIT 1`, [Number(leadId)])).rows[0];
+  if (!f) return null;
+  const r = f.respuestas || {};
+  const inv = f.invitados || null;
+  return {
+    uri: f.uri, inicio: f.inicio, inicio_ms: f.inicio_ms, reservo: { email: f.email, nombre: f.nombre },
+    respuestas: r.respuestas || [], acompanantes: r.acompanantes || [], enlace_reunion: (inv && inv.enlace_reunion) || r.enlace_reunion || null,
+    invitados: inv ? inv.lista : null, invitados_fuente: inv ? inv.fuente : null, invitados_motivo: inv ? inv.motivo || null : null,
+    invitados_at: f.invitados_at, evento: inv && inv.enlace ? inv.enlace : null, calendario: inv ? inv.calendario || null : null,
+  };
 }
 
 // Antes de registrar "Reunión agendada" desde la app: si vino de Calendly y hay token, la hora es la
@@ -188,6 +267,9 @@ async function sincronizar(db, config, env, { ahora = new Date(), fetchFn, log =
       res.canceladas++;
     } catch (err) { res.errores.push(`${ev.uri}: ${err.message}`); log.error('[sdr/calendly]', err.message); }
   }
+  // Invitados y respuestas de las reuniones vigentes (mejor esfuerzo: si Google falla, la sincronización sigue valiendo).
+  try { res.invitados = await refrescarInvitados(db, config, env, { ahora, fetchFn }); }
+  catch (err) { res.invitados = { error: err.message }; log.error('[sdr/calendly] invitados:', err.message); }
   return res;
 }
 
@@ -214,4 +296,4 @@ async function estado(db, config, env) {
   return { activo: activo(config), token: !!token(env), url: activo(config) ? config.CALENDLY.url : null, conteo: r.rows, sin_lead: sinLead.rows };
 }
 
-module.exports = { activo, token, enlace, leadDeTracking, resolver, prepararDetalle, registrarEvento, sincronizar, estado };
+module.exports = { activo, token, enlace, leadDeTracking, resolver, prepararDetalle, registrarEvento, sincronizar, estado, refrescarInvitados, reunionDe, respuestasDe };

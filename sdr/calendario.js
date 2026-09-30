@@ -136,6 +136,49 @@ async function borrarEvento(env, config, usuario, eventId, opts = {}) {
   return { ok: true };
 }
 
+// Busca en el calendario de `usuario` el evento que empieza a esa hora (±2 min) y es de esa reunión:
+// tiene al invitado entre los asistentes o su nombre/correo en el título o la descripción. Es como
+// se ubica el evento que creó Calendly (no lleva nuestras marcas) para leer quién aceptó.
+async function buscarEvento(env, config, usuario, { inicio, email, nombre, emails = [] }, opts = {}) {
+  const sub = emailDe(config, usuario);
+  if (!sub || !inicio) return null;
+  const t = new Date(inicio).getTime();
+  if (Number.isNaN(t)) return null;
+  const q = new URLSearchParams({ timeMin: new Date(t - 120000).toISOString(), timeMax: new Date(t + 120000).toISOString(), singleEvents: 'true', maxResults: '20' });
+  const r = await llamar(env, sub, 'GET', `/calendars/primary/events?${q}`, null, opts);
+  const correos = [email, ...emails].filter(Boolean).map(x => String(x).toLowerCase());
+  const nom = String(nombre || '').trim().toLowerCase();
+  const candidatos = (r.items || []).filter(ev => ev.status !== 'cancelled' && ev.start && ev.start.dateTime && Math.abs(new Date(ev.start.dateTime).getTime() - t) <= 120000);
+  const puntaje = ev => {
+    const asistentes = (ev.attendees || []).map(a => String(a.email || '').toLowerCase());
+    const texto = `${ev.summary || ''}\n${ev.description || ''}`.toLowerCase();
+    let p = 0;
+    if (correos.some(c => asistentes.includes(c))) p += 4;
+    if (correos.some(c => texto.includes(c))) p += 2;
+    if (nom && nom.length >= 4 && texto.includes(nom)) p += 2;
+    if (/calendly/.test(texto) || /calendly/i.test(ev.iCalUID || '') || (ev.source && /calendly/i.test(ev.source.url || ''))) p += 1;
+    return p;
+  };
+  const mejor = candidatos.map(ev => ({ ev, p: puntaje(ev) })).filter(x => x.p > 0).sort((a, b) => b.p - a.p)[0];
+  if (!mejor) return null;
+  const ev = mejor.ev;
+  return {
+    id: ev.id, calendario: sub, htmlLink: ev.htmlLink || null, titulo: ev.summary || null, descripcion: ev.description || null,
+    enlace_reunion: ev.hangoutLink || (ev.conferenceData && (ev.conferenceData.entryPoints || []).map(e => e.uri).find(Boolean)) || null,
+    organizador: ev.organizer ? ev.organizer.email : null,
+    invitados: invitadosDe(ev),
+  };
+}
+
+// Asistentes de un evento de Google con su respuesta, en palabras.
+const RESPUESTA = { accepted: 'acepto', declined: 'rechazo', tentative: 'tal_vez', needsAction: 'sin_responder' };
+function invitadosDe(ev) {
+  return (ev.attendees || []).filter(a => a.email && !a.resource).map(a => ({
+    email: a.email, nombre: a.displayName || null, estado: RESPUESTA[a.responseStatus] || 'sin_responder',
+    organizador: !!a.organizer, opcional: !!a.optional, yo: !!a.self,
+  }));
+}
+
 // Crea y borra un evento de prueba: dice en un minuto si la delegación quedó bien.
 async function probar(env, config, usuario, opts = {}) {
   const sub = emailDe(config, usuario);
@@ -148,4 +191,4 @@ async function probar(env, config, usuario, opts = {}) {
   return { ok: true, calendario: sub, evento: ev.htmlLink || ev.id };
 }
 
-module.exports = { leerLlave, activo, emailDe, jwt, token, eventoDe, crearEvento, actualizarEvento, borrarEvento, probar, SCOPE, _tokens: tokens };
+module.exports = { leerLlave, activo, emailDe, jwt, token, eventoDe, crearEvento, actualizarEvento, borrarEvento, buscarEvento, invitadosDe, probar, SCOPE, RESPUESTA, _tokens: tokens };

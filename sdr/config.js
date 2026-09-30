@@ -417,6 +417,11 @@ module.exports = {
     // prospecto. false = los compromisos de reunión quedan solo en la app, sin evento en Google
     // (tampoco las registradas a mano: el calendario de la ejecutiva lo maneja Calendly).
     duplicar_en_google: false,
+    // Quién aceptó la reunión no lo sabe Calendly: lo sabe Google Calendar, donde Calendly creó el
+    // evento. En cada sincronización la app busca ese evento (por hora y correo del invitado) en estos
+    // calendarios, en orden, y guarda los invitados con su respuesta para verlos en la ficha del lead
+    // y en el tablero de la ejecutiva. Ver el efecto: node sdr/cli.js invitados <lead_id>
+    calendarios_invitados: ['Luisa', 'Angie'],
     // Mensaje con el link para mandar por WhatsApp / correo / LinkedIn. {nombre} {ejecutiva} {link}.
     mensaje: 'Hola {nombre}, te comparto la agenda de {ejecutiva} para que escojas el espacio que mejor te quede: {link}',
   },

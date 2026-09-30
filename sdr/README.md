@@ -233,6 +233,18 @@ webhooks → Personal access tokens; en Render como variable de entorno), cada `
 - Las reservas que no son de ningún lead quedan en `sdr.calendly_eventos` con estado `sin_lead`
   (`GET /api/calendly/estado`). `POST /api/calendly/sincronizar` fuerza una pasada.
 
+### Invitados de la reunión y si aceptaron
+Angie no ve en su calendario quién está invitado ni si aceptó: Calendly solo sabe quién reservó, y el evento lo
+crea Calendly en el calendario de la ejecutiva, donde Google guarda las respuestas. En cada sincronización la
+app busca ese evento en Google Calendar (cuenta de servicio, calendarios de `CALENDLY.calendarios_invitados`
+en orden, por hora ±2 min y correo del invitado) y guarda en `sdr.calendly_eventos`:
+`respuestas` (lo que el prospecto respondió en el formulario de Calendly: "Vacantes activas: 3", teléfono;
+acompañantes que agregó; link de la reunión) e `invitados` (lista con `acepto` / `rechazo` / `tal_vez` /
+`sin_responder`, calendario donde se encontró, link al evento). Se revisa cada reunión vigente como mucho
+una vez por hora; **Actualizar** en la ficha (`POST /api/leads/:id/reunion/invitados`) mira al momento.
+Se ve en la ficha del lead (panel *Reunión*) y en cada fila del tablero de la ejecutiva.
+`node sdr/cli.js invitados <lead_id>` hace lo mismo desde la consola.
+
 ## Comisión por reuniones calificadas
 Arriba de la cola, un panel verde con la **comisión del mes**: plata acumulada, cuántas calificadas lleva, la
 escalera de tramos (se llena con las calificadas y, rayado, con las pendientes) y cuánto le falta para el
@@ -452,6 +464,9 @@ repetidas se saltan; siempre se puede simular primero y confirmar después.
 Sin credenciales: el desplegable de la barra (Angie, Luisa, Santiago; lista en `USUARIOS` de `config.js`) marca
 quién hizo cada cosa y queda en el historial. La app no deja registrar nada sin elegir uno. Solo los toques del
 rol `sdr` cuentan para marcaciones, conversaciones, bloques y racha; así las pruebas no ensucian los números.
+Semana, Historial y Comisión muestran los números de quien los mira solo si es SDR. La ejecutiva y el admin ven
+los del **equipo SDR** (los propios estarían en cero) y pueden escoger a alguien con *Viendo a…* (`?de=Nombre`
+en el hash; `de` vacío = equipo).
 
 ## Borrar datos de prueba
 ```

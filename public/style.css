@@ -292,3 +292,10 @@ details.tb-criterios summary { cursor: pointer; color: var(--peaku-blue-dark); }
 .emb-cot:hover { text-decoration: underline; }
 .cot-bloque li, .wl-pedidos li { justify-content: flex-start; }
 .wl-pedidos li { display: flex; gap: 8px; align-items: baseline; }
+
+/* Tablero: invitados a la reunión y si aceptaron (viene de Google Calendar) */
+.rf-inv { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.rsvp { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.rsvp.ok { background: #e8f6f0; border-color: #b7e3ce; color: var(--peaku-green-dark); }
+.rsvp.bad { background: #fdecec; border-color: #f4c2c2; color: var(--bad); }
+.rsvp.warn { background: #fef3e2; border-color: #f8d7a5; color: var(--warn); }

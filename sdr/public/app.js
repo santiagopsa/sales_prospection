@@ -20,6 +20,27 @@
   const rolActual = () => ((meta.usuarios || []).find(u => u.nombre === usuarioActual()) || {}).rol || '';
   // Transcripción y métricas por llamada: solo para los roles de VER_TRANSCRIPCION (Angie recibe el semanal).
   const veTranscripcion = () => (meta.verTranscripcion || []).includes(rolActual());
+  // De quién son los números en Semana, Historial y Comisión. La SDR ve los suyos. La ejecutiva y el
+  // admin ven los del equipo SDR (o los de alguien en particular con ?de=Nombre): los propios estarían
+  // en cero, porque ellos no marcan. '' = equipo SDR (el servidor filtra por rol sdr).
+  const usuarioVisto = params => {
+    const de = params && params.get ? params.get('de') : null;
+    if (de != null) return de;
+    return rolActual() === 'sdr' ? usuarioActual() : '';
+  };
+  // Selector "Viendo a…" para quien no es SDR. `irA(de)` arma el hash de la vista con el nuevo `de`.
+  function selectorVisto(params, irA) {
+    if (rolActual() === 'sdr' || !(meta.usuarios || []).length) return '';
+    const visto = usuarioVisto(params);
+    const ops = [['', 'equipo SDR'], ...meta.usuarios.map(u => [u.nombre, u.nombre + (u.rol === 'sdr' ? ' (SDR)' : '')])];
+    setTimeout(() => {
+      const $s = document.getElementById('visto');
+      if ($s) $s.onchange = () => { location.hash = irA($s.value); };
+    }, 0);
+    return `<label class="visto suave">Viendo a <select id="visto" class="pk-select">${ops.map(([v, l]) => `<option value="${esc(v)}" ${v === visto ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
+  }
+  const conDe = (params, de) => { const q = new URLSearchParams(params || ''); if (de) q.set('de', de); else q.delete('de'); return q.toString(); };
+
   function pintarUsuarios() {
     const $sel = document.getElementById('usuario');
     if (!$sel || !meta.usuarios) return;
@@ -157,8 +178,10 @@
     </a>`;
   }
   async function vistaComision(params) {
-    const qs = new URLSearchParams(); if (params.get('mes')) qs.set('mes', params.get('mes')); if (usuarioActual()) qs.set('usuario', usuarioActual());
+    const visto = usuarioVisto(params);
+    const qs = new URLSearchParams(); if (params.get('mes')) qs.set('mes', params.get('mes')); if (visto) qs.set('usuario', visto);
     const r = await api('comision' + (qs.toString() ? '?' + qs : ''));
+    const linkMes = mes => `#/comision?${conDe(new URLSearchParams({ mes }), visto)}`;
     const k = r.comision, m = r.reglas.moneda, c = r.conteo;
     const orden = ['calificada', 'por_calificar', 'programada', 'no_califica', 'no_asistio', 'cancelada'];
     const reuniones = r.reuniones.slice().sort((a, b) => orden.indexOf(a.estado) - orden.indexOf(b.estado) || (a.reunion_ms || a.agendada_ms) - (b.reunion_ms || b.agendada_ms));
@@ -174,7 +197,7 @@
     $app.innerHTML = `
       <div class="cabeza">
         <div><h1>Comisión de ${esc(MES_LARGO(r.mes))}</h1>
-          <div class="suave">${r.usuario ? `de <b>${esc(r.usuario)}</b> · ` : 'equipo SDR · '}<a href="#/comision?mes=${r.anterior}">← mes anterior</a>${r.posterior <= r.hoy.slice(0, 7) ? ` · <a href="#/comision?mes=${r.posterior}">mes siguiente →</a>` : ''}</div></div>
+          <div class="suave">${r.usuario ? `de <b>${esc(r.usuario)}</b> · ` : 'equipo SDR · '}<a href="${linkMes(r.anterior)}">← mes anterior</a>${r.posterior <= r.hoy.slice(0, 7) ? ` · <a href="${linkMes(r.posterior)}">mes siguiente →</a>` : ''} ${selectorVisto(params, de => `#/comision?${conDe(params, de)}`)}</div></div>
         <a class="btn" href="#/cola">Cola del día</a>
       </div>
       <div class="panel comision grande">
@@ -922,6 +945,48 @@
       : `<a class="btn" href="#/cola">Cola al día ✔</a>`;
   }
 
+  // ---------------------------------------------------------------- reunión (Calendly + Google)
+  // Lo que Angie no ve en su calendario: quién está invitado y si aceptó (lo sabe Google, en el
+  // calendario de la ejecutiva), más lo que el prospecto respondió en el formulario de Calendly.
+  const RESPUESTA_LABEL = { acepto: ['Aceptó', 'si'], rechazo: ['Rechazó', 'no'], tal_vez: ['Tal vez', 'quizas'], sin_responder: ['Sin responder', 'pendiente'] };
+  function pintarReunion(l) {
+    const r = l.reunion;
+    if (!r) return '';
+    const lista = (r.invitados || []).filter(i => !i.yo && !i.organizador);
+    const organizadores = (r.invitados || []).filter(i => i.yo || i.organizador);
+    const quien = i => esc(i.nombre && i.nombre !== i.email ? `${i.nombre} · ${i.email}` : i.email);
+    const chip = i => { const [lab, cls] = RESPUESTA_LABEL[i.estado] || RESPUESTA_LABEL.sin_responder; return `<span class="chip rsvp ${cls}">${lab}</span>`; };
+    const cuando = r.invitados_at ? new Date(r.invitados_at).toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit' }) : null;
+    return `<div class="panel reunion" style="margin-top:16px">
+      <h2>Reunión ${r.inicio_ms ? `<span class="suave">· ${esc(fechaHora(r.inicio_ms))}</span>` : ''}
+        <button class="btn mini" id="reunion-refrescar" style="float:right" title="Vuelve a mirar en Google Calendar quién aceptó">Actualizar</button></h2>
+      ${r.reservo && (r.reservo.nombre || r.reservo.email) ? `<div class="suave pequeno">Reservó ${esc(r.reservo.nombre || '')}${r.reservo.email ? ` · ${esc(r.reservo.email)}` : ''}</div>` : ''}
+      ${r.respuestas && r.respuestas.length ? `<dl class="respuestas">${r.respuestas.map(x => `<dt>${esc(x.pregunta)}</dt><dd>${esc(x.respuesta)}</dd>`).join('')}</dl>` : ''}
+      <h3>Invitados</h3>
+      ${r.invitados === null ? `<p class="suave pequeno">Todavía no se ha mirado el calendario (se revisa cada ${esc(String((meta.calendly || {}).sincronizar_min || 10))} min, o pulsa Actualizar).</p>`
+        : r.invitados_fuente === 'ninguna' ? `<p class="suave pequeno">${esc(r.invitados_motivo || 'No encontré el evento en Google Calendar')}. Si la reunión se movió, vuelve a intentar en unos minutos.</p>`
+        : lista.length ? `<ul class="invitados">${lista.map(i => `<li><span>${quien(i)}${i.opcional ? ' <span class="suave">(opcional)</span>' : ''}</span>${chip(i)}</li>`).join('')}</ul>`
+        : '<p class="suave pequeno">El evento no tiene invitados aparte del organizador.</p>'}
+      ${r.acompanantes && r.acompanantes.length ? `<div class="suave pequeno">Acompañantes que agregó en Calendly: ${r.acompanantes.map(esc).join(', ')}</div>` : ''}
+      <div class="suave pequeno" style="margin-top:8px">${organizadores.length ? `Organiza ${organizadores.map(i => esc(i.email)).join(', ')} · ` : ''}${r.enlace_reunion ? `<a href="${esc(r.enlace_reunion)}" target="_blank" rel="noopener">Enlace de la reunión ↗</a> · ` : ''}${r.evento ? `<a href="${esc(r.evento)}" target="_blank" rel="noopener">Ver en Google Calendar ↗</a> · ` : ''}${cuando ? `revisado a las ${cuando}` : ''}</div>
+    </div>`;
+  }
+  function enlazarReunion(l) {
+    const $b = document.getElementById('reunion-refrescar');
+    if (!$b) return;
+    $b.addEventListener('click', async () => {
+      $b.disabled = true; $b.textContent = 'Mirando…';
+      try {
+        const r = await api(`leads/${l.id}/reunion/invitados`, { method: 'POST', body: {} });
+        l.reunion = r.reunion;
+        const $p = document.getElementById('reunion-panel');
+        if ($p) { $p.innerHTML = pintarReunion(l); enlazarReunion(l); }
+        if (r.omitido) avisar(r.omitido, 'aviso');
+        else if (r.errores && r.errores.length) avisar(r.errores[0], 'error');
+      } catch (e) { avisar(e.message, 'error'); $b.disabled = false; $b.textContent = 'Actualizar'; }
+    });
+  }
+
   async function vistaLead(id, { tocado = false } = {}) {
     const l = await api('leads/' + encodeURIComponent(id));
     const deAngie = DE_ANGIE.includes(l.etapa);
@@ -991,6 +1056,7 @@
                 ${l.etapa !== 'calificado' ? `<button class="btn peligro" id="descartar">Descartar</button>` : ''}
               </div>`}
           </div>
+          <div id="reunion-panel">${pintarReunion(l)}</div>
           <div class="panel" style="margin-top:16px">
             <h2>Datos <button class="btn mini" id="editar" style="float:right" title="Corregir teléfono, correo, contacto…">Editar</button></h2>
             <div id="datos-form" hidden></div>
@@ -1056,6 +1122,7 @@
       } catch (e) { avisar(e.message, 'error'); }
     };
     $app.querySelectorAll('[data-fusionar]').forEach(b => b.addEventListener('click', () => fusionar(l.misma_empresa.find(x => String(x.id) === b.dataset.fusionar))));
+    enlazarReunion(l);
     const $fo = document.getElementById('fusionar-otro');
     if ($fo) $fo.addEventListener('click', () => {
       const $modal = document.getElementById('modal');
@@ -1732,8 +1799,10 @@
   // ---------------------------------------------------------------- semana
   async function vistaSemana(params) {
     const f = params.get('fecha');
-    const qsw = new URLSearchParams(); if (f) qsw.set('fecha', f); if (usuarioActual()) qsw.set('usuario', usuarioActual());
+    const visto = usuarioVisto(params);
+    const qsw = new URLSearchParams(); if (f) qsw.set('fecha', f); if (visto) qsw.set('usuario', visto);
     const w = await api('semana' + (qsw.toString() ? '?' + qsw : ''));
+    const linkSemana = fecha => `#/semana?${conDe(new URLSearchParams({ fecha }), visto)}`;
     const dia = x => new Date(x + 'T12:00:00-05:00').toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'short', day: 'numeric' });
     const rango = `${new Date(w.lunes + 'T12:00:00-05:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })} – ${new Date(w.domingo + 'T12:00:00-05:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}`;
     const mover = n => { const d = new Date(w.lunes + 'T12:00:00-05:00'); d.setDate(d.getDate() + n * 7); return d.toISOString().slice(0, 10); };
@@ -1742,7 +1811,7 @@
     const tasa = (v, nombre, num, den) => `<div class="kpi"><b>${v == null ? '—' : v + '%'}</b><span>${nombre}</span><small>${num} de ${den}</small></div>`;
     $app.innerHTML = `
       <div class="cabeza">
-        <div><h1>Semana${w.usuario ? ` de ${esc(w.usuario)}` : ''}</h1><div class="suave">${esc(rango)} · <a href="#/semana?fecha=${mover(-1)}">← anterior</a>${w.domingo < w.hoy ? ` · <a href="#/semana?fecha=${mover(1)}">siguiente →</a>` : ''}</div></div>
+        <div><h1>Semana${w.usuario ? ` de ${esc(w.usuario)}` : ' del equipo SDR'}</h1><div class="suave">${esc(rango)} · <a href="${linkSemana(mover(-1))}">← anterior</a>${w.domingo < w.hoy ? ` · <a href="${linkSemana(mover(1))}">siguiente →</a>` : ''} ${selectorVisto(params, de => `#/semana?${conDe(params, de)}`)}</div></div>
         <div class="racha ${w.racha.hoyCumple ? 'hoy' : ''}"><b>${w.racha.dias}</b><span>${w.racha.dias === 1 ? 'día seguido' : 'días seguidos'} cumpliendo la meta</span></div>
       </div>
       <div class="kpis">
@@ -1754,7 +1823,7 @@
       <div class="panel tabla-env">
         <table><thead><tr><th>Día</th><th class="num">Marcaciones</th><th class="num">Conversaciones</th><th class="num">Reuniones</th><th class="num">WhatsApp</th><th class="num">Correo</th><th class="num">LinkedIn</th><th>Meta</th></tr></thead>
         <tbody>${w.dias.map(d => `<tr class="${d.fecha === w.hoy ? 'hoy' : ''} ${d.habil ? '' : 'suave'}">
-          <td><a href="#/historial/${d.fecha}" title="Ver qué se hizo ese día">${dia(d.fecha)}</a></td><td class="num">${d.marcaciones}</td><td class="num">${d.conversaciones}</td><td class="num">${d.reuniones}</td><td class="num">${d.whatsapp}</td><td class="num">${d.correo}</td><td class="num">${d.linkedin}</td>
+          <td><a href="#/historial/${d.fecha}${visto ? '?de=' + encodeURIComponent(visto) : (params.get('de') != null ? '?de=' : '')}" title="Ver qué se hizo ese día">${dia(d.fecha)}</a></td><td class="num">${d.marcaciones}</td><td class="num">${d.conversaciones}</td><td class="num">${d.reuniones}</td><td class="num">${d.whatsapp}</td><td class="num">${d.correo}</td><td class="num">${d.linkedin}</td>
           <td>${!d.habil ? '' : d.cumplida ? `<span class="chip whatsapp" title="${d.cumplida_por === 'reuniones' ? `${d.reuniones} reuniones agendadas (meta: ${w.metas.reunionesDia})` : 'por ' + d.cumplida_por}">cumplida${d.cumplida_por === 'reuniones' ? ` · ${d.reuniones} reuniones` : ''}</span>` : (d.fecha < w.hoy ? '<span class="chip vencida">no</span>' : (d.fecha === w.hoy ? '<span class="chip hoy">en curso</span>' : ''))}</td>
         </tr>`).join('')}</tbody></table>
       </div>
@@ -1810,8 +1879,10 @@
 
   // ---------------------------------------------------------------- historial de un día
   // "¿Qué hice ayer?": cada toque en orden con su lead, resultado y nota, y los compromisos cumplidos.
-  async function vistaHistorial(fechaPedida) {
-    const qs = new URLSearchParams(); if (fechaPedida) qs.set('fecha', fechaPedida); if (usuarioActual()) qs.set('usuario', usuarioActual());
+  async function vistaHistorial(fechaPedida, params = new URLSearchParams()) {
+    const visto = usuarioVisto(params);
+    const qs = new URLSearchParams(); if (fechaPedida) qs.set('fecha', fechaPedida); if (visto) qs.set('usuario', visto);
+    const sufijo = params.get('de') != null ? '?de=' + encodeURIComponent(params.get('de')) : '';
     const h = await api('historial' + (qs.toString() ? '?' + qs : ''));
     const largo = x => new Date(x + 'T12:00:00-05:00').toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'long' });
     const hora = ms => new Date(ms).toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit' });
@@ -1838,7 +1909,7 @@
     $app.innerHTML = `
       <div class="cabeza">
         <div><h1>${nombre ? nombre + ' · ' : ''}${esc(largo(h.fecha))}</h1>
-          <div class="suave">${h.usuario ? `gestión de <b>${esc(h.usuario)}</b> · ` : ''}<a href="#/historial/${h.ayer}">← día anterior</a>${h.fecha < h.hoy ? ` · <a href="#/historial/${h.manana}">día siguiente →</a>` : ''} · <a href="#/semana?fecha=${h.fecha}">ver la semana</a></div></div>
+          <div class="suave">${h.usuario ? `gestión de <b>${esc(h.usuario)}</b> · ` : 'equipo SDR · '}<a href="#/historial/${h.ayer}${sufijo}">← día anterior</a>${h.fecha < h.hoy ? ` · <a href="#/historial/${h.manana}${sufijo}">día siguiente →</a>` : ''} · <a href="#/semana?${conDe(new URLSearchParams({ fecha: h.fecha }), visto)}">ver la semana</a> ${selectorVisto(params, de => `#/historial/${h.fecha}${de ? '?de=' + encodeURIComponent(de) : '?de='}`)}</div></div>
         <a class="btn" href="#/cola">Cola del día</a>
       </div>
       <div class="kpis">
@@ -1869,7 +1940,7 @@
       else if (partes[0] === 'llamada' && partes[1]) await vistaLlamada(partes[1]);
       else if (partes[0] === 'marcar') vistaMarcar(new URLSearchParams(query));
       else if (partes[0] === 'semana') await vistaSemana(new URLSearchParams(query));
-      else if (partes[0] === 'historial') await vistaHistorial(partes[1]);
+      else if (partes[0] === 'historial') await vistaHistorial(partes[1], new URLSearchParams(query));
       else if (partes[0] === 'comision') await vistaComision(new URLSearchParams(query));
       else if (partes[0] === 'proyeccion') await vistaProyeccion(new URLSearchParams(query));
       else if (partes[0] === 'reuniones') { location.href = '/#/tablero'; return; }   // el tablero de la ejecutiva vive en el Sandler Coach

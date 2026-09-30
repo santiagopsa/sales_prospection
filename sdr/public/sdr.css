@@ -414,3 +414,21 @@ a.chip.fuego:hover { text-decoration: none; background: #ffe4cc; }
 .sp-pill { font: inherit; color: #fff; background: none; border: 0; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; padding: 0 4px; }
 .sp-pill b { font-size: 13px; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 520px) { .softphone { right: 12px; bottom: 12px; left: 12px; width: auto; } .softphone.min { left: auto; } }
+
+/* Reunión: invitados y si aceptaron (Google Calendar) + respuestas del formulario de Calendly */
+.panel.reunion h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--suave); margin: 12px 0 6px; }
+.panel.reunion .respuestas { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0 0; font-size: 13px; }
+.panel.reunion .respuestas dt { color: var(--suave); }
+.panel.reunion .respuestas dd { margin: 0; }
+.invitados { list-style: none; margin: 0; padding: 0; }
+.invitados li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--linea); font-size: 13px; }
+.invitados li:first-child { border-top: 0; }
+.invitados li > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.chip.rsvp.si { background: var(--bien-bg); color: #166534; }
+.chip.rsvp.no { background: var(--mal-bg); color: var(--mal); }
+.chip.rsvp.quizas { background: var(--alerta-bg); color: var(--alerta); }
+.chip.rsvp.pendiente { background: var(--fondo); color: var(--suave); }
+
+/* "Viendo a…" (ejecutiva / admin): de quién son los números de Semana, Historial y Comisión */
+.visto { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 12px; }
+.visto .pk-select { padding: 2px 26px 2px 8px; font-size: 12px; min-height: 0; }
