@@ -15,7 +15,7 @@ const INICIO = '2026-10-02T15:00:00.000Z';
 
 // Calendly + Google falsos en un solo fetch. `google` guarda los eventos por calendario (sub del JWT).
 function falso() {
-  const ev = {}, inv = {}, google = { 'luisa@peaku.co': [], 'angie@peaku.co': [] }, llamadas = [];
+  const ev = {}, inv = {}, google = { 'luisa@peaku.co': [], 'angie@peaku.co': [] }, llamadas = [], patches = [];
   const agregar = (id, { inicio = INICIO, email, name, respuestas = [], guests = [], status = 'active' }) => {
     const uri = `https://api.calendly.com/scheduled_events/${id}`;
     ev[uri] = { uri, name: 'Conoce Peaku!', status, start_time: inicio, end_time: inicio, location: { join_url: 'https://meet/x' }, event_guests: guests.map(e => ({ email: e })) };
@@ -30,6 +30,13 @@ function falso() {
     if (u.includes('oauth2')) { subActual = subDe(o); return json(200, { access_token: 'g-' + subActual, expires_in: 3600 }); }
     if (u.includes('googleapis.com/calendar')) {
       const sub = String(o.headers.Authorization).replace('Bearer g-', '');
+      const uno = /\/events\/([^?]+)/.exec(u);
+      if (uno) {
+        const ev = (google[sub] || []).find(e => e.id === decodeURIComponent(uno[1]));
+        if (!ev) return json(404, { error: { message: 'Not Found' } });
+        if (o.method === 'PATCH') { assert.strictEqual(new URL(u).searchParams.get('sendUpdates'), 'none'); Object.assign(ev, JSON.parse(o.body)); patches.push([sub, ev.id]); }
+        return json(200, ev);
+      }
       const q = new URL(u).searchParams;
       const min = new Date(q.get('timeMin')).getTime(), max = new Date(q.get('timeMax')).getTime();
       return json(200, { items: (google[sub] || []).filter(e => { const t = new Date(e.start.dateTime).getTime(); return t >= min && t <= max; }) });
@@ -43,7 +50,7 @@ function falso() {
     if (m && m[2]) return json(200, { collection: inv[m[1]] });
     return json(404, { message: 'ruta desconocida ' + u });
   };
-  return { fetchFn, agregar, google, llamadas };
+  return { fetchFn, agregar, google, llamadas, patches };
 }
 
 test('calendario: buscarEvento ubica el evento de Calendly por hora e invitado y lee las respuestas', async () => {
@@ -78,42 +85,49 @@ test('invitados: la sincronización guarda formulario, invitados y respuesta; la
   const ahora = new Date('2026-09-30T15:00:00Z');
   const k = falso();
   k.agregar('A', { email: 'maria@cemento.co', name: 'María', respuestas: [['Vacantes activas', '3'], ['Teléfono', '+57 316 7081572']], guests: ['jefe@cemento.co'] });
-  // El evento está en el calendario de Angie (no en el de Luisa): se busca en los calendarios de CALENDLY.calendarios_invitados en orden.
-  k.google['angie@peaku.co'].push({ id: 'g1', status: 'confirmed', summary: 'Conoce Peaku! - María', htmlLink: 'https://cal/g1', organizer: { email: 'luisa@peaku.co' }, start: { dateTime: INICIO },
-    attendees: [{ email: 'angie@peaku.co', self: true, responseStatus: 'accepted' }, { email: 'luisa@peaku.co', organizer: true, responseStatus: 'accepted' }, { email: 'maria@cemento.co', responseStatus: 'needsAction' }, { email: 'jefe@cemento.co', responseStatus: 'declined' }] });
+  // Calendly creó el evento en el calendario de Luisa, sin Angie: la sincronización la agrega como invitada (invitar_al_evento).
+  k.google['luisa@peaku.co'].push({ id: 'g1', status: 'confirmed', summary: 'Conoce Peaku! - María', htmlLink: 'https://cal/g1', organizer: { email: 'luisa@peaku.co' }, start: { dateTime: INICIO },
+    attendees: [{ email: 'luisa@peaku.co', organizer: true, self: true, responseStatus: 'accepted' }, { email: 'maria@cemento.co', responseStatus: 'needsAction' }, { email: 'jefe@cemento.co', responseStatus: 'declined' }] });
   const log = { log() {}, error() {} };
 
   const r = await CAL.sincronizar(db, base, ENV, { ahora, fetchFn: k.fetchFn, log });
   assert.strictEqual(r.nuevas, 1);
-  assert.deepStrictEqual([r.invitados.revisadas, r.invitados.encontradas, r.invitados.errores], [1, 1, []]);
+  assert.deepStrictEqual([r.invitados.revisadas, r.invitados.encontradas, r.invitados.errores, r.invitados.agregados], [1, 1, [], 1]);
+  assert.deepStrictEqual(k.patches, [['luisa@peaku.co', 'g1']]);                       // Angie entró al evento, desde el calendario de Luisa
 
   const m = await CAL.reunionDe(db, leadId);
   assert.strictEqual(m.inicio_ms, new Date(INICIO).getTime());
   assert.deepStrictEqual(m.reservo, { email: 'maria@cemento.co', nombre: 'María' });
   assert.deepStrictEqual(m.respuestas, [{ pregunta: 'Vacantes activas', respuesta: '3' }, { pregunta: 'Teléfono', respuesta: '+57 316 7081572' }]);
   assert.deepStrictEqual(m.acompanantes, ['jefe@cemento.co']);
-  assert.deepStrictEqual([m.invitados_fuente, m.calendario, m.evento], ['google', 'angie@peaku.co', 'https://cal/g1']);
-  assert.deepStrictEqual(m.invitados.map(i => [i.email, i.estado]), [['angie@peaku.co', 'acepto'], ['luisa@peaku.co', 'acepto'], ['maria@cemento.co', 'sin_responder'], ['jefe@cemento.co', 'rechazo']]);
+  assert.deepStrictEqual([m.invitados_fuente, m.calendario, m.evento], ['google', 'luisa@peaku.co', 'https://cal/g1']);
+  assert.deepStrictEqual(m.invitados.map(i => [i.email, i.estado]), [['luisa@peaku.co', 'acepto'], ['maria@cemento.co', 'sin_responder'], ['jefe@cemento.co', 'rechazo'], ['angie@peaku.co', 'sin_responder']]);
 
   // El tablero de la ejecutiva trae lo mismo por reunión.
   const t = await require('../ejecutiva').tablero(db, base, { mes: '2026-10', ahora });
   const fila = t.reuniones.find(x => x.lead_id === leadId);
   assert.ok(fila, 'la reunión aparece en el tablero');
-  assert.deepStrictEqual(fila.invitados.lista.map(i => i.estado), ['acepto', 'acepto', 'sin_responder', 'rechazo']);
+  assert.deepStrictEqual(fila.invitados.lista.map(i => i.estado), ['acepto', 'sin_responder', 'rechazo', 'sin_responder']);
   assert.strictEqual(fila.invitados.respuestas[0].respuesta, '3');
 
   // Dentro de la hora no se vuelve a mirar; con forzar / por lead sí. Cuando la aceptan, cambia.
-  k.google['angie@peaku.co'][0].attendees[2].responseStatus = 'accepted';
+  k.google['luisa@peaku.co'][0].attendees[1].responseStatus = 'accepted';
   const antes = k.llamadas.length;
   assert.strictEqual((await CAL.refrescarInvitados(db, base, ENV, { ahora: new Date(ahora.getTime() + 10 * 60000), fetchFn: k.fetchFn })).revisadas, 0);
   assert.strictEqual(k.llamadas.length, antes);
   const r2 = await CAL.refrescarInvitados(db, base, ENV, { leadId, ahora: new Date(ahora.getTime() + 10 * 60000), fetchFn: k.fetchFn });
-  assert.deepStrictEqual([r2.revisadas, r2.encontradas], [1, 1]);
+  assert.deepStrictEqual([r2.revisadas, r2.encontradas, r2.agregados], [1, 1, undefined]);   // Angie ya está: no se vuelve a tocar el evento
+  assert.strictEqual(k.patches.length, 1);
   assert.strictEqual((await CAL.reunionDe(db, leadId)).invitados.find(i => i.email === 'maria@cemento.co').estado, 'acepto');
+  // Si el evento está en el calendario de Angie (ella no es la organizadora), se lee pero no se toca.
+  k.google['angie@peaku.co'].push({ id: 'g2', status: 'confirmed', summary: 'Conoce Peaku! - María', organizer: { email: 'otra@peaku.co' }, start: { dateTime: INICIO }, attendees: [{ email: 'maria@cemento.co', responseStatus: 'accepted' }] });
+  k.google['luisa@peaku.co'].length = 0;
+  const r2b = await CAL.refrescarInvitados(db, base, ENV, { leadId, ahora, fetchFn: k.fetchFn });
+  assert.deepStrictEqual([r2b.encontradas, r2b.agregados, k.patches.length, r2b.errores], [1, undefined, 1, []]);
+  k.google['angie@peaku.co'].length = 0;
 
   // Reserva de antes de guardar respuestas (columna vacía) y evento que no está en ningún calendario.
   await db.query(`UPDATE sdr.calendly_eventos SET respuestas = NULL, invitados = NULL, invitados_at = NULL`);
-  k.google['angie@peaku.co'].length = 0;
   const r3 = await CAL.refrescarInvitados(db, base, ENV, { leadId, ahora, fetchFn: k.fetchFn });
   assert.deepStrictEqual([r3.revisadas, r3.encontradas], [1, 0]);
   const m3 = await CAL.reunionDe(db, leadId);

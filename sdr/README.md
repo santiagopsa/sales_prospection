@@ -245,6 +245,17 @@ una vez por hora; **Actualizar** en la ficha (`POST /api/leads/:id/reunion/invit
 Se ve en la ficha del lead (panel *Reunión*) y en cada fila del tablero de la ejecutiva.
 `node sdr/cli.js invitados <lead_id>` hace lo mismo desde la consola.
 
+Calendly crea el evento solo con la ejecutiva y el prospecto. Los usuarios de `CALENDLY.invitar_al_evento`
+(Angie) entran como invitados cuando la sincronización encuentra el evento, sin correo al prospecto
+(`sendUpdates=none`): a Angie le aparece en su calendario con la lista de invitados. Solo se puede desde el
+calendario del organizador (Luisa); si el evento se encontró en otro calendario, se lee y no se toca.
+
+Para que el prospecto reciba **una sola** invitación y quede como invitado en el evento (y así Google sepa si
+aceptó), el tipo de evento en Calendly debe estar en *Calendar invitations* (la invitación sale del Google
+Calendar de Luisa), no en *Email confirmations* (Calendly manda su propio correo con un .ics y el prospecto
+no queda como invitado). Calendly → Scheduling → tipo de evento → Edit → More options → Notifications and
+workflows → ⋯ → Edit → *Switch to calendar invitations*.
+
 ## Comisión por reuniones calificadas
 Arriba de la cola, un panel verde con la **comisión del mes**: plata acumulada, cuántas calificadas lleva, la
 escalera de tramos (se llena con las calificadas y, rayado, con las pendientes) y cuánto le falta para el

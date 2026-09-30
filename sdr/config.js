@@ -422,6 +422,11 @@ module.exports = {
     // calendarios, en orden, y guarda los invitados con su respuesta para verlos en la ficha del lead
     // y en el tablero de la ejecutiva. Ver el efecto: node sdr/cli.js invitados <lead_id>
     calendarios_invitados: ['Luisa', 'Angie'],
+    // Calendly crea el evento solo con la ejecutiva y el prospecto: la SDR no está. Estos usuarios
+    // (con correo en USUARIOS) entran como invitados al evento cuando la sincronización lo encuentra,
+    // sin correo al prospecto (sendUpdates=none); a la SDR le aparece en su calendario con la lista
+    // de invitados. [] = no tocar el evento. Ver el efecto: node sdr/cli.js invitados <lead_id>
+    invitar_al_evento: ['Angie'],
     // Mensaje con el link para mandar por WhatsApp / correo / LinkedIn. {nombre} {ejecutiva} {link}.
     mensaje: 'Hola {nombre}, te comparto la agenda de {ejecutiva} para que escojas el espacio que mejor te quede: {link}',
   },

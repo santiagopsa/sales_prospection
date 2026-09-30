@@ -170,6 +170,21 @@ async function buscarEvento(env, config, usuario, { inicio, email, nombre, email
   };
 }
 
+// Agrega correos como invitados a un evento existente (p. ej. la SDR al evento que creó Calendly en
+// el calendario de la ejecutiva). Solo lo puede hacer el organizador; sendUpdates=none para que el
+// prospecto no reciba otro correo: a la persona agregada el evento le aparece igual en su calendario
+// (mismo dominio). Devuelve el evento actualizado o null si no había nada que agregar.
+async function agregarInvitados(env, config, usuario, eventId, emails, opts = {}) {
+  const sub = emailDe(config, usuario);
+  if (!sub) throw error(400, `${usuario || 'ese usuario'} no tiene correo en USUARIOS`);
+  const ev = await llamar(env, sub, 'GET', `/calendars/primary/events/${encodeURIComponent(eventId)}`, null, opts);
+  const actuales = (ev.attendees || []).map(a => String(a.email || '').toLowerCase());
+  const nuevos = emails.map(e => String(e || '').toLowerCase()).filter(e => e && !actuales.includes(e));
+  if (!nuevos.length) return null;
+  const attendees = [...(ev.attendees || []), ...nuevos.map(email => ({ email }))];
+  return llamar(env, sub, 'PATCH', `/calendars/primary/events/${encodeURIComponent(eventId)}?sendUpdates=none`, { attendees }, opts);
+}
+
 // Asistentes de un evento de Google con su respuesta, en palabras.
 const RESPUESTA = { accepted: 'acepto', declined: 'rechazo', tentative: 'tal_vez', needsAction: 'sin_responder' };
 function invitadosDe(ev) {
@@ -191,4 +206,4 @@ async function probar(env, config, usuario, opts = {}) {
   return { ok: true, calendario: sub, evento: ev.htmlLink || ev.id };
 }
 
-module.exports = { leerLlave, activo, emailDe, jwt, token, eventoDe, crearEvento, actualizarEvento, borrarEvento, buscarEvento, invitadosDe, probar, SCOPE, RESPUESTA, _tokens: tokens };
+module.exports = { leerLlave, activo, emailDe, jwt, token, eventoDe, crearEvento, actualizarEvento, borrarEvento, buscarEvento, agregarInvitados, invitadosDe, probar, SCOPE, RESPUESTA, _tokens: tokens };

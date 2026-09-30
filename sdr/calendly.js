@@ -127,14 +127,26 @@ async function refrescarInvitados(db, config, env, { uri, leadId, ahora = new Da
     }
     const r = f.respuestas || {};
     const emails = [...(r.acompanantes || []), ...((r.invitados || []).map(i => i.email))];
-    let hallado = null, error = null;
+    let hallado = null, error = null, dueno = null;
     for (const quien of calendarios) {
       try {
         hallado = await cal.buscarEvento(env, config, quien, { inicio: f.inicio, email: f.email, nombre: f.nombre, emails }, opts);
-        if (hallado) break;
+        if (hallado) { dueno = quien; break; }
       } catch (e) { error = e.message; }
     }
     if (hallado) res.encontradas++; else if (error) res.errores.push(`${f.uri}: ${error}`);
+    // La SDR (CALENDLY.invitar_al_evento) entra como invitada al evento si no está: así le aparece en su
+    // calendario con los demás invitados. Solo funciona desde el calendario del organizador; si no, se deja.
+    if (hallado && (config.CALENDLY.invitar_al_evento || []).length) {
+      const correos = config.CALENDLY.invitar_al_evento.map(n => cal.emailDe(config, n)).filter(Boolean);
+      const faltan = correos.filter(c => !hallado.invitados.some(i => i.email.toLowerCase() === c.toLowerCase()));
+      if (faltan.length && hallado.organizador && hallado.organizador.toLowerCase() === String(cal.emailDe(config, dueno) || '').toLowerCase()) {
+        try {
+          const ev = await cal.agregarInvitados(env, config, dueno, hallado.id, faltan, opts);
+          if (ev) { hallado.invitados = cal.invitadosDe(ev); res.agregados = (res.agregados || 0) + faltan.length; }
+        } catch (e) { res.errores.push(`${f.uri}: no pude agregar ${faltan.join(', ')} al evento: ${e.message}`); }
+      }
+    }
     const inv = hallado
       ? { fuente: 'google', calendario: hallado.calendario, evento_id: hallado.id, enlace: hallado.htmlLink, titulo: hallado.titulo, enlace_reunion: hallado.enlace_reunion, organizador: hallado.organizador, lista: hallado.invitados, at: ahora.toISOString() }
       : { fuente: 'ninguna', motivo: error || 'No encontré el evento en Google Calendar', lista: [], at: ahora.toISOString() };
