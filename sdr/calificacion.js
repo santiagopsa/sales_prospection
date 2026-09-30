@@ -29,14 +29,41 @@ function painFunnel(d) {
   return { c, h, i, count, ok: count >= 2 };
 }
 
-// Lo que dice el formulario del Sandler, criterio por criterio.
+// Veredicto de la IA por criterio (iaExtracted.criterios_sandler), aplicando la regla escrita de cada
+// uno a la transcripción: { cumple, evidencia, falta, accion }. null si el demo no lo trae (demos de
+// antes de este cambio).
+function veredictoIA(d = {}) {
+  const c = d && d.iaExtracted && d.iaExtracted.criterios_sandler;
+  if (!c || typeof c !== 'object') return null;
+  const out = {};
+  for (const k of CLAVES) {
+    const v = c[k];
+    if (v && typeof v === 'object' && typeof v.cumple === 'boolean') {
+      out[k] = { cumple: v.cumple, evidencia: String(v.evidencia || '').trim(), falta: String(v.falta || '').trim(), accion: String(v.accion || '').trim() };
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+// Lo que dice el demo, criterio por criterio. Con veredicto de la IA manda el veredicto (aplica la
+// regla, no "el campo tiene texto": "presupuesto: no hay, es para 2027" ya no cuenta como chulo).
+// Sin veredicto, el criterio se infiere de los campos del formulario, como antes.
 function itemsFormulario(d = {}) {
-  return {
+  const ia = veredictoIA(d) || {};
+  const campos = {
     dolor: painFunnel(d).ok,
     presupuesto: has(d.presupuesto),
     decision: has(d.decisor) && has(d.procesoDecision),
     fecha: has(d.fechaLimiteDecision),
   };
+  const out = {};
+  for (const k of CLAVES) out[k] = k in ia ? ia[k].cumple : campos[k];
+  return out;
+}
+
+// Las reglas escritas, para el prompt del análisis (una línea por criterio).
+function reglasTexto() {
+  return CRITERIOS.map(c => `- ${c.clave} (${c.label}): ${c.ayuda}`).join('\n');
 }
 
 function manual(d = {}) {
@@ -55,14 +82,17 @@ function calificacionSandler(d = {}) {
   const pf = painFunnel(d);
   const form = itemsFormulario(d);
   const man = manual(d);
-  const items = {}, fuente = {};
+  const ia = veredictoIA(d) || {};
+  const items = {}, fuente = {}, detalle = {};
   for (const k of CLAVES) {
     if (k in man) { items[k] = man[k]; fuente[k] = 'manual'; }
-    else { items[k] = form[k]; fuente[k] = form[k] ? 'sandler' : null; }
+    else { items[k] = form[k]; fuente[k] = form[k] ? (k in ia ? 'ia' : 'sandler') : null; }
+    // Evidencia y qué falta (de la IA), se marque como se marque: es el "por qué" del chulo.
+    if (k in ia) detalle[k] = ia[k];
   }
   const done = CLAVES.filter(k => items[k]).length;
   return {
-    label: etiqueta(done), done, of: 4, pf, items, fuente, formulario: form,
+    label: etiqueta(done), done, of: 4, pf, items, fuente, formulario: form, detalle, con_ia: Object.keys(ia).length > 0,
     // Compatibilidad con server.js (scoreDeal / pantalla del Sandler).
     dolorOk: items.dolor || has(d.dolor), budget: items.presupuesto, decision: items.decision, fecha: items.fecha,
   };
@@ -82,4 +112,4 @@ function fusionarAlCompletar(dNuevo = {}, dGuardado = {}) {
   return out;
 }
 
-module.exports = { CRITERIOS, CLAVES, calificacionSandler, itemsFormulario, painFunnel, fusionarAlCompletar, etiqueta };
+module.exports = { CRITERIOS, CLAVES, calificacionSandler, itemsFormulario, painFunnel, fusionarAlCompletar, etiqueta, veredictoIA, reglasTexto };

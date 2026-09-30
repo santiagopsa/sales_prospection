@@ -302,3 +302,16 @@ details.tb-criterios summary { cursor: pointer; color: var(--peaku-blue-dark); }
 
 /* Asistente: aviso de en qué deal del SDR va a quedar el demo */
 .hint.deal-tomado { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; background: #fff8e6; border-left-color: var(--warn); }
+
+/* Detalle del deal: criterio por criterio, con la cita, qué falta y qué hacer */
+.crit-lista { display: grid; gap: 8px; margin-top: 12px; }
+.crit-lista .crit { display: block; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); font-weight: 400; color: var(--text, #1a2331); }
+.crit-lista .crit.no { border-left: 4px solid var(--bad); }
+.crit-lista .crit.si { border-left: 4px solid var(--peaku-green); }
+.crit-lista .crit b { text-align: left; }
+.crit-cab { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.crit-cita { font-style: italic; color: var(--muted); font-size: 13px; margin-top: 6px; }
+.crit-falta { font-size: 13px; margin-top: 6px; }
+.crit-accion { font-size: 13px; margin-top: 4px; padding: 8px 10px; background: #fff; border-radius: 8px; border: 1px dashed var(--peaku-blue); }
+.reunion-fila.directo { border-left: 4px solid var(--line); }
+.rf-cta { margin-top: 6px; padding: 6px 10px; background: #fff; border: 1px dashed var(--peaku-blue); border-radius: 8px; display: grid; gap: 3px; }

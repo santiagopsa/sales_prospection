@@ -99,7 +99,7 @@ function fila(x, lead, deal, ahora) {
     cargo: lead ? lead.cargo : null, telefono: lead ? lead.telefono : null, email: lead ? lead.email : null,
     etapa: x.etapa, estado: x.estado, reunion_ms: x.reunion_ms, agendada_ms: x.agendada_ms, agendo: x.agendo,
     realizada, deal_id: x.deal_id || null, ejecutiva: deal ? deal.executive || null : null,
-    calificacion, items: cal.items, fuente: cal.fuente,
+    calificacion, items: cal.items, fuente: cal.fuente, detalle: cal.detalle || {},
     formulario_sandler: !!(data.transcript && String(data.transcript).trim()),
     manual: man ? { por: man.por || null, ms: ms(man.at) } : null,
     comercial: comercial(deal), motivo: deal ? deal.outcome_reason || null : null,
@@ -160,6 +160,11 @@ async function tablero(db, config, { mes, ahora = new Date() } = {}) {
     m = a.anterior;
   }
 
+  // Demos que la ejecutiva hizo por otros canales (referido, inbound, outbound propio…): deals del mes
+  // que no vienen de un lead de la SDR. No tienen reunión en /sdr, pero sí se califican con los mismos
+  // chulos (van al deal) y tienen que verse en el mismo tablero para no perderse en el historial.
+  const directos = await demosDirectos(db, res.mes, ahora);
+
   const orden = { por_calificar: 0, programada: 1 };
   reuniones.sort((a, b) => {
     const oa = a.estado in orden ? orden[a.estado] : 2, ob = b.estado in orden ? orden[b.estado] : 2;
@@ -170,7 +175,7 @@ async function tablero(db, config, { mes, ahora = new Date() } = {}) {
 
   return {
     mes: res.mes, anterior: res.anterior, posterior: res.posterior, hoy: res.hoy,
-    kpis, reuniones, pendientes_anteriores: anteriores,
+    kpis, reuniones, directos, pendientes_anteriores: anteriores,
     comision: { calificadas: res.conteo.calificadas, total: res.comision.total, moneda: res.reglas.moneda, califica_con: res.reglas.califica_con, potencial: res.potencial.total },
     criterios: CAL.CRITERIOS,
     sandler: await hayDeals(db),
@@ -178,6 +183,33 @@ async function tablero(db, config, { mes, ahora = new Date() } = {}) {
     ejecutiva: ((config.USUARIOS || []).find(u => u.rol === 'ejecutiva') || {}).nombre || null,
     sdr: ((config.USUARIOS || []).find(u => u.rol === 'sdr') || {}).nombre || null,
   };
+}
+
+async function demosDirectos(db, mes, ahora) {
+  if (!(await hayDeals(db))) return [];
+  const lim = C.limitesMes(mes);
+  const desde = tiempo.instante(lim.inicio, 0).toISOString(), hasta = tiempo.instante(lim.siguiente, 0).toISOString();
+  const r = await db.query(
+    `SELECT d.id, to_jsonb(d.*) AS fila FROM public.deals d
+     WHERE (to_jsonb(d.*)->>'created_at')::timestamptz >= $1 AND (to_jsonb(d.*)->>'created_at')::timestamptz < $2
+       AND COALESCE(to_jsonb(d.*)->>'canal_adquisicion', '') <> 'sdr_interno'
+       AND NOT EXISTS (SELECT 1 FROM ${T.leads} l WHERE l.deal_id = d.id)
+     ORDER BY 1 DESC`, [desde, hasta]);
+  return r.rows.map(x => {
+    const deal = x.fila, data = deal.data || {};
+    const cal = CAL.calificacionSandler(data);
+    const man = data.calificacionManual || null;
+    const contacto = String(data.fichaAdicional || '').split('\n').find(l => /^Contacto:/i.test(l));
+    return {
+      deal_id: deal.id, empresa: deal.company || data.company || 'Sin empresa', contacto: contacto ? contacto.replace(/^Contacto:\s*/i, '') : null,
+      canal: deal.canal_adquisicion || data.canalAdquisicion || null, ejecutiva: deal.executive || null, creado_ms: ms(deal.created_at),
+      con_demo: !!(data.transcript && String(data.transcript).trim()),
+      calificacion: deal.calificacion_sandler || null, items: cal.items, fuente: cal.fuente, detalle: cal.detalle || {},
+      manual: man ? { por: man.por || null, ms: ms(man.at) } : null,
+      comercial: comercial(deal), motivo: deal.outcome_reason || null, etapa_embudo: deal.etapa_embudo || null,
+      puede_calificar: true,
+    };
+  });
 }
 
 // Guarda los 4 chulos de una reunión (o los quita con `limpiar`). Si la reunión seguía como

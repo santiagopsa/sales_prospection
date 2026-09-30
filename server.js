@@ -117,15 +117,19 @@ function scoreDeal(d) {
   // Fundamentales del nuevo proceso: contrato previo, segmentación, dolor desarrollado (embudo 2/3),
   // presupuesto, decisor, proceso de decisión, fecha límite de decisión.
   const pf = painFunnelOk(d);
+  // Con veredicto de la IA por criterio (demos nuevos), dolor / presupuesto / fecha son el veredicto,
+  // no "el campo tiene texto" (el texto puede decir "no hay presupuesto, es para 2027").
+  const cal = calificacionSandler(d);
+  const v = cal.con_ia ? cal.formulario : null;
   const fundamentals = {
     contratoPrevio: has(d.contratoPrevio),
     fichaPrevia: has(d.fichaCargos) || has(d.fichaCosto) || has(d.fichaHerramientas), // contrato previo N°1
     segmentacion: !!(d.segment),
-    dolorDesarrollado: pf.ok, // >=2 de 3 del embudo
-    presupuesto: has(d.presupuesto),
+    dolorDesarrollado: v ? v.dolor : pf.ok, // >=2 de 3 del embudo
+    presupuesto: v ? v.presupuesto : has(d.presupuesto),
     decisor: has(d.decisor),
-    procesoDecision: has(d.procesoDecision),
-    fechaLimiteDecision: has(d.fechaLimiteDecision),
+    procesoDecision: v ? v.decision : has(d.procesoDecision),
+    fechaLimiteDecision: v ? v.fecha : has(d.fechaLimiteDecision),
   };
   // Nice to have: vínculo, consecuencias emocionales, cotización piloto, post-venta, etc.
   // "integraciones" solo es relevante si el cliente es grande (C) o ya tiene ATS.
@@ -141,7 +145,6 @@ function scoreDeal(d) {
   };
   const fundOk = Object.values(fundamentals).filter(Boolean).length;
   const nthOk = Object.values(niceToHave).filter(Boolean).length;
-  const cal = calificacionSandler(d);
   return {
     fundamentals,
     niceToHave,
@@ -563,12 +566,11 @@ REGLA DE ORO — ANCLAJE ESTRICTO AL TRANSCRIPT (léela dos veces):
 
 MÉTODO SANDLER (para calificar el deal):
 - Fase 1 · Construcción: contrato previo (tiempo, agenda, permiso para decir "no") + vínculo.
-- Fase 2 · Calificación:
-  · EMBUDO DEL DOLOR (2 de 3): cuantificar ($/tiempo) + historia (qué intentaron) + impacto (a quién le duele). Sin embudo, el dolor no ancla el precio.
-  · Presupuesto: ¿hay plata? ¿cuánto? ¿comparado con qué?
-  · Decisión: quiénes deciden + proceso interno + FECHA LÍMITE acordada.
+- Fase 2 · Calificación: cuatro criterios, cada uno con SU regla escrita (es la regla de Peaku, aplícala literal, no la versión genérica de Sandler):
+${CALIFICACION.reglasTexto()}
+  Reglas de juicio: un criterio cumple SOLO si la transcripción lo respalda con una cita. Que el ejecutivo haya preguntado no basta: cuenta la respuesta del cliente. "Presupuesto" NO cumple si la plata es del próximo año o el cliente dijo que no tiene; tampoco cumple si el ejecutivo nunca dijo un precio o rango (sin precio no hay reacción al precio). "Decisión" NO cumple con "lo paso a RRHH / lo reviso con mi jefe" sin saber quién aprueba y cómo. "Fecha" es una fecha para DECIDIR acordada con el cliente, no la fecha de la capacitación, del envío de la propuesta ni de la prueba. Si dudas, NO cumple, y explica qué falta.
 - Fase 3 · Cierre: el ejecutivo propone los próximos pasos (no el cliente). Piloto > cotización fría.
-- CALIFICACIÓN: Completa = dolor desarrollado + presupuesto + decisión + fecha límite. Parcial = 2-3 de 4. No califica = 0-1 de 4.
+- CALIFICACIÓN: Completa = los 4 criterios cumplen. Parcial = 2-3 de 4. No califica = 0-1 de 4. calificacion_sandler DEBE ser coherente con criterios_sandler (cuenta los cumple:true).
 
 ═══════════════════════════════════════════════════════════
 MARCO JOLT — EL CENTRO DEL ANÁLISIS Y DE LAS ACCIONES:
@@ -591,6 +593,7 @@ ${transcript}
 
 TAREA:
 1. Extrae la información estructurada (campos del JSON), con citas textuales.
+1b. criterios_sandler: aplica la regla escrita de cada criterio a la transcripción y da el veredicto con su cita. Para cada criterio que NO cumple, "falta" dice qué le falta según la regla y "accion" es un call to action concreto: la pregunta exacta o el paso (a quién, por qué canal, cuándo) que cierra ese criterio. Esto es lo que la ejecutiva va a leer para saber qué hacer: sé directo y específico a esta conversación.
 2. Diagnostica la objeción/indecisión SUBYACENTE (objecion_subyacente) usando SOLO señales del transcript. Cita la frase que la delata.
 3. Genera acciones_concretas: 3-7 pasos ESPECÍFICOS a esta conversación (nombre real, fecha, canal). Cada acción atada a: la palanca JOLT que ataca (J/O/L/T) y la cita o señal del transcript que la motiva. Prioriza por impacto en DESBLOQUEAR la indecisión detectada, NO por el orden del proceso.
 4. que_mostrar: qué mostrar (y qué NO mostrar) de Peaku en la demo/propuesta de seguimiento, SEGÚN LO QUE ESTE CLIENTE REALMENTE QUIERE Y LE DUELE en el transcript — NO por reglas de segmento. Ejemplo: si el cliente pidió PRUEBAS/ASSESSMENTS para filtrar candidatos que ya tiene, marca "Motor de pruebas" como mostrar:true, y "Sourcing masivo" como mostrar:false (porque no es lo que pidió). Cada ítem debe citar la señal del transcript. Sé concreto y aterrizado a este caso.
@@ -623,6 +626,12 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL. Formato exacto:
   "segmento_sugerido": "A (Micro), B (PyME) o C (Grande) según volumen/equipo del cliente",
   "hasAts": true,
   "atsName": "nombre del ATS si lo tienen",
+  "criterios_sandler": {
+    "dolor": {"cumple": true, "evidencia": "cita textual que lo sustenta (o vacío)", "falta": "si no cumple: qué falta exactamente según la regla (vacío si cumple)", "accion": "si no cumple: la pregunta literal o el paso concreto que el ejecutivo debe hacer en el siguiente contacto para cerrarlo, con nombre y canal (vacío si cumple)"},
+    "presupuesto": {"cumple": false, "evidencia": "", "falta": "", "accion": ""},
+    "decision": {"cumple": false, "evidencia": "", "falta": "", "accion": ""},
+    "fecha": {"cumple": false, "evidencia": "", "falta": "", "accion": ""}
+  },
   "calificacion_sandler": "Completa | Parcial | No califica",
   "objecion_subyacente": {
     "tipo": "valoracion | falta_informacion | miedo_resultado | miedo_interno_statuquo | ninguna_clara",
@@ -645,6 +654,25 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL. Formato exacto:
 }`;
 }
 
+// Análisis de una transcripción con Claude (el JSON del prompt). Lanza con status 502 si el JSON no parsea.
+async function analizarTranscript(transcript, context) {
+  const prompt = buildAnalyzePrompt(transcript, context || {});
+  const msg = await anthropic.messages.create({ model: ANALYZE_MODEL, max_tokens: 8000, messages: [{ role: 'user', content: prompt }] });
+  const text = (msg.content && msg.content[0] && msg.content[0].text) || '';
+  // Extraer JSON del texto (Claude puede envolverlo en ```json ... ``` a veces)
+  let jsonText = text.trim();
+  const fenced = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) jsonText = fenced[1].trim();
+  let parsed;
+  try { parsed = JSON.parse(jsonText); }
+  catch (e) {
+    console.error('[llm] JSON parse fallido:', e.message, '\ntexto:', text.slice(0, 500));
+    throw Object.assign(new Error('Claude devolvió JSON inválido'), { status: 502, raw: text.slice(0, 2000) });
+  }
+  parsed._usage = msg.usage;
+  return parsed;
+}
+
 app.post('/api/analyze', async (req, res) => {
   try {
     if (!anthropic) return res.status(500).json({ error: 'ANTHROPIC_API_KEY no configurada' });
@@ -652,28 +680,42 @@ app.post('/api/analyze', async (req, res) => {
     if (!transcript || transcript.length < 100) {
       return res.status(400).json({ error: 'transcript vacío o muy corto (mín 100 chars)' });
     }
-    const prompt = buildAnalyzePrompt(transcript, context || {});
-    const msg = await anthropic.messages.create({
-      model: ANALYZE_MODEL,
-      max_tokens: 8000,
-      messages: [{ role: 'user', content: prompt }],
-    });
-    const text = (msg.content && msg.content[0] && msg.content[0].text) || '';
-    // Extraer JSON del texto (Claude puede envolverlo en ```json ... ``` a veces)
-    let jsonText = text.trim();
-    const fenced = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (fenced) jsonText = fenced[1].trim();
-    let parsed;
-    try { parsed = JSON.parse(jsonText); }
-    catch (e) {
-      console.error('[llm] JSON parse fallido:', e.message, '\ntexto:', text.slice(0, 500));
-      return res.status(502).json({ error: 'Claude devolvió JSON inválido', raw: text.slice(0, 2000) });
-    }
-    parsed._usage = msg.usage;
-    res.json(parsed);
+    res.json(await analizarTranscript(transcript, context));
   } catch (e) {
     console.error('[llm] error:', e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message, raw: e.raw });
+  }
+});
+
+// Volver a analizar la transcripción guardada de un deal (p. ej. demos de antes de que la IA aplicara
+// las reglas por criterio). Se reemplaza iaExtracted y se recalculan calificación y score; los campos
+// que la ejecutiva ya tenía escritos no se pisan (solo se llenan los vacíos).
+app.post('/api/deals/:id/reanalizar', async (req, res) => {
+  try {
+    if (!anthropic) return res.status(500).json({ ok: false, error: 'ANTHROPIC_API_KEY no configurada' });
+    if (!pool) return res.status(503).json({ ok: false, error: 'sin base de datos' });
+    const id = Number(req.params.id);
+    const row = (await pool.query(`SELECT * FROM deals WHERE id=$1`, [id])).rows[0];
+    if (!row) return res.status(404).json({ ok: false, error: 'not found' });
+    const d = { ...(row.data || {}) };
+    if (!has(d.transcript) || String(d.transcript).length < 100) return res.status(400).json({ ok: false, error: 'Este deal no tiene transcripción para analizar' });
+    const ia = await analizarTranscript(d.transcript, d);
+    d.iaExtracted = ia;
+    const CAMPOS_IA = ['contratoPrevio', 'vinculo', 'dolor', 'dolorCuantificar', 'dolorHistoria', 'dolorImpacto', 'consecuenciasEmocionales', 'medicion', 'integraciones',
+      'presupuesto', 'decisor', 'procesoDecision', 'fechaLimiteDecision', 'proximoPaso', 'postVenta', 'pilotoCargo', 'pilotoFechaRevision', 'atsName'];
+    for (const k of CAMPOS_IA) if (!has(d[k]) && has(ia[k])) d[k] = ia[k];
+    if (!Array.isArray(d.idealRequests) || !d.idealRequests.length) d.idealRequests = Array.isArray(ia.idealRequests) ? ia.idealRequests : [];
+    if (!d.segment && ia.segmento_sugerido) d.segment = String(ia.segmento_sugerido).trim().charAt(0);
+    if (typeof d.hasAts !== 'boolean' && typeof ia.hasAts === 'boolean') d.hasAts = ia.hasAts;
+    const s = scoreDeal(d);
+    const fechaLim = (d.fechaLimiteDecision && String(d.fechaLimiteDecision).match(/^\d{4}-\d{2}-\d{2}$/)) ? d.fechaLimiteDecision : null;
+    await pool.query(
+      `UPDATE deals SET segment=$1, has_ats=$2, data=$3, score_fundamentals=$4, score_nice_to_have=$5, calificacion_sandler=$6, fecha_limite_decision=$7 WHERE id=$8`,
+      [d.segment || null, !!d.hasAts, d, s.fundamentalsPct, s.niceToHavePct, s.calificacion.label, fechaLim, id]);
+    res.json({ ok: true, id, calificacion: s.calificacion.label, criterios: ia.criterios_sandler || null });
+  } catch (e) {
+    console.error('[llm] reanalizar:', e.message);
+    res.status(e.status || 500).json({ ok: false, error: e.message });
   }
 });
 

@@ -112,8 +112,8 @@ async function refrescarInvitados(db, config, env, { uri, leadId, ahora = new Da
   // Sin uri ni lead: las reuniones vigentes (desde ayer) que no se han mirado en la última hora.
   const filas = (await db.query(
     `SELECT uri, lead_id, inicio, email, nombre, respuestas, invitados, invitados_at FROM ${T.calendly}
-     WHERE ${cond} AND estado <> 'cancelado' AND inicio IS NOT NULL ${uri || leadId || forzar ? '' : 'AND (invitados_at IS NULL OR invitados_at < NOW() - INTERVAL \'55 minutes\')'}
-     ORDER BY inicio DESC LIMIT ${uri || leadId ? 1 : 40}`, [arg])).rows;
+     WHERE ${cond} AND estado <> 'cancelado' AND inicio IS NOT NULL ${uri || leadId || forzar ? '' : 'AND (invitados_at IS NULL OR invitados_at < $2::timestamptz - INTERVAL \'55 minutes\')'}
+     ORDER BY inicio DESC LIMIT ${uri || leadId ? 1 : 40}`, uri || leadId || forzar ? [arg] : [arg, ahora.toISOString()])).rows;
   const res = { revisadas: 0, encontradas: 0, errores: [] };
   for (const f of filas) {
     res.revisadas++;

@@ -144,27 +144,48 @@ function painFunnel(d) {
   const n = [c, h, i].filter(Boolean).length;
   return { c, h, i, count: n, ok: n >= 2 };
 }
+// Veredicto de la IA por criterio (iaExtracted.criterios_sandler): { cumple, evidencia, falta, accion }.
+function veredictoIA(d) {
+  const c = d && d.iaExtracted && d.iaExtracted.criterios_sandler;
+  if (!c || typeof c !== 'object') return {};
+  const out = {};
+  for (const k of ['dolor', 'presupuesto', 'decision', 'fecha']) {
+    const v = c[k];
+    if (v && typeof v === 'object' && typeof v.cumple === 'boolean') out[k] = { cumple: v.cumple, evidencia: v.evidencia || '', falta: v.falta || '', accion: v.accion || '' };
+  }
+  return out;
+}
+// Misma regla que sdr/calificacion.js: con veredicto de la IA manda el veredicto (aplica la regla escrita);
+// sin veredicto, se infiere de los campos del formulario. Los chulos manuales del tablero mandan sobre todo.
 function calificacion(d) {
   const pf = painFunnel(d);
-  const items = {
+  const ia = veredictoIA(d);
+  const campos = {
     dolor: pf.ok,
     presupuesto: has(d.presupuesto),
     decision: has(d.decisor) && has(d.procesoDecision),
     fecha: has(d.fechaLimiteDecision),
   };
-  // Criterios que la ejecutiva marcó a mano en el tablero de /sdr (misma regla que sdr/calificacion.js):
-  // la marca manda salvo que el formulario ya traiga el criterio.
+  const items = {}, fuente = {};
+  for (const k of Object.keys(campos)) { items[k] = k in ia ? ia[k].cumple : campos[k]; fuente[k] = items[k] ? (k in ia ? 'ia' : 'sandler') : null; }
   const man = (d.calificacionManual && d.calificacionManual.items) || {};
-  for (const k of Object.keys(items)) if (!items[k] && typeof man[k] === 'boolean') items[k] = man[k];
+  for (const k of Object.keys(items)) if (!items[k] && typeof man[k] === 'boolean') { items[k] = man[k]; if (man[k]) fuente[k] = 'manual'; }
   const done = Object.values(items).filter(Boolean).length;
   let label = 'No califica';
   if (done >= 4) label = 'Completa';
   else if (done >= 2) label = 'Parcial';
-  return { label, done, of: 4, pf, items };
+  return { label, done, of: 4, pf, items, fuente, detalle: ia, con_ia: Object.keys(ia).length > 0 };
 }
 function daysBetween(a, b) { return Math.floor((new Date(b).getTime() - new Date(a).getTime()) / 86400000); }
 
 const PRODUCTOS_PEAKU = ['SaaS', 'Headhunting', 'EOR', 'Evaluaciones'];   // qué se vendió (misma lista que EMBUDO.productos)
+// Regla escrita de cada criterio (misma que sdr/calificacion.js, que es la que ve la IA y el tablero).
+const CRITERIOS_AYUDA = {
+  dolor: 'El cliente cuantificó el problema, contó qué ha intentado o describió el impacto (al menos 2 de las 3).',
+  presupuesto: 'Ya gastan en resolver esto (herramienta paga, agencia o alguien dedicado: se infiere, no se pregunta el monto) y nuestro rango de precios no les pareció lejos, con plata de este ciclo (no "para el presupuesto del próximo año").',
+  decision: 'Se sabe quién aprueba la compra (nombre o cargo; no necesariamente quien usa la herramienta) y cómo la aprueba (pasos, quién más opina, compras o comité). "Lo reviso con mi jefe" no alcanza.',
+  fecha: 'Hay una fecha acordada con el cliente para decidir ("¿para cuándo necesitan esto resuelto?").',
+};
 
 // ---------- Router ----------
 function router() {
@@ -1684,8 +1705,24 @@ async function renderDealDetail(id) {
       const c = calificacion(d), man = (d.calificacionManual && d.calificacionManual.items) || {};
       const nombres = { dolor: 'Dolor', presupuesto: 'Presupuesto', decision: 'Decisión', fecha: 'Fecha límite' };
       const label = row.calificacion_sandler || (Object.values(c.items).some(Boolean) ? c.label : null);
-      return `<div class="card compact"><div class="split"><div><strong style="font-size:13px;color:var(--peaku-gray);">Calificación Sandler:</strong> ${calCell(label)}</div>
-        <div class="chips" style="margin:0">${Object.entries(c.items).map(([k, v]) => `<span class="pill ${v ? 'good' : ''}" title="${typeof man[k] === 'boolean' ? 'marcado en el tablero' : 'del formulario del demo'}">${v ? '✓' : '✗'} ${nombres[k]}</span>`).join('')}</div></div>
+      const pendientes = Object.keys(c.items).filter(k => !c.items[k]);
+      // Por criterio: la cita que lo sustenta y, si no cumple, qué falta y qué hacer (call to action).
+      const filas = Object.keys(c.items).map(k => {
+        const v = c.items[k], det = c.detalle[k] || null, manual = typeof man[k] === 'boolean';
+        const origen = manual ? `marcado en el tablero por ${esc(d.calificacionManual.por || '—')}` : det ? 'veredicto de la IA sobre la transcripción' : 'inferido del formulario del demo';
+        return `<div class="crit ${v ? 'si' : 'no'}">
+          <div class="crit-cab"><span class="pill ${v ? 'good' : 'bad'}">${v ? '✓' : '✗'} ${nombres[k]}</span> <span class="muted chico">${origen}${manual && det && det.cumple !== v ? ` · la IA dice ${det.cumple ? 'que sí cumple' : 'que no cumple'}` : ''}</span></div>
+          ${det && det.evidencia ? `<div class="crit-cita">“${esc(det.evidencia)}”</div>` : ''}
+          ${det && !det.cumple && det.falta ? `<div class="crit-falta"><b>${v ? 'Según la IA falta' : 'Falta'}:</b> ${esc(det.falta)}</div>` : ''}
+          ${det && !det.cumple && det.accion ? `<div class="crit-accion"><b>Para cerrarlo:</b> ${esc(det.accion)}</div>` : ''}
+          ${!v && !det ? `<div class="muted chico">${esc(CRITERIOS_AYUDA[k] || '')}</div>` : ''}
+        </div>`;
+      }).join('');
+      return `<div class="card"><div class="split"><div><strong style="font-size:13px;color:var(--peaku-gray);">Calificación Sandler:</strong> ${calCell(label)} <span class="muted chico">${c.done} de 4</span></div>
+        <div class="chips" style="margin:0">${Object.entries(c.items).map(([k, v]) => `<span class="pill ${v ? 'good' : ''}">${v ? '✓' : '✗'} ${nombres[k]}</span>`).join('')}</div></div>
+        ${pendientes.length && c.con_ia ? `<p class="muted" style="font-size:13px;margin:10px 0 0">Para que sea <b>Completa</b> faltan ${pendientes.map(k => nombres[k]).join(' y ')}. Abajo está qué falta en cada uno y la pregunta o el paso que lo cierra.</p>` : ''}
+        ${!c.con_ia && d.transcript ? `<p class="muted" style="font-size:12px;margin:10px 0 0">Este demo se analizó antes de que la IA aplicara las reglas por criterio: los chulos vienen de los campos del formulario. <button type="button" class="btn secondary btn-sm" data-reanalizar="${row.id}">Analizar con las reglas</button> <span class="muted">(1 minuto; tus chulos del tablero se conservan)</span></p>` : ''}
+        <div class="crit-lista">${filas}</div>
         ${d.calificacionManual ? `<p class="muted" style="font-size:12px;margin:8px 0 0">Chulos marcados en el <a href="#/tablero">tablero</a> por ${esc(d.calificacionManual.por || '—')}${d.calificacionManual.at ? ' · ' + new Date(d.calificacionManual.at).toLocaleString('es-CO') : ''}.</p>` : ''}</div>`;
     })()}
 
@@ -1798,6 +1835,16 @@ async function renderDealDetail(id) {
   `);
   el.querySelector('[data-del-detail]').addEventListener('click', async () => {
     await deleteDeal(row.id, () => { location.hash = '#/deals'; });
+  });
+  const $re = el.querySelector('[data-reanalizar]');
+  if ($re) $re.addEventListener('click', async () => {
+    $re.disabled = true; $re.textContent = 'Analizando…';
+    try {
+      const r = await fetch(`/api/deals/${row.id}/reanalizar`, { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || r.statusText);
+      renderDealDetail(row.id);
+    } catch (e) { alert('No se pudo analizar: ' + e.message); $re.disabled = false; $re.textContent = 'Analizar con las reglas'; }
   });
   const $mover = el.querySelector('[data-mover-demo]');
   if ($mover) $mover.addEventListener('click', async () => {
@@ -2098,12 +2145,49 @@ function tbInvitados(x) {
   return partes.length ? `<div class="chico rf-inv">${partes.join(' · ')}</div>` : '';
 }
 
+// Fila de un demo que no vino de la SDR: sin estado de reunión, con los chulos guardándose en el deal.
+function tbFilaDirecto(x, criterios) {
+  const n = criterios.filter(c => x.items[c.clave]).length;
+  const det = x.detalle || {};
+  const pista = c => { const v = det[c.clave]; return v ? `${c.label}: la IA dice que ${v.cumple ? 'SÍ cumple' : 'NO cumple'}.${v.evidencia ? ` "${v.evidencia}"` : ''}${!v.cumple && v.falta ? `\nFalta: ${v.falta}` : ''}${!v.cumple && v.accion ? `\nPara cerrarlo: ${v.accion}` : ''}` : c.ayuda; };
+  const chulos = criterios.map(c => `<label class="chulo ${x.items[c.clave] ? 'si' : ''} ${x.fuente[c.clave] === 'sandler' || x.fuente[c.clave] === 'ia' ? 'de-sandler' : ''}" title="${esc(pista(c))}">
+      <input type="checkbox" data-k="${c.clave}" ${x.items[c.clave] ? 'checked' : ''} /><span>${esc(c.label)}</span></label>`).join('');
+  const com = TB_COMERCIAL[x.comercial];
+  const canal = EMB_CANAL[x.canal] || x.canal || 'Directo';
+  const faltan = criterios.filter(c => !x.items[c.clave] && det[c.clave] && det[c.clave].accion);
+  return `<div class="reunion-fila directo" data-deal-directo="${x.deal_id}">
+    <div class="rf-info">
+      <div><span class="pill">${esc(canal)}</span>${x.con_demo ? '' : ' <span class="pill warn">sin demo</span>'}${com ? ` <span class="pill ${com[1]}" title="${esc(x.motivo || '')}">${com[0]}</span>` : ''}</div>
+      <a href="#/deal/${x.deal_id}"><b>${esc(x.empresa || 'Sin empresa')}</b></a>
+      ${x.contacto ? `<div class="muted">${esc(x.contacto)}</div>` : ''}
+      <div class="muted chico">deal #${x.deal_id} · ${tbFecha(x.creado_ms)}${x.ejecutiva ? ' · ' + esc(x.ejecutiva) : ''}</div>
+      ${faltan.length ? `<div class="chico rf-cta">${faltan.map(c => `<div><b>${esc(c.label)}:</b> ${esc(det[c.clave].accion)}</div>`).join('')}</div>` : ''}
+    </div>
+    <div class="rf-cal">
+      <div class="chulos">${chulos}</div>
+      <div class="rf-res">${x.calificacion ? calCell(x.calificacion) + ` <span class="muted chico">${n}/4</span>` : '<span class="pill">Sin calificar</span>'}
+        ${x.manual ? `<span class="muted chico">marcado por ${esc(x.manual.por || '—')} ${tbFechaHora(x.manual.ms)}</span>` : x.con_demo ? '<span class="muted chico">del demo</span>' : ''}</div>
+    </div>
+    <div class="rf-acc">
+      <a class="btn secondary btn-sm" href="#/deal/${x.deal_id}" title="Demo completo, análisis y acciones">Deal →</a>
+      <a class="btn ghost btn-sm" href="#/embudo" title="Moverlo de etapa en el embudo">Embudo</a>
+    </div>
+  </div>`;
+}
+
 function tbFila(x, criterios) {
   const est = TB_ESTADO[x.estado] || [x.estado, ''];
   const n = criterios.filter(c => x.items[c.clave]).length;
   const bloqueo = x.puede_calificar ? '' : (x.estado === 'programada' ? 'Se califica después de la reunión (o márcala realizada)' : 'La reunión no se hizo');
   const coincide = x.calificacion && x.calificacion.toLowerCase() === tbEtiqueta(n).toLowerCase();
-  const chulos = criterios.map(c => `<label class="chulo ${x.items[c.clave] ? 'si' : ''} ${x.fuente[c.clave] === 'sandler' ? 'de-sandler' : ''}" title="${esc(bloqueo || c.ayuda + (x.fuente[c.clave] === 'sandler' ? ' · viene del demo llenado en el Sandler' : ''))}">
+  const det = x.detalle || {};
+  const pista = c => {
+    const v = det[c.clave];
+    if (bloqueo) return bloqueo;
+    if (!v) return c.ayuda + (x.fuente[c.clave] === 'sandler' ? ' · viene del demo llenado en el Sandler' : '');
+    return `${c.label}: la IA dice que ${v.cumple ? 'SÍ cumple' : 'NO cumple'}.${v.evidencia ? ` "${v.evidencia}"` : ''}${!v.cumple && v.falta ? `\nFalta: ${v.falta}` : ''}${!v.cumple && v.accion ? `\nPara cerrarlo: ${v.accion}` : ''}`;
+  };
+  const chulos = criterios.map(c => `<label class="chulo ${x.items[c.clave] ? 'si' : ''} ${x.fuente[c.clave] === 'sandler' || x.fuente[c.clave] === 'ia' ? 'de-sandler' : ''}" title="${esc(pista(c))}">
       <input type="checkbox" data-k="${c.clave}" ${x.items[c.clave] ? 'checked' : ''} ${x.puede_calificar ? '' : 'disabled'} /><span>${esc(c.label)}</span></label>`).join('');
   const com = TB_COMERCIAL[x.comercial];
   return `<div class="reunion-fila ${x.estado}" data-lead="${x.lead_id}">
@@ -2187,11 +2271,28 @@ async function renderTablero(params, { conservar = false } = {}) {
     <div class="reuniones-lista">
       ${lista.length ? lista.map(x => tbFila(x, r.criterios)).join('') : `<p class="muted" style="text-align:center;padding:30px">${filtro[0] === 'pendientes' ? 'Nada por calificar. ✔' : 'No hay reuniones aquí.'}</p>`}
     </div>
+    ${(r.directos || []).length ? `
+    <h2 style="margin-top:28px">Demos por otros canales <span class="muted" style="font-weight:400;font-size:14px">· ${r.directos.length} en ${esc(tbMes(r.mes))}</span></h2>
+    <p class="muted chico" style="margin:-6px 0 10px">Deals que no vienen de ${esc(sdr)} (referidos, inbound, tu propia prospección). Se califican con los mismos chulos; lo que marques queda en el deal y en el embudo.</p>
+    <div class="reuniones-lista">${r.directos.map(x => tbFilaDirecto(x, r.criterios)).join('')}</div>` : ''}
     <div class="card compact tb-criterios"><h3 style="margin-top:0">Cuándo marcar cada chulo</h3>${r.criterios.map(c => `<p><b>${esc(c.label)}:</b> ${esc(c.ayuda)}</p>`).join('')}</div>
     <p class="muted chico" style="margin-top:14px">4 = Completa (cuenta para la comisión de ${esc(sdr)}) · 2-3 = Parcial · 0-1 = No califica. El chulo con borde punteado viene del demo llenado en el asistente; lo marcado aquí manda. Con la reunión en "Realizada" y los 4 chulos, el lead queda calificado.</p>`);
 
   const recargar = async () => { const y = window.scrollY; await renderTablero(params, { conservar: true }); window.scrollTo(0, y); };
-  el.querySelectorAll('.reunion-fila').forEach($f => {
+  el.querySelectorAll('.reunion-fila[data-deal-directo]').forEach($f => {
+    const dealId = $f.dataset.dealDirecto;
+    const x = (r.directos || []).find(z => String(z.deal_id) === dealId);
+    $f.querySelectorAll('.chulos input').forEach($c => $c.addEventListener('change', async () => {
+      const items = {};
+      $f.querySelectorAll('.chulos input').forEach(i => { items[i.dataset.k] = i.checked; i.disabled = true; });
+      try {
+        const res = await tbApi(`embudo/${dealId}/calificar`, { method: 'POST', body: { items, usuario: r.ejecutiva } });
+        tbAvisar(`${x.empresa || 'Deal'}: ${res.calificacion || res.label || 'sin calificar'}`);
+      } catch (e) { tbAvisar(e.message, 'error'); }
+      await recargar();
+    }));
+  });
+  el.querySelectorAll('.reunion-fila[data-lead]').forEach($f => {
     const id = $f.dataset.lead;
     const x = r.reuniones.find(z => String(z.lead_id) === id);
     $f.querySelectorAll('.chulos input').forEach($c => $c.addEventListener('change', async () => {

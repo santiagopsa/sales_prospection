@@ -372,6 +372,29 @@ enlace al tablero. `/sdr/#/reuniones` redirige allá.
   La regla vive en `calificacion.js` y la usa también `server.js`: lo marcado a mano manda sobre el
   formulario del demo; al completar el demo, el criterio que el formulario sí trae reemplaza la marca
   manual. El detalle del deal muestra la calificación y sus 4 criterios.
+- **Demos por otros canales**: debajo de las reuniones de la SDR, los deals del mes que no vienen de un
+  lead de la SDR (referidos, inbound, prospección propia de la ejecutiva). Mismos 4 chulos, guardados
+  en el deal con `/sdr/api/embudo/:id/calificar`; antes solo se veían en el historial.
+
+### Los chulos los pone la regla, no "el campo tiene texto"
+Al analizar la transcripción, Claude recibe la regla escrita de cada criterio (`CRITERIOS[].ayuda` en
+`calificacion.js`, la misma que ve la ejecutiva en el tablero) y devuelve `criterios_sandler`: por
+criterio `cumple`, la cita que lo sustenta, `falta` (qué le falta según la regla) y `accion` (la
+pregunta o el paso concreto para cerrarlo). Ese veredicto es el que pone el chulo del demo
+(`itemsFormulario`): "presupuesto: no hay, es para 2027" ya no cuenta como Presupuesto ✓. Lo que la
+ejecutiva marca a mano sigue mandando, pero el detalle del deal muestra al lado la cita y, si la IA no
+está de acuerdo, qué falta y qué hacer; en el tablero está en el tooltip de cada chulo y, en los demos
+directos, debajo de la fila. Los demos analizados antes de este cambio siguen con los chulos por campos;
+**Analizar con las reglas** en el detalle (`POST /api/deals/:id/reanalizar`) vuelve a pasar la
+transcripción guardada sin pisar lo que la ejecutiva escribió.
+
+### El demo quedó en el deal equivocado
+El asistente dice en cada paso en qué deal del SDR va a quedar el demo ("tomado"), con *No es este
+deal* para soltarlo, y al guardar compara la empresa del encabezado de la transcripción de Meet con la
+del deal: si no coinciden, pide confirmación. Si igual pasó, en el detalle del deal *Este demo es de otra
+empresa…* (`POST /api/deals/:id/demo/mover`) pasa el demo a un deal nuevo (o a otro existente, o lo
+descarta) y el deal de origen vuelve a ser la ficha del SDR, pendiente de demo. El lead de la SDR se
+re-enlaza solo al deal que tenga el demo de la misma empresa.
 
 ## Embudo de la ejecutiva (Sandler Coach → Embudo)
 

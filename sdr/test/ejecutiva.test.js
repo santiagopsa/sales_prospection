@@ -31,6 +31,31 @@ test('calificación: formulario del Sandler, chulos manuales y fusión al comple
   assert.deepStrictEqual(CAL.fusionarAlCompletar({ a: 1 }, {}), { a: 1 });
 });
 
+test('calificación: el veredicto de la IA por criterio manda sobre "el campo tiene texto"', () => {
+  // El formulario dice presupuesto "no hay, es para 2027" (texto → antes contaba) y fecha vacía.
+  const form = { dolorCuantificar: 'x', dolorHistoria: 'y', presupuesto: 'no hay, es para 2027', decisor: 'Gerente', procesoDecision: 'le presenta' };
+  assert.strictEqual(CAL.calificacionSandler(form).items.presupuesto, true);
+  const ia = { iaExtracted: { criterios_sandler: {
+    dolor: { cumple: true, evidencia: '20 días' },
+    presupuesto: { cumple: false, evidencia: 'para el próximo año', falta: 'plata de 2027', accion: 'preguntar cuánto pagan hoy' },
+    decision: { cumple: true, evidencia: 'gerente general' },
+    fecha: { cumple: true, evidencia: 'enero' },
+  } } };
+  const c = CAL.calificacionSandler({ ...form, ...ia });
+  assert.deepStrictEqual(c.items, { dolor: true, presupuesto: false, decision: true, fecha: true });
+  assert.deepStrictEqual(c.fuente, { dolor: 'ia', presupuesto: null, decision: 'ia', fecha: 'ia' });
+  assert.strictEqual(c.label, 'Parcial');
+  assert.strictEqual(c.con_ia, true);
+  assert.strictEqual(c.detalle.presupuesto.accion, 'preguntar cuánto pagan hoy');
+  // Un veredicto incompleto o mal formado se ignora criterio a criterio; sin veredicto, todo como antes.
+  const parcial = CAL.calificacionSandler({ ...form, iaExtracted: { criterios_sandler: { presupuesto: { cumple: 'sí' }, fecha: { cumple: true } } } });
+  assert.deepStrictEqual([parcial.items.presupuesto, parcial.items.fecha, parcial.fuente.presupuesto], [true, true, 'sandler']);
+  assert.strictEqual(CAL.veredictoIA({ iaExtracted: {} }), null);
+  // Los chulos manuales siguen mandando sobre la IA.
+  assert.strictEqual(CAL.calificacionSandler({ ...form, ...ia, calificacionManual: { items: { presupuesto: true } } }).label, 'Completa');
+  assert.match(CAL.reglasTexto(), /presupuesto \(Presupuesto\): Ya gastan/);
+});
+
 test('tablero de la ejecutiva y chulos contra la base', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async () => {
   const { conectar } = require('../db');
   const { initSchema } = require('../schema');
