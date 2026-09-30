@@ -237,6 +237,76 @@ app.put('/api/deals/:id/completar', async (req, res) => {
   }
 });
 
+// Un demo que se guardó en el deal equivocado (el asistente tenía otro deal "tomado" y se pegó la
+// transcripción de otra empresa). Se saca el demo de este deal y va a un deal nuevo, a otro deal
+// existente o se descarta. Lo que es de la ficha del SDR (empresa, contacto, línea, chulos del
+// tablero, cotización) se queda; lo del demo (transcripción, extracción, embudo del dolor, wishlist…)
+// se mueve.
+const CAMPOS_FICHA = ['company', 'executive', 'lineaNegocio', 'canalAdquisicion', 'freelancerNombre', 'prospActitud', 'prospUrgencia', 'prospOrigen',
+  'fichaCargos', 'fichaCosto', 'fichaHerramientas', 'fichaAdicional', 'calificacionManual', 'embudoHistorial', 'cotizacion', 'cotizacionAnalisis'];
+function partirDemo(data) {
+  const ficha = {}, demo = {};
+  for (const [k, v] of Object.entries(data || {})) (CAMPOS_FICHA.includes(k) ? ficha : demo)[k] = v;
+  return { ficha, demo };
+}
+app.post('/api/deals/:id/demo/mover', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { destino, company } = req.body || {};
+    if (!pool) return res.status(503).json({ ok: false, error: 'sin base de datos' });
+    const src = (await pool.query(`SELECT * FROM deals WHERE id=$1`, [id])).rows[0];
+    if (!src) return res.status(404).json({ ok: false, error: 'not found' });
+    const { ficha, demo } = partirDemo(src.data || {});
+    if (!has(demo.transcript) && !demo.iaExtracted) return res.status(400).json({ ok: false, error: 'Este deal no tiene demo que mover' });
+    const guardarDeal = async (dealId, data) => {
+      const s = scoreDeal(data);
+      const fechaLim = (data.fechaLimiteDecision && String(data.fechaLimiteDecision).match(/^\d{4}-\d{2}-\d{2}$/)) ? data.fechaLimiteDecision : null;
+      // Sin demo, la calificación que queda es la de los chulos del tablero (si los hay).
+      const cal = has(data.transcript) || data.iaExtracted ? s.calificacion.label
+        : (data.calificacionManual && Object.values(data.calificacionManual.items || {}).some(Boolean) ? CALIFICACION.calificacionSandler(data).label : null);
+      await pool.query(
+        `UPDATE deals SET company=$1, segment=$2, has_ats=$3, data=$4, score_fundamentals=$5, score_nice_to_have=$6, linea_negocio=$7,
+           calificacion_sandler=$8, fecha_limite_decision=$9 WHERE id=$10`,
+        [data.company || null, data.segment || null, !!data.hasAts, data, s.fundamentalsPct, s.niceToHavePct, data.lineaNegocio || null, cal, fechaLim, dealId]);
+      await pool.query(`DELETE FROM wishlist WHERE deal_id=$1`, [dealId]);
+      for (const item of (Array.isArray(data.idealRequests) ? data.idealRequests : [])) {
+        if (item && item.text) await pool.query(`INSERT INTO wishlist (deal_id, segment, item, we_have) VALUES ($1,$2,$3,$4)`, [dealId, data.segment || null, item.text, !!item.weHave]);
+      }
+      return s;
+    };
+    let destinoId = null;
+    if (destino === 'nuevo') {
+      if (!has(company)) return res.status(400).json({ ok: false, error: 'Falta el nombre de la empresa del deal nuevo' });
+      const data = { ...demo, company: String(company).trim(), executive: ficha.executive || src.executive || '', lineaNegocio: demo.lineaNegocio || ficha.lineaNegocio || '' };
+      const s = scoreDeal(data);
+      const r = await pool.query(
+        `INSERT INTO deals (executive, company, segment, has_ats, data, score_fundamentals, score_nice_to_have, linea_negocio, calificacion_sandler, outcome)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'open') RETURNING id`,
+        [data.executive || null, data.company, data.segment || null, !!data.hasAts, data, s.fundamentalsPct, s.niceToHavePct, data.lineaNegocio || null, s.calificacion.label]);
+      destinoId = r.rows[0].id;
+      await guardarDeal(destinoId, data);
+    } else if (Number.isInteger(Number(destino)) && Number(destino) > 0) {
+      destinoId = Number(destino);
+      if (destinoId === id) return res.status(400).json({ ok: false, error: 'El destino es el mismo deal' });
+      const dst = (await pool.query(`SELECT * FROM deals WHERE id=$1`, [destinoId])).rows[0];
+      if (!dst) return res.status(404).json({ ok: false, error: `No existe el deal #${destinoId}` });
+      const dd = dst.data || {};
+      if (has(dd.transcript)) return res.status(400).json({ ok: false, error: `El deal #${destinoId} ya tiene un demo; sácalo primero` });
+      // Los chulos que la ejecutiva marcó a mano en el destino se conservan (misma regla que al completar).
+      const data = CALIFICACION.fusionarAlCompletar({ ...dd, ...demo, company: dd.company || dst.company, executive: dd.executive || dst.executive || demo.executive || '' }, dd);
+      await guardarDeal(destinoId, data);
+    } else if (destino !== 'descartar') {
+      return res.status(400).json({ ok: false, error: 'destino debe ser "nuevo", "descartar" o el id de otro deal' });
+    }
+    // El deal de origen vuelve a ser la ficha del SDR, sin demo.
+    await guardarDeal(id, { ...ficha, company: ficha.company || src.company, idealRequests: [], qualif: {} });
+    return res.json({ ok: true, origen: id, destino: destinoId });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get('/api/deals', async (req, res) => {
   try {
     if (pool) {

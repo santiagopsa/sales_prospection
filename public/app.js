@@ -222,7 +222,10 @@ const el = document.getElementById('app');
 function h(html) { el.innerHTML = html; }
 
 function stepHeader() {
-  return `<div class="steps">
+  // Deal del SDR "tomado": se dice en cada paso en qué deal va a quedar este demo, para no pegar la
+  // transcripción de otra empresa en un deal que quedó abierto en la pestaña.
+  const tomado = state.sdrDealId ? `<div class="hint deal-tomado"><span>Este demo se va a guardar en el <strong>deal #${esc(String(state.sdrDealId))} · ${esc(state.company || '')}</strong> (agendado por el SDR).</span> <button type="button" class="btn ghost btn-sm" data-act="soltar">No es este deal</button></div>` : '';
+  return `${tomado}<div class="steps">
     ${STEPS.map((s,i) => {
       const cls = i === stepIdx ? 'active' : (i < stepIdx ? 'done' : '');
       const tipText = `${s.label.replace(/^\d+ · /, '')}\n\nOBJETIVO: ${s.goal}\n\nREGLA: ${s.rule}`;
@@ -261,6 +264,10 @@ function bindForm() {
       stepIdx++; saveDraft(); renderWizard();
     }
     else if (a === 'finish') { submitDeal(b); }
+    else if (a === 'soltar') {
+      if (!confirm(`Este demo dejará de estar ligado al deal #${state.sdrDealId} (${state.company || ''}). Al guardar se creará un deal nuevo con la empresa que pongas en Datos. ¿Seguir?`)) return;
+      delete state.sdrDealId; saveDraft(); renderWizard();
+    }
     else if (a === 'new') { clearDraft(); renderWizard(); }
   }));
   el.querySelectorAll('[data-pick-segment]').forEach(c => c.addEventListener('click', () => {
@@ -1493,9 +1500,30 @@ function stepResult() {
   bindForm();
 }
 
+// Empresa que aparece en el encabezado de la transcripción de Meet ("Encuentro X - PeakU",
+// "Conoce Peaku! - X : PeakU Meeting"). null si no se reconoce.
+function empresaDelTranscript(t) {
+  const cab = String(t || '').split('\n').slice(0, 4).join('\n');
+  const m = /(?:Encuentro|Conoce Peaku!?\s*-|Reunión)\s*(.+?)\s*(?:[-:–]\s*PeakU|: PeakU Meeting)/i.exec(cab);
+  return m ? m[1].trim() : null;
+}
+const nombreSimple = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\b(s\.?a\.?s?|ltda|s\.?a\.?|sas|esp|com|agencia de seguros)\b/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+function mismaEmpresa(a, b) {
+  const x = nombreSimple(a), y = nombreSimple(b);
+  if (!x || !y) return true;   // sin datos no se puede comparar
+  const px = x.split(' ').filter(w => w.length >= 4), py = y.split(' ').filter(w => w.length >= 4);
+  return x === y || x.includes(y) || y.includes(x) || px.some(w => py.includes(w));
+}
+
 let submitting = false;
 async function submitDeal(btn) {
   if (submitting) return;              // guard anti doble-click
+  // Guardar el demo de una empresa en el deal de otra: pasa cuando quedó "tomado" un deal del SDR en
+  // la pestaña. Se compara la empresa del deal con la del encabezado de la transcripción.
+  const enTranscript = empresaDelTranscript(state.transcript);
+  if (state.sdrDealId && enTranscript && !mismaEmpresa(enTranscript, state.company)) {
+    if (!confirm(`Ojo: la transcripción parece ser de "${enTranscript}", pero este demo se va a guardar en el deal #${state.sdrDealId} de "${state.company || ''}".\n\n¿Guardarlo igual en el deal de ${state.company || ''}?\n\n(Cancela y pulsa "No es este deal" arriba para crear un deal nuevo con la empresa correcta.)`)) return;
+  }
   submitting = true;
   // Deshabilitar TODOS los botones de guardar y mostrar loader en el que se pulsó
   const saveButtons = el.querySelectorAll('[data-act="finish"]');
@@ -1762,11 +1790,30 @@ async function renderDealDetail(id) {
 
     <div class="btn-row">
       <a class="btn ghost" href="#/deals">← Volver al historial</a>
-      <button class="btn green danger-solid" data-del-detail="${row.id}">🗑 Eliminar este deal</button>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        ${d.transcript && String(d.transcript).trim() ? `<button class="btn secondary" data-mover-demo="${row.id}" title="Si esta transcripción es de otra empresa (quedó otro deal abierto en la pestaña): el demo se pasa a un deal nuevo y este vuelve a ser la ficha del SDR">Este demo es de otra empresa…</button>` : ''}
+        <button class="btn green danger-solid" data-del-detail="${row.id}">🗑 Eliminar este deal</button>
+      </div>
     </div>
   `);
   el.querySelector('[data-del-detail]').addEventListener('click', async () => {
     await deleteDeal(row.id, () => { location.hash = '#/deals'; });
+  });
+  const $mover = el.querySelector('[data-mover-demo]');
+  if ($mover) $mover.addEventListener('click', async () => {
+    const sugerida = empresaDelTranscript(d.transcript) || '';
+    const empresa = prompt(`¿De qué empresa es este demo? Se crea un deal nuevo con esa empresa y el deal #${row.id} (${d.company || row.company || ''}) queda como lo dejó el SDR, sin demo.\n\nDeja vacío para solo quitar el demo de aquí.`, sugerida);
+    if (empresa === null) return;
+    const destino = empresa.trim() ? 'nuevo' : 'descartar';
+    if (destino === 'descartar' && !confirm(`Se quita el demo del deal #${row.id} y no se guarda en ningún otro. ¿Seguir?`)) return;
+    $mover.disabled = true; $mover.textContent = 'Moviendo…';
+    try {
+      const r = await fetch(`/api/deals/${row.id}/demo/mover`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ destino, company: empresa.trim() }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || r.statusText);
+      location.hash = j.destino ? `#/deal/${j.destino}` : `#/deal/${row.id}`;
+      if (!j.destino) renderDealDetail(row.id);
+    } catch (e) { alert('No se pudo mover: ' + e.message); $mover.disabled = false; $mover.textContent = 'Este demo es de otra empresa…'; }
   });
   pintarCotizacion(row.id);
   // Bindings del panel de outcome

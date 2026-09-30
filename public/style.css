@@ -299,3 +299,6 @@ details.tb-criterios summary { cursor: pointer; color: var(--peaku-blue-dark); }
 .rsvp.ok { background: #e8f6f0; border-color: #b7e3ce; color: var(--peaku-green-dark); }
 .rsvp.bad { background: #fdecec; border-color: #f4c2c2; color: var(--bad); }
 .rsvp.warn { background: #fef3e2; border-color: #f8d7a5; color: var(--warn); }
+
+/* Asistente: aviso de en qué deal del SDR va a quedar el demo */
+.hint.deal-tomado { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; background: #fff8e6; border-left-color: var(--warn); }
