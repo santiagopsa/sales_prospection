@@ -168,10 +168,20 @@ test('compromisos contra la base', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }
     assert.strictEqual(await en(viernes), false);
     await C.hecha(db, base, {}, seg.id, {});
     assert.strictEqual(await en(new Date('2026-09-28T14:00:00Z')), true);
+    // Retroactivo: un compromiso creado con el hueco apagado (o de antes) se arregla con la pasada del arranque.
+    const viejo = await C.crear(db, { ...base, COMPROMISO_PAUSA_SECUENCIA: false }, {}, { leadId: gamma, tipo: 'seguimiento', fecha: '2026-10-02', usuario: 'Angie' });
+    assert.strictEqual(viejo.secuencia_corrida, 0);
+    const pasada = await C.correrSecuenciasPendientes(db, base, { ahora: new Date('2026-09-28T14:00:00Z') });
+    assert.strictEqual(pasada.corridos, 1);   // (revisados incluye el seguimiento de ACME, que no tiene secuencia que correr)
+    assert.strictEqual(new Date((await db.query(`SELECT MIN(due_at) AS m FROM sdr.tasks WHERE lead_id = $1 AND tipo = 'secuencia' AND estado = 'pendiente'`, [gamma])).rows[0].m).toISOString(), '2026-10-02T13:00:00.000Z');
+    assert.strictEqual((await C.correrSecuenciasPendientes(db, base, { ahora: new Date('2026-09-28T14:00:00Z') })).corridos, 0);   // idempotente
+    await C.hecha(db, base, {}, viejo.id, {});
     // Con el hueco en false, la secuencia sigue como si nada.
-    const seg2 = await C.crear(db, { ...base, COMPROMISO_PAUSA_SECUENCIA: false }, {}, { leadId: gamma, tipo: 'seguimiento', fecha: '2026-09-30', usuario: 'Angie' });
+    const seg2 = await C.crear(db, { ...base, COMPROMISO_PAUSA_SECUENCIA: false }, {}, { leadId: gamma, tipo: 'seguimiento', fecha: '2026-10-06', usuario: 'Angie' });
     assert.strictEqual(seg2.secuencia_corrida, 0);
-    assert.strictEqual(await en(new Date('2026-09-28T14:00:00Z'), { ...base, COMPROMISO_PAUSA_SECUENCIA: false }), true);
+    const oct2 = new Date('2026-10-02T14:00:00Z');   // la secuencia quedó corrida al 2 de octubre
+    assert.strictEqual(await en(oct2, { ...base, COMPROMISO_PAUSA_SECUENCIA: false }), true);
+    assert.strictEqual(await en(oct2), false);
     await C.hecha(db, base, {}, seg2.id, {});
   });
 

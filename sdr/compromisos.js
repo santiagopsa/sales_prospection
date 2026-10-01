@@ -71,6 +71,20 @@ async function correrSecuencia(c, config, leadId, due) {
   return r.rows.length;
 }
 
+// Pasada sobre los compromisos pendientes (hoy o después) con lead: corre la secuencia de cada uno.
+// Para los que se crearon antes de COMPROMISO_PAUSA_SECUENCIA; es idempotente (solo mueve si el primer
+// toque pendiente cae antes del compromiso), así que se corre al arrancar sin riesgo.
+async function correrSecuenciasPendientes(db, config, { ahora = new Date() } = {}) {
+  if (!config.COMPROMISO_PAUSA_SECUENCIA) return { revisados: 0, corridos: 0 };
+  const r = await db.query(
+    `SELECT DISTINCT ON (lead_id) lead_id, due_at FROM ${T.tasks}
+     WHERE estado = 'pendiente' AND tipo NOT IN ('secuencia', 'reunion') AND lead_id IS NOT NULL AND due_at >= $1
+     ORDER BY lead_id, due_at ASC`, [tiempo.instante(tiempo.fechaBogota(ahora), 0).toISOString()]);
+  let corridos = 0;
+  for (const f of r.rows) if (await correrSecuencia(db, config, f.lead_id, new Date(f.due_at))) corridos++;
+  return { revisados: r.rows.length, corridos };
+}
+
 async function leer(db, id) {
   const r = await db.query(
     `SELECT t.*, l.empresa, l.contacto, l.telefono, l.email FROM ${T.tasks} t LEFT JOIN ${T.leads} l ON l.id = t.lead_id WHERE t.id = $1 AND t.tipo <> 'secuencia'`, [Number(id)]);
@@ -217,4 +231,4 @@ function ejecutivaPara(config, nombre) {
   return (pedida && pedida.rol === 'ejecutiva' ? pedida : us.find(u => u.rol === 'ejecutiva')) || null;
 }
 
-module.exports = { insertar, crear, hecha, eliminar, mover, listar, leer, sincronizar, reintentarPendientes, ejecutivaPara, vencimiento, quitarDelCalendario, reunionSinGoogle, correrSecuencia, EN_CALENDLY, SIN_EVENTO };
+module.exports = { insertar, crear, hecha, eliminar, mover, listar, leer, sincronizar, reintentarPendientes, ejecutivaPara, vencimiento, quitarDelCalendario, reunionSinGoogle, correrSecuencia, correrSecuenciasPendientes, EN_CALENDLY, SIN_EVENTO };

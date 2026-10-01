@@ -40,6 +40,11 @@ async function arrancar(pool, config = baseConfig) {
   // Rúbrica activa: se siembra una vez por versión (inmutable).
   try { await require('./evaluador').sembrarRubrica(pool, require('./rubrica/' + (config.RUBRICA_ACTIVA || 'v1')), { activar: true }); }
   catch (e) { console.error('[sdr] rúbrica:', e.message); }
+  // Compromisos que ya estaban pactados: la secuencia de esos leads se corre a la fecha del compromiso
+  // (una vez; es idempotente).
+  require('./compromisos').correrSecuenciasPendientes(pool, config)
+    .then(r => { if (r.corridos) console.log(`[sdr] secuencias corridas por compromisos pactados: ${r.corridos} de ${r.revisados}`); })
+    .catch(e => console.error('[sdr] correr secuencias:', e.message));
   const P = require('./pipeline');
   P.revisarTodas(pool, config).then(r => { if (r.pendientes) console.log(`[sdr/pipeline] ${r.pendientes} llamadas quedaron pendientes de transcribir`); }).catch(e => console.error('[sdr/pipeline] revisar:', e.message));
   P.iniciar(pool, config, process.env);

@@ -194,7 +194,8 @@ el toque de la secuencia. Al crear o mover el compromiso, la secuencia pendiente
 primer toque cae en la fecha del compromiso y los demás conservan su espaciado). Un compromiso vencido
 sin hacerse no esconde al lead: vuelve a la cola y el compromiso sale en "vencidos". Hecho el
 compromiso (o registrado el toque desde él), la secuencia sigue como siempre. Hueco:
-`COMPROMISO_PAUSA_SECUENCIA` en `config.js` (false = la secuencia sigue como si nada).
+`COMPROMISO_PAUSA_SECUENCIA` en `config.js` (false = la secuencia sigue como si nada). Es retroactivo: al
+arrancar, la app corre la secuencia de los leads con compromisos ya pactados (idempotente).
 
 ## Agendar en el Calendly de la ejecutiva
 Con `CALENDLY.url` (hoy `https://calendly.com/luisa-ztw/45min`), el resultado **Reunión agendada** funciona así:
