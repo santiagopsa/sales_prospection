@@ -488,7 +488,8 @@
       try {
         const r = await api('tareas', { method: 'POST', body: { lead_id: lead ? lead.id : null, tipo: f.get('tipo'), titulo: f.get('titulo'), fecha: f.get('fecha'), hora: f.get('hora') || null, dueno: f.get('dueno'), canal: f.get('canal'), nota: f.get('nota') || '' } });
         $modal.innerHTML = '';
-        avisar(r.calendario && r.calendario.ok ? 'Compromiso guardado y en el calendario.' : r.calendario && r.calendario.error ? 'Compromiso guardado; el calendario falló: ' + r.calendario.error : 'Compromiso guardado.', r.calendario && r.calendario.error ? 'aviso' : 'ok');
+        const cola = r.secuencia_corrida ? ' El lead sale de la cola hasta ese día: la secuencia se corrió.' : '';
+        avisar((r.calendario && r.calendario.ok ? 'Compromiso guardado y en el calendario.' : r.calendario && r.calendario.error ? 'Compromiso guardado; el calendario falló: ' + r.calendario.error : 'Compromiso guardado.') + cola, r.calendario && r.calendario.error ? 'aviso' : 'ok');
         if (alTerminar) await alTerminar();
       } catch (err) { document.getElementById('comp-error').innerHTML = pintarError(err); $frm.querySelector('button[type=submit]').disabled = false; }
     });

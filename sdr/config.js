@@ -204,6 +204,13 @@ module.exports = {
   // Ver el efecto: node sdr/cli.js resultado no_contesto --paso 9
   AL_AGOTAR_SECUENCIA: 'huerfano',
 
+  // Qué mueve: un compromiso con fecha (seguimiento, enviar algo, otra tarea) manda sobre la
+  // secuencia. true: mientras el compromiso esté pendiente el lead no sale en la cola de toques
+  // (sale el compromiso, el día que toca), y los toques de la secuencia que caían antes se corren a
+  // la fecha del compromiso. false: la secuencia sigue como si nada y el lead sale igual en la cola.
+  // Ver el efecto: node sdr/cli.js cola
+  COMPROMISO_PAUSA_SECUENCIA: true,
+
   // ---------------------------------------------------------------------------
   // Sacar un lead de la cola: descartar o pausar
   // ---------------------------------------------------------------------------

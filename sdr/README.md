@@ -187,6 +187,15 @@ por ese canal de una vez. La secuencia del lead no se consume (el compromiso es 
 está con la ejecutiva o el compromiso no tiene lead, *Hecha* solo cierra la tarea. Antes esto no contaba, por eso
 las llamadas de seguimiento no aparecían en los indicadores.
 
+### Un seguimiento pactado saca al lead de la cola
+Si Angie quedó en hablar con alguien otro día (compromiso de seguimiento, enviar algo u otra tarea con
+fecha), ese lead no vuelve a salir en la cola de toques hasta ese día: sale el compromiso en su sección, no
+el toque de la secuencia. Al crear o mover el compromiso, la secuencia pendiente se corre completa (el
+primer toque cae en la fecha del compromiso y los demás conservan su espaciado). Un compromiso vencido
+sin hacerse no esconde al lead: vuelve a la cola y el compromiso sale en "vencidos". Hecho el
+compromiso (o registrado el toque desde él), la secuencia sigue como siempre. Hueco:
+`COMPROMISO_PAUSA_SECUENCIA` en `config.js` (false = la secuencia sigue como si nada).
+
 ## Agendar en el Calendly de la ejecutiva
 Con `CALENDLY.url` (hoy `https://calendly.com/luisa-ztw/45min`), el resultado **Reunión agendada** funciona así:
 1. La SDR llena la ficha de la reunión (cargos, costo, herramientas, actitud, urgencia, nota) y da **Guardar y

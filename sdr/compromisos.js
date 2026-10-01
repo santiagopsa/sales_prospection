@@ -51,7 +51,24 @@ async function insertar(c, config, { leadId, tipo, titulo, canal, fecha, hora, n
     [leadId, paso, canal, due.toISOString(), tipo, titulo, nota || null, conHora, usuario || null, creadoPor || usuario || null]);
   const t = r.rows[0];
   if (Array.isArray(invitados) && invitados.length) t.invitados = invitados;
+  if (tipo !== 'reunion') t.secuencia_corrida = await correrSecuencia(c, config, leadId, due);
   return t;
+}
+
+// Los toques de la secuencia del lead que caían antes del compromiso se corren a su fecha: hasta
+// entonces no hay nada que hacer con ese lead (ya quedaron en hablar ese día). Después del
+// compromiso, el resultado que se registre reacomoda la secuencia como siempre.
+// Se corre la secuencia entera conservando el espaciado: el primer toque pendiente cae en la fecha
+// del compromiso y los demás se desplazan lo mismo. Devuelve cuántos toques se movieron.
+async function correrSecuencia(c, config, leadId, due) {
+  if (!config.COMPROMISO_PAUSA_SECUENCIA || leadId == null) return 0;
+  const primero = (await c.query(`SELECT MIN(due_at) AS m FROM ${T.tasks} WHERE lead_id = $1 AND estado = 'pendiente' AND tipo = 'secuencia'`, [leadId])).rows[0].m;
+  if (!primero || new Date(primero).getTime() >= due.getTime()) return 0;
+  const deltaMs = due.getTime() - new Date(primero).getTime();
+  const r = await c.query(
+    `UPDATE ${T.tasks} SET due_at = due_at + ($2::float8 * INTERVAL '1 millisecond') WHERE lead_id = $1 AND estado = 'pendiente' AND tipo = 'secuencia' RETURNING id`,
+    [leadId, deltaMs]);
+  return r.rows.length;
 }
 
 async function leer(db, id) {
@@ -148,6 +165,7 @@ async function mover(db, config, env, taskId, { fecha, hora, dias, titulo, nota 
   }
   await db.query(`UPDATE ${T.tasks} SET due_at = $2, con_hora = $3, titulo = COALESCE($4, titulo), nota = COALESCE($5, nota) WHERE id = $1`,
     [t.id, due.toISOString(), conHora, titulo != null ? String(titulo).trim() || null : null, nota != null ? String(nota) : null]);
+  if (t.tipo !== 'reunion') await correrSecuencia(db, config, t.lead_id, due);
   const g = await sincronizar(db, config, env, t.id, 'mover', opts);
   return { id: t.id, due_at: due.toISOString(), con_hora: conHora, fecha: tiempo.fechaBogota(due), calendario: g };
 }
@@ -199,4 +217,4 @@ function ejecutivaPara(config, nombre) {
   return (pedida && pedida.rol === 'ejecutiva' ? pedida : us.find(u => u.rol === 'ejecutiva')) || null;
 }
 
-module.exports = { insertar, crear, hecha, eliminar, mover, listar, leer, sincronizar, reintentarPendientes, ejecutivaPara, vencimiento, quitarDelCalendario, reunionSinGoogle, EN_CALENDLY, SIN_EVENTO };
+module.exports = { insertar, crear, hecha, eliminar, mover, listar, leer, sincronizar, reintentarPendientes, ejecutivaPara, vencimiento, quitarDelCalendario, reunionSinGoogle, correrSecuencia, EN_CALENDLY, SIN_EVENTO };

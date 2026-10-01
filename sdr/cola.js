@@ -43,10 +43,14 @@ async function consultarCola(db, config, { ahora = new Date(), usuario = null } 
                           WHERE x.lead_id = t.lead_id AND x.canal <> 'ejecutiva' ORDER BY x.created_at DESC, x.id DESC LIMIT 1) u ON true
        WHERE t.estado = 'pendiente' AND t.tipo = 'secuencia'
          AND l.etapa IN (SELECT jsonb_array_elements_text($1::jsonb))
+         ${config.COMPROMISO_PAUSA_SECUENCIA ? `AND NOT EXISTS (
+           -- Ya quedaron en hablar (compromiso pendiente para hoy o después): sale el compromiso, no el toque de la secuencia.
+           -- Un compromiso vencido no esconde al lead: vuelve a la cola y el compromiso sale en "vencidos".
+           SELECT 1 FROM ${T.tasks} k WHERE k.lead_id = t.lead_id AND k.estado = 'pendiente' AND k.tipo NOT IN ('secuencia', 'reunion') AND k.due_at >= $3)` : ''}
        ORDER BY t.lead_id, t.paso
      ) s
      WHERE s.due_ms < $2`,
-    [etapasDeAngie, finHoy.getTime()],
+    config.COMPROMISO_PAUSA_SECUENCIA ? [etapasDeAngie, finHoy.getTime(), inicioHoy.toISOString()] : [etapasDeAngie, finHoy.getTime()],
   );
 
   // Un lead ya tocado hoy (llamó y no contestó, mandó el WhatsApp…) no compite con los que faltan

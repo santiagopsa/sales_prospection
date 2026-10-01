@@ -140,6 +140,41 @@ test('compromisos contra la base', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }
     assert.match((await C.leer(db, b.id)).gcal_error, /boom/);
   });
 
+  await t.test('un seguimiento con fecha saca al lead de la cola de toques hasta ese día (COMPROMISO_PAUSA_SECUENCIA)', async () => {
+    const { importar } = require('../importar');
+    // Lead con secuencia: su toque 1 cae hoy (lunes 21) → está en la cola.
+    await importar(db, base, { archivo: 'x.csv', contenido: 'empresa,contacto,telefono\nGamma,Gus,+573005555555\n', simular: false, ahora: lunes });
+    const gamma = await id('Gamma');
+    const en = async (ahora, cfg = base) => (await consultarCola(db, cfg, { ahora, usuario: 'Angie' })).tareas.some(x => x.lead_id === gamma);
+    assert.strictEqual(await en(lunes), true);
+    // Angie quedó en hablar el jueves 24: no sale lunes, martes ni miércoles; el jueves sale el compromiso, no el toque.
+    const seg = await C.crear(db, base, {}, { leadId: gamma, tipo: 'seguimiento', titulo: 'Me dijo que el jueves', fecha: '2026-09-24', hora: '10:00', usuario: 'Angie' });
+    assert.ok(seg.secuencia_corrida >= 2, 'se corre la secuencia entera');
+    assert.strictEqual(await en(lunes), false);
+    assert.strictEqual(await en(new Date('2026-09-23T14:00:00Z')), false);
+    const jueves = new Date('2026-09-24T14:00:00Z');
+    assert.strictEqual(await en(jueves), false);
+    assert.ok((await consultarCola(db, base, { ahora: jueves, usuario: 'Angie' })).compromisos.hoy.some(c => c.id === seg.id));
+    // El toque de la secuencia quedó corrido al jueves, no borrado.
+    const tks = (await db.query(`SELECT due_at FROM sdr.tasks WHERE lead_id = $1 AND tipo = 'secuencia' AND estado = 'pendiente' ORDER BY paso`, [gamma])).rows;
+    assert.strictEqual(new Date(tks[0].due_at).toISOString(), '2026-09-24T15:00:00.000Z');
+    assert.strictEqual(new Date(tks[1].due_at).toISOString(), '2026-09-24T15:00:00.000Z');   // paso 2 es el mismo día (dias: 0)
+    assert.ok(new Date(tks[2].due_at) > new Date(tks[0].due_at), 'el espaciado de la secuencia se conserva');
+    // Si el compromiso se vence sin hacerse, el lead vuelve a la cola (y el compromiso sale en vencidos).
+    const viernes = new Date('2026-09-25T14:00:00Z');
+    assert.strictEqual(await en(viernes), true);
+    // Mover el compromiso vuelve a correr la secuencia; hecho el compromiso, el lead vuelve.
+    await C.mover(db, base, {}, seg.id, { fecha: '2026-09-28' });
+    assert.strictEqual(await en(viernes), false);
+    await C.hecha(db, base, {}, seg.id, {});
+    assert.strictEqual(await en(new Date('2026-09-28T14:00:00Z')), true);
+    // Con el hueco en false, la secuencia sigue como si nada.
+    const seg2 = await C.crear(db, { ...base, COMPROMISO_PAUSA_SECUENCIA: false }, {}, { leadId: gamma, tipo: 'seguimiento', fecha: '2026-09-30', usuario: 'Angie' });
+    assert.strictEqual(seg2.secuencia_corrida, 0);
+    assert.strictEqual(await en(new Date('2026-09-28T14:00:00Z'), { ...base, COMPROMISO_PAUSA_SECUENCIA: false }), true);
+    await C.hecha(db, base, {}, seg2.id, {});
+  });
+
   // Con REUNION_CREA_COMPROMISO en true (hoy está en false: la reunión vive en Calendly).
   const conReunion = { ...base, REUNION_CREA_COMPROMISO: true };
   await t.test('reunión agendada crea el compromiso de la ejecutiva con Angie invitada; realizada lo cierra', async () => {
