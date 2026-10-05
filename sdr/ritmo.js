@@ -61,10 +61,10 @@ async function racha(db, config, ahora = new Date(), usuario = null) {
 async function bloqueActual(db, config, ahora = new Date(), usuario = null) {
   const hoy = tiempo.fechaBogota(ahora);
   const minAhora = Math.floor((ahora - tiempo.instante(hoy, 0)) / 60000);
-  const bloques = config.BLOQUES_PROSPECCION || [];
+  const bloques = bloquesJornada(config);
   const idx = bloques.findIndex(b => minAhora >= minutos(b.inicio) && minAhora < minutos(b.fin));
   const siguiente = bloques.find(b => minutos(b.inicio) > minAhora) || null;
-  if (idx < 0) return { enCurso: null, siguiente: siguiente ? { nombre: siguiente.nombre, inicio: siguiente.inicio } : null };
+  if (idx < 0) return { enCurso: null, siguiente: siguiente ? { id: siguiente.id, nombre: siguiente.nombre, inicio: siguiente.inicio } : null };
   const b = bloques[idx];
   const desde = new Date(tiempo.instante(hoy, 0).getTime() + minutos(b.inicio) * 60000);
   const r = await db.query(
@@ -74,12 +74,19 @@ async function bloqueActual(db, config, ahora = new Date(), usuario = null) {
     [desde.toISOString(), ahora.toISOString(), conv, paramUsuario(config, usuario)]);
   return {
     enCurso: {
-      nombre: b.nombre || `Bloque ${idx + 1}`, inicio: b.inicio, fin: b.fin,
-      metaMarcaciones: b.metaMarcaciones, marcaciones: r.rows[0].marcaciones, conversaciones: r.rows[0].conversaciones,
+      id: b.id, que: b.que, nombre: b.nombre || `Bloque ${idx + 1}`, inicio: b.inicio, fin: b.fin,
+      metaMarcaciones: b.metaMarcaciones || null, marcaciones: r.rows[0].marcaciones, conversaciones: r.rows[0].conversaciones,
       minutosRestantes: minutos(b.fin) - minAhora,
     },
-    siguiente: siguiente ? { nombre: siguiente.nombre, inicio: siguiente.inicio } : null,
+    siguiente: siguiente ? { id: siguiente.id, nombre: siguiente.nombre, inicio: siguiente.inicio } : null,
   };
+}
+
+// Los bloques del día (config.JORNADA.bloques). Compatibilidad con la forma vieja (BLOQUES_PROSPECCION).
+function bloquesJornada(config) {
+  const J = config.JORNADA;
+  if (J && Array.isArray(J.bloques)) return J.bloques.map((b, i) => ({ id: b.id || `b${i + 1}`, que: b.que || 'nuevas', ...b }));
+  return (config.BLOQUES_PROSPECCION || []).map((b, i) => ({ id: `b${i + 1}`, que: 'nuevas', ...b }));
 }
 
 // Tasas sobre una ventana móvil. Se calculan siempre; la vista decide si las muestra (MOSTRAR_RATIOS).
@@ -184,4 +191,4 @@ async function historialDia(db, config, { fecha, usuario = null } = {}) {
   return { fecha, usuario, resumen, toques, compromisosHechos: k.rows, ayer: tiempo.sumarDias(fecha, -1), manana: tiempo.sumarDias(fecha, 1), hoy: tiempo.fechaBogota(new Date()), ayerDeHoy: tiempo.sumarDias(tiempo.fechaBogota(new Date()), -1) };
 }
 
-module.exports = { actividadPorDia, racha, bloqueActual, ratios, resumenSemana, semanaDe, diaCumplido, motivoCumplido, historialDia };
+module.exports = { actividadPorDia, racha, bloqueActual, bloquesJornada, ratios, resumenSemana, semanaDe, diaCumplido, motivoCumplido, historialDia };

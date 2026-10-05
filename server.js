@@ -593,6 +593,7 @@ ${transcript}
 
 TAREA:
 1. Extrae la información estructurada (campos del JSON), con citas textuales.
+1a. idealRequests: SOLO lo que el CLIENTE pidió o dijo necesitar, con la cita textual del cliente (no del ejecutivo). Algo que el ejecutivo mostró y el cliente aceptó ver, dijo "ok" o no se opuso NO es un pedido. Sin cita del cliente, no va. Mejor vacío que inventado: esta lista alimenta el wishlist de la empresa.
 1b. criterios_sandler: aplica la regla escrita de cada criterio a la transcripción y da el veredicto con su cita. Para cada criterio que NO cumple, "falta" dice qué le falta según la regla y "accion" es un call to action concreto: la pregunta exacta o el paso (a quién, por qué canal, cuándo) que cierra ese criterio. Esto es lo que la ejecutiva va a leer para saber qué hacer: sé directo y específico a esta conversación.
 2. Diagnostica la objeción/indecisión SUBYACENTE (objecion_subyacente) usando SOLO señales del transcript. Cita la frase que la delata.
 3. Genera acciones_concretas: 3-7 pasos ESPECÍFICOS a esta conversación (nombre real, fecha, canal). Cada acción atada a: la palanca JOLT que ataca (J/O/L/T) y la cita o señal del transcript que la motiva. Prioriza por impacto en DESBLOQUEAR la indecisión detectada, NO por el orden del proceso.
@@ -617,7 +618,7 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL. Formato exacto:
   "procesoDecision": "pasos internos, comité, plazos",
   "fechaLimiteDecision": "YYYY-MM-DD si se acordó fecha específica, vacío si no",
   "idealRequests": [
-    {"text": "pedido del cliente en sus palabras", "weHave": true}
+    {"text": "pedido del cliente, en sus palabras", "cita": "cita textual del CLIENTE donde lo pide (obligatoria)", "weHave": true}
   ],
   "proximoPaso": "próximo paso concreto acordado en el demo",
   "postVenta": "si se habló de onboarding/seguimiento",
@@ -670,8 +671,30 @@ async function analizarTranscript(transcript, context) {
     throw Object.assign(new Error('Claude devolvió JSON inválido'), { status: 502, raw: text.slice(0, 2000) });
   }
   parsed._usage = msg.usage;
+  // Pedidos del cliente sin cita del cliente no entran: alimentan el wishlist y no pueden ser inventados.
+  if (Array.isArray(parsed.idealRequests)) {
+    parsed.idealRequests = parsed.idealRequests.filter(x => x && has(x.text) && has(x.cita)).map(x => ({ text: String(x.text).trim(), cita: String(x.cita).trim(), weHave: !!x.weHave }));
+  }
   return parsed;
 }
+
+// Quitar un pedido del cliente del deal (y del wishlist): la IA lo registró y el cliente no lo pidió.
+app.post('/api/deals/:id/ideal/quitar', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ ok: false, error: 'sin base de datos' });
+    const id = Number(req.params.id);
+    const texto = String((req.body || {}).text || '').trim();
+    if (!texto) return res.status(400).json({ ok: false, error: 'Falta el pedido' });
+    const row = (await pool.query(`SELECT data FROM deals WHERE id=$1`, [id])).rows[0];
+    if (!row) return res.status(404).json({ ok: false, error: 'not found' });
+    const d = { ...(row.data || {}) };
+    const antes = Array.isArray(d.idealRequests) ? d.idealRequests.length : 0;
+    d.idealRequests = (Array.isArray(d.idealRequests) ? d.idealRequests : []).filter(x => !(x && String(x.text || '').trim() === texto));
+    await pool.query(`UPDATE deals SET data=$2 WHERE id=$1`, [id, d]);
+    await pool.query(`DELETE FROM wishlist WHERE deal_id=$1 AND item=$2`, [id, texto]);
+    res.json({ ok: true, quitados: antes - d.idealRequests.length, idealRequests: d.idealRequests });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 
 app.post('/api/analyze', async (req, res) => {
   try {

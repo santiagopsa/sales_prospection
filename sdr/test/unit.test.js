@@ -82,7 +82,12 @@ test('Secuencia: días acumulados desde el toque anterior y fines de semana', ()
 test('Prioridad: etapa + canal + atraso con tope', () => {
   const ahora = new Date('2026-09-30T15:00:00Z');
   const t = (etapa, canal, fecha) => prioridad({ etapa, canal, due_ms: tiempo.instante(fecha, 8).getTime() }, config, ahora);
-  assert.deepStrictEqual(t('nuevo', 'llamada', '2026-09-30').desglose, { etapa: 10, canal: 10, atraso: 0, lista: 0 });
+  assert.deepStrictEqual(t('nuevo', 'llamada', '2026-09-30').desglose, { etapa: 10, canal: 10, atraso: 0, lista: 0, cargo: 0 });
+  // Cargo con prioridad (PRIORIDAD.porCargo): selección/reclutamiento suma más que coordinador de TH; directores, nada.
+  const conCargo = cargo => prioridad({ etapa: 'nuevo', canal: 'llamada', cargo, due_ms: tiempo.instante('2026-09-30', 8).getTime() }, config, ahora);
+  assert.deepStrictEqual([conCargo('Coordinadora de Selección de Personal').desglose.cargo, conCargo('Coordinador de Talento Humano').desglose.cargo, conCargo('Head of Human Talent').desglose.cargo, conCargo(null).desglose.cargo], [15, 5, 0, 0]);
+  assert.strictEqual(conCargo('Jefe de Reclutamiento').cargo_regla, 'selección / reclutamiento');
+  assert.ok(conCargo('Analista de selección').puntaje > conCargo('Gerente General').puntaje);
   // Lead de una lista fresca de prioridad alta: suma LISTAS.puntos y le gana a todo lo demás.
   const deLista = prioridad({ etapa: 'nuevo', canal: 'correo', due_ms: tiempo.instante('2026-09-30', 8).getTime(), lista: { id: 1 } }, config, ahora);
   assert.strictEqual(deLista.desglose.lista, config.LISTAS.puntos);

@@ -9,17 +9,35 @@ const tiempo = require('./tiempo');
 const { actividadDelDia } = require('./resultados');
 const ritmo = require('./ritmo');
 
+// Puntos por el cargo del contacto (PRIORIDAD.porCargo): la primera regla cuyo patrón encaja.
+const simple = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+function puntosCargo(config, cargo) {
+  const reglas = (config.PRIORIDAD && config.PRIORIDAD.porCargo) || [];
+  const c = simple(cargo);
+  if (!c) return { puntos: 0, regla: null };
+  for (const r of reglas) { try { if (new RegExp(r.patron, 'i').test(c)) return { puntos: r.puntos || 0, regla: r.nombre || r.patron }; } catch (_) { /* patrón inválido: se ignora */ } }
+  return { puntos: 0, regla: null };
+}
+
 function prioridad(tarea, config, ahora) {
   const P = config.PRIORIDAD;
   const diasVencida = Math.max(0, tiempo.diasEntre(new Date(tarea.due_ms), ahora));
+  const cargo = puntosCargo(config, tarea.cargo);
   const desglose = {
     etapa: P.porEtapa[tarea.etapa] || 0,
     canal: P.porCanal[tarea.canal] || 0,
     atraso: Math.min(diasVencida, P.topeDiasVencido) * P.porDiaVencido,
     // Lead de una lista fresca de prioridad alta (config.LISTAS).
     lista: tarea.lista ? ((config.LISTAS || {}).puntos || 0) : 0,
+    cargo: cargo.puntos,
   };
-  return { puntaje: desglose.etapa + desglose.canal + desglose.atraso + desglose.lista, desglose, diasVencida };
+  return { puntaje: desglose.etapa + desglose.canal + desglose.atraso + desglose.lista + desglose.cargo, desglose, diasVencida, cargo_regla: cargo.regla };
+}
+
+// A qué bloque de la jornada pertenece una tarea de la secuencia (config.JORNADA.bloques[].que).
+function bloqueDe(tarea) {
+  if (tarea.canal !== 'llamada') return 'otros';
+  return tarea.etapa === 'conversacion' ? 'seguimiento' : 'nuevas';
 }
 
 const etapasDeAngie = JSON.stringify(ETAPAS_DE_ANGIE);
@@ -59,8 +77,16 @@ async function consultarCola(db, config, { ahora = new Date(), usuario = null } 
   const tareas = r.rows.map(t => {
     t = { ...t, lista: calientes.get(t.lead_id) || null };
     const p = prioridad(t, config, ahora);
-    return { ...t, ...p, vencida: t.due_ms < inicioHoy.getTime(), tocado_hoy: t.ultimo_ms != null && t.ultimo_ms >= inicioHoy.getTime() };
+    return { ...t, ...p, bloque: bloqueDe(t), vencida: t.due_ms < inicioHoy.getTime(), tocado_hoy: t.ultimo_ms != null && t.ultimo_ms >= inicioHoy.getTime() };
   }).sort((a, b) => (a.tocado_hoy - b.tocado_hoy) || b.puntaje - a.puntaje || a.due_ms - b.due_ms || a.lead_id - b.lead_id);
+  // Cupo por bloque (JORNADA.cupo): lo que no cabe hoy queda "en espera", sin alarma de atraso.
+  const cupo = (config.JORNADA && config.JORNADA.cupo) || {};
+  const contados = {};
+  for (const t of tareas) {
+    if (t.tocado_hoy) continue;
+    contados[t.bloque] = (contados[t.bloque] || 0) + 1;
+    t.en_espera = cupo[t.bloque] != null && contados[t.bloque] > cupo[t.bloque];
+  }
 
   const huerfanos = (await db.query(
     `SELECT COUNT(*)::int AS n FROM ${T.leads} l
@@ -71,15 +97,30 @@ async function consultarCola(db, config, { ahora = new Date(), usuario = null } 
 
   const act = await actividadDelDia(db, hoy, config, usuario);
   const [bloque, racha, compromisos] = await Promise.all([ritmo.bloqueActual(db, config, ahora, usuario), ritmo.racha(db, config, ahora, usuario), require('./compromisos').listar(db, config, { usuario, ahora })]);
+  // La jornada: cada bloque con lo que le toca (secuencia + compromisos del día por canal).
+  const porBloque = id => tareas.filter(t => t.bloque === id && !t.tocado_hoy);
+  const jornada = {
+    actual: bloque.enCurso ? bloque.enCurso.id : null,
+    siguiente: bloque.siguiente ? bloque.siguiente.id : null,
+    bloques: ritmo.bloquesJornada(config).map(b => {
+      const que = b.que || 'nuevas';
+      const mias = porBloque(que);
+      const comps = compromisos.hoy.filter(c => que === 'seguimiento' ? c.canal === 'llamada' : que === 'otros' ? c.canal !== 'llamada' : false);
+      return { id: b.id, que, nombre: b.nombre, inicio: b.inicio, fin: b.fin, metaMarcaciones: b.metaMarcaciones || null,
+        total: mias.length, caben: mias.filter(t => !t.en_espera).length, en_espera: mias.filter(t => t.en_espera).length, compromisos: comps.length, cupo: cupo[que] != null ? cupo[que] : null };
+    }),
+  };
   return {
     fecha: hoy,
     tareas,
     compromisos,
     usuario: usuario || null,
     bloque,
+    jornada,
     racha,
     indicadores: {
       vencidas: tareas.filter(t => t.vencida).length,
+      enEspera: tareas.filter(t => t.en_espera).length,
       porContactar: tareas.filter(t => !t.tocado_hoy).length,
       tocadosHoy: tareas.filter(t => t.tocado_hoy).length,
       compromisosHoy: compromisos.hoy.length,
@@ -112,4 +153,4 @@ async function posponerTarea(db, config, { taskId, dias, ahora = new Date() }) {
   return { ...r.rows[0], fecha };
 }
 
-module.exports = { consultarCola, prioridad, posponerTarea };
+module.exports = { consultarCola, prioridad, puntosCargo, bloqueDe, posponerTarea };

@@ -45,6 +45,10 @@ async function arrancar(pool, config = baseConfig) {
   require('./compromisos').correrSecuenciasPendientes(pool, config)
     .then(r => { if (r.corridos) console.log(`[sdr] secuencias corridas por compromisos pactados: ${r.corridos} de ${r.revisados}`); })
     .catch(e => console.error('[sdr] correr secuencias:', e.message));
+  // Tope de llamadas sin conversación: se aplica también a los leads que ya venían con llamadas de más.
+  require('./resultados').aplicarTopeLlamadasATodos(pool, config)
+    .then(r => { if (r.cambiados) console.log(`[sdr] tope de llamadas aplicado: ${r.cambiados} leads siguen por otro canal (de ${r.revisados} revisados)`); })
+    .catch(e => console.error('[sdr] tope de llamadas:', e.message));
   const P = require('./pipeline');
   P.revisarTodas(pool, config).then(r => { if (r.pendientes) console.log(`[sdr/pipeline] ${r.pendientes} llamadas quedaron pendientes de transcribir`); }).catch(e => console.error('[sdr/pipeline] revisar:', e.message));
   P.iniciar(pool, config, process.env);

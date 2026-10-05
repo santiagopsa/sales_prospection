@@ -165,11 +165,33 @@ los de una exportación de **Apollo** tal cual: `First Name` + `Last Name` → c
 país, LinkedIn, sitio web, keywords y tecnologías quedan en la ficha del lead. Los números que Excel guarda como
 `3.016572696E9` se leen bien.
 
-## Cola del día: por contactar y ya tocados hoy
+## Jornada: la cola por bloques del día
+La cola (`#/cola`) es el plan del día, partido en los bloques de `JORNADA.bloques` (hora de Bogotá):
+**Llamadas nuevas** 9–12 (llamadas de la secuencia a leads que todavía no conversan; meta 60 marcaciones),
+**Seguimientos por llamada** 14–15 (compromisos del día por llamada y llamadas a leads que ya conversaron) y
+**WhatsApp, correo y LinkedIn** 15–18 (toques de la secuencia por esos canales y compromisos por ellos). El
+bloque que corre ahora sale abierto y marcado "ahora"; los otros, plegados con su conteo. "Llamar al siguiente"
+toma el primero del bloque abierto. Viene del análisis del 1-oct (10–12 contestan 33 % y conversan el 60 % de
+los que contestan; después de las 4 pm, 20 % y 36 %).
+
+Cada bloque muestra como mucho `JORNADA.cupo` leads; el resto queda **en espera**, sin alarma: la secuencia
+no es una deuda. Un toque que la secuencia tenía para días atrás dice "espera N días" en gris y sube de
+prioridad solo (`PRIORIDAD.porDiaVencido`). Las únicas alertas son compromisos vencidos (lo que Angie pactó)
+y leads huérfanos.
+
 Cada tarjeta dice la acción que toca (**Llamar**, **Enviar WhatsApp**, **Enviar correo**, **Mensaje por LinkedIn**), el
 contexto del último toque ("Último: hoy 10:32 · No contestó") y el paso ("toque 2 de 9"). Los leads que ya
 recibieron un toque hoy (llamó y no contestó, ya mandó el WhatsApp…) van en su propia sección **Ya tocados hoy**,
-debajo, con su siguiente paso; los de arriba son los que faltan por contactar, en orden de prioridad.
+debajo, con su siguiente paso.
+
+- **Prioridad por cargo** (`PRIORIDAD.porCargo`): selección/reclutamiento +15, coordinadores de TH +5 (del
+  análisis: agendan 9 % y 6 % de las llamadas; directores y gerentes 4 %). La tarjeta lo marca con ★.
+- **Tope de llamadas sin conversación** (`JORNADA.tope_llamadas_sin_conversacion`, 3): a la tercera llamada
+  sin conversación desde la última conversación (no contestó, buzón, gatekeeper), las llamadas que quedaban en
+  la secuencia se omiten y el lead sigue por los otros canales; si no quedan, aplica `AL_AGOTAR_SECUENCIA`. Al
+  arrancar, la app lo aplica también a los leads que ya venían con llamadas de más (idempotente). Del
+  análisis: de la 4ª llamada en adelante, 0 conversaciones de 28.
+- `node sdr/cli.js cola` muestra los bloques, el cupo, el bloque de cada tarea y el desglose del puntaje.
 
 ## Compromisos y Google Calendar
 Un compromiso es una tarea con fecha (y hora, si se pactó) que nace de una conversación, distinta de los toques
@@ -397,6 +419,14 @@ está de acuerdo, qué falta y qué hacer; en el tablero está en el tooltip de 
 directos, debajo de la fila. Los demos analizados antes de este cambio siguen con los chulos por campos;
 **Analizar con las reglas** en el detalle (`POST /api/deals/:id/reanalizar`) vuelve a pasar la
 transcripción guardada sin pisar lo que la ejecutiva escribió.
+
+### Pedidos del cliente (wishlist) solo con cita
+`idealRequests` alimenta el wishlist, así que cada pedido lleva la cita textual del cliente; algo que la
+ejecutiva mostró y el cliente aceptó ver no es un pedido, y lo que llega sin cita se descarta antes de
+guardar. En el detalle del deal cada pedido muestra su cita y tiene ✕ para quitarlo del deal y del wishlist
+(`POST /api/deals/:id/ideal/quitar`). El detalle ya no muestra el "resumen de calidad" ni la lista mecánica
+de "campos que no se completaron": lo pendiente lo dice el veredicto por criterio y las preguntas faltantes
+de la IA, que sí leen la conversación.
 
 ### El demo quedó en el deal equivocado
 El asistente dice en cada paso en qué deal del SDR va a quedar el demo ("tomado"), con *No es este

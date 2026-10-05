@@ -432,3 +432,21 @@ a.chip.fuego:hover { text-decoration: none; background: #ffe4cc; }
 /* "Viendo a…" (ejecutiva / admin): de quién son los números de Semana, Historial y Comisión */
 .visto { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 12px; }
 .visto .pk-select { padding: 2px 26px 2px 8px; font-size: 12px; min-height: 0; }
+
+/* Jornada: un bloque por franja del día, el de ahora abierto */
+.jornada { display: grid; gap: 10px; }
+.bloque-dia { background: var(--panel); border: 1px solid var(--linea); border-radius: var(--r); overflow: hidden; }
+.bloque-dia > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 14px 96px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 12px 16px; }
+.bloque-dia > summary::-webkit-details-marker { display: none; }
+.bloque-dia > summary::before { content: '▸'; color: var(--suave); }
+.bloque-dia[open] > summary::before { content: '▾'; }
+.bloque-dia > summary .bd-hora { font-variant-numeric: tabular-nums; color: var(--suave); font-size: 13px; }
+.bloque-dia > summary .bd-nombre { font-size: 15px; }
+.bloque-dia > summary .bd-resumen { font-size: 12px; text-align: right; }
+.bloque-dia.ahora { border-color: var(--azul); box-shadow: 0 0 0 2px #e6f9ff; }
+.bloque-dia.ahora > summary { background: #f3fcff; }
+.bd-cuerpo { padding: 0 12px 12px; border-top: 1px solid var(--linea); }
+.bd-cuerpo .cola { margin-top: 10px; }
+.bd-cuerpo .compromisos-bloque .compromiso { background: var(--fondo); }
+.en-espera { font-size: 12px; margin-top: 10px; }
+@media (max-width: 700px) { .bloque-dia > summary { grid-template-columns: 14px 1fr; gap: 4px 10px; } .bloque-dia > summary .bd-nombre, .bloque-dia > summary .bd-resumen { grid-column: 2; text-align: left; } }

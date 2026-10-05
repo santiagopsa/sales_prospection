@@ -47,6 +47,42 @@ async function omitirPendientes(c, leadId, todo = false) {
   return r.rows.filter(t => t.tipo !== 'secuencia').map(t => t.id);
 }
 
+// Llamadas sin conversación de un lead desde su última conversación (o desde siempre).
+async function llamadasSinConversacion(c, leadId) {
+  const r = await c.query(
+    `SELECT COUNT(*)::int AS n FROM ${T.touches} t
+     WHERE t.lead_id = $1 AND t.canal = 'llamada' AND t.resultado IN ('no_contesto', 'buzon', 'gatekeeper')
+       AND t.created_at > COALESCE((SELECT MAX(x.created_at) FROM ${T.touches} x WHERE x.lead_id = $1 AND x.resultado IN (SELECT jsonb_array_elements_text($2::jsonb))), '1970-01-01')`,
+    [leadId, JSON.stringify(D.RESULTADOS_CON_CONVERSACION)]);
+  return r.rows[0].n;
+}
+
+// Si el lead llegó al tope de llamadas sin conversación, omite las llamadas pendientes de su
+// secuencia (quedan los otros canales). Devuelve { llamadas, omitidas }.
+async function aplicarTopeLlamadas(c, config, leadId) {
+  const tope = config.JORNADA && config.JORNADA.tope_llamadas_sin_conversacion;
+  if (!tope) return { llamadas: 0, omitidas: 0 };
+  const llamadas = await llamadasSinConversacion(c, leadId);
+  if (llamadas < tope) return { llamadas, omitidas: 0 };
+  const r = await c.query(
+    `UPDATE ${T.tasks} SET estado = 'omitida', done_at = NOW() WHERE lead_id = $1 AND estado = 'pendiente' AND tipo = 'secuencia' AND canal = 'llamada' RETURNING id`, [leadId]);
+  return { llamadas, omitidas: r.rows.length };
+}
+
+// Pasada sobre todos los leads de la SDR con llamadas pendientes (para aplicar el tope a los que ya
+// venían de antes). Idempotente. Devuelve cuántos leads cambiaron.
+async function aplicarTopeLlamadasATodos(db, config) {
+  const tope = config.JORNADA && config.JORNADA.tope_llamadas_sin_conversacion;
+  if (!tope) return { revisados: 0, cambiados: 0 };
+  const leads = (await db.query(
+    `SELECT DISTINCT t.lead_id FROM ${T.tasks} t JOIN ${T.leads} l ON l.id = t.lead_id
+     WHERE t.estado = 'pendiente' AND t.tipo = 'secuencia' AND t.canal = 'llamada' AND l.etapa IN (SELECT jsonb_array_elements_text($1::jsonb))`,
+    [JSON.stringify(D.ETAPAS_DE_ANGIE)])).rows;
+  let cambiados = 0;
+  for (const { lead_id } of leads) if ((await aplicarTopeLlamadas(db, config, lead_id)).omitidas) cambiados++;
+  return { revisados: leads.length, cambiados };
+}
+
 // Nueva tarea al final de la secuencia del lead, `dias` días (hábiles según config) después de hoy.
 async function programar(c, config, leadId, canal, dias, ahora, fechaFija) {
   const fecha = fechaFija || tiempo.avanzar(tiempo.fechaBogota(ahora), dias, !!config.SALTAR_FINES_DE_SEMANA);
@@ -266,6 +302,15 @@ async function registrarToque(db, config, {
     } else {
       // no contestó, buzón, gatekeeper y toques por otros canales: la secuencia sigue.
       if (nueva) await cambiarEtapa(c, leadId, nueva);
+      // Tope de llamadas sin conversación (JORNADA.tope_llamadas_sin_conversacion): las llamadas
+      // que quedaban en la secuencia se omiten y el lead sigue por los otros canales.
+      if (canal === 'llamada') {
+        const t = await aplicarTopeLlamadas(c, config, leadId);
+        if (t.omitidas) {
+          pendientes = pendientes.filter(x => x.canal !== 'llamada');
+          avisos.push(`${t.llamadas} llamadas sin conversación: ${pendientes.length ? 'la secuencia sigue por ' + pendientes.map(x => D.CANAL_LABEL[x.canal] || x.canal).filter((v, i, a) => a.indexOf(v) === i).join(', ') + '.' : 'se omitieron las llamadas que quedaban y no hay otro canal pendiente.'}`);
+        }
+      }
       proxima = pendientes[0] || null;
       if (!proxima && config.AL_AGOTAR_SECUENCIA === 'descartar') {
         await cambiarEtapa(c, leadId, 'descartado', { razon_descarte: 'sin_respuesta' });
@@ -473,4 +518,4 @@ async function agregarAListaNegra(db, config, { telefono, email, empresa, domini
   });
 }
 
-module.exports = { registrarToque, registrarEjecutiva, crearDeal, cambiarEtapa, leerLead, reagendarReunion, agregarAListaNegra, sacarDeCola, mesesReintento, actividadDelDia, siguienteEtapa, enTransaccion, usuarioValido, usuariosSdr, filtroUsuario, paramUsuario };
+module.exports = { registrarToque, registrarEjecutiva, crearDeal, cambiarEtapa, leerLead, reagendarReunion, agregarAListaNegra, sacarDeCola, mesesReintento, actividadDelDia, siguienteEtapa, enTransaccion, usuarioValido, usuariosSdr, filtroUsuario, paramUsuario, aplicarTopeLlamadas, aplicarTopeLlamadasATodos, llamadasSinConversacion };

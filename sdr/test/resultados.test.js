@@ -343,6 +343,51 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
     assert.strictEqual(d.razon_descarte, 'sin_respuesta');
   });
 
+  await t.test('tope de llamadas sin conversación: a la tercera, la secuencia sigue por otro canal', async () => {
+    const { aplicarTopeLlamadasATodos, llamadasSinConversacion } = require('../resultados');
+    await importar(db, base, { archivo: 'y.csv', contenido: 'empresa,contacto,telefono,email\nEpsilon,Eva,3017770001,eva@eps.co\nZeta,Zoe,3017770002,', simular: false, ahora: lunes });
+    const eps = await id('Epsilon');
+    const r1 = await registrarToque(db, base, { leadId: eps, canal: 'llamada', resultado: 'no_contesto', ahora: lunes });
+    const r2 = await registrarToque(db, base, { leadId: eps, canal: 'llamada', resultado: 'buzon', ahora: lunes });
+    assert.ok(!r1.avisos.some(a => /sin conversación/.test(a)) && !r2.avisos.some(a => /sin conversación/.test(a)));
+    assert.ok((await pendientes('Epsilon')).some(x => x.canal === 'llamada'), 'con 2 llamadas aún quedan llamadas en la secuencia');
+    const r3 = await registrarToque(db, base, { leadId: eps, canal: 'llamada', resultado: 'gatekeeper', ahora: lunes });
+    assert.match(r3.avisos.join(' '), /3 llamadas sin conversación: la secuencia sigue por/);
+    const p = await pendientes('Epsilon');
+    assert.ok(p.length > 0 && !p.some(x => x.canal === 'llamada'), 'ya no quedan llamadas pendientes, sí otros canales');
+    assert.strictEqual(await llamadasSinConversacion(db, eps), 3);
+    const cola = await consultarCola(db, base, { ahora: lunes });
+    const enCola = cola.tareas.find(x => x.lead_id === eps);
+    assert.ok(enCola && enCola.canal !== 'llamada' && enCola.bloque === 'otros');
+    // Una conversación reinicia el conteo.
+    await registrarToque(db, base, { leadId: eps, canal: 'whatsapp', resultado: 'conversacion', ahora: lunes });
+    assert.strictEqual(await llamadasSinConversacion(db, eps), 0);
+    // Pasada retroactiva: Zeta ya tiene 3 llamadas sin respuesta registradas "a la antigua" (sin tope).
+    const zeta = await id('Zeta');
+    const sinTope = { ...base, JORNADA: { ...base.JORNADA, tope_llamadas_sin_conversacion: null } };
+    for (let i = 0; i < 3; i++) await registrarToque(db, sinTope, { leadId: zeta, canal: 'llamada', resultado: 'no_contesto', ahora: lunes });
+    assert.ok((await pendientes('Zeta')).some(x => x.canal === 'llamada'));
+    const pasada = await aplicarTopeLlamadasATodos(db, base);
+    assert.ok(pasada.cambiados >= 1);
+    assert.ok(!(await pendientes('Zeta')).some(x => x.canal === 'llamada'));
+    assert.strictEqual((await aplicarTopeLlamadasATodos(db, base)).cambiados, 0);   // idempotente
+  });
+
+  await t.test('cola por bloques: nuevas / seguimiento / otros, cupo y en espera', async () => {
+    const cola = await consultarCola(db, { ...base, JORNADA: { ...base.JORNADA, cupo: { nuevas: 1, seguimiento: 30, otros: 60 } } }, { ahora: lunes });
+    assert.ok(Array.isArray(cola.jornada.bloques) && cola.jornada.bloques.map(b => b.que).join(',') === 'nuevas,seguimiento,otros');
+    assert.strictEqual(cola.jornada.actual, 'nuevas');                       // lunes 9:00 Bogotá
+    const nuevas = cola.tareas.filter(t => t.bloque === 'nuevas' && !t.tocado_hoy);
+    if (nuevas.length > 1) {
+      assert.strictEqual(nuevas.filter(t => !t.en_espera).length, 1);
+      assert.strictEqual(cola.jornada.bloques[0].en_espera, nuevas.length - 1);
+      assert.strictEqual(cola.indicadores.enEspera, nuevas.length - 1);
+    }
+    // Un lead que ya conversó va a "seguimiento" cuando su siguiente toque es llamada.
+    const eps = await id('Epsilon');
+    assert.ok(cola.tareas.filter(t => t.lead_id === eps).every(t => t.bloque === (t.canal === 'llamada' ? 'seguimiento' : 'otros')));
+  });
+
   await t.test('llamada desde el navegador: el uuid une resultado y webhook', async () => {
     // El webhook llegó primero (fase 3) y creó la fila
     await db.query(`INSERT INTO sdr.calls (uuid, lead_id, origen, duracion_s, record_url) VALUES ('u-1', $1, 'voximplant', 95, 'https://rec/u-1.mp3')`, [await id('Gama')]);

@@ -54,6 +54,14 @@ module.exports = {
     porCanal: { llamada: 10, whatsapp: 4, correo: 2, linkedin: 2 },
     porDiaVencido: 3,
     topeDiasVencido: 7,
+    // Qué mueve: puntos extra por el cargo del contacto (expresión regular sobre el cargo, sin
+    // tildes ni mayúsculas). Del análisis del 1-oct: selección y reclutamiento agendan 9 % de las
+    // llamadas; coordinadores de TH 6 %; directores y gerentes 4 % (hablan, pero no agendan).
+    // Ver el efecto: node sdr/cli.js cola --set 'PRIORIDAD.porCargo=[]'
+    porCargo: [
+      { nombre: 'selección / reclutamiento', patron: 'selecci|reclut|recruit|talent acq|atracci|sourcing', puntos: 15 },
+      { nombre: 'coordinador de TH',          patron: 'coordinad',                                          puntos: 5 },
+    ],
   },
 
   // ---------------------------------------------------------------------------
@@ -450,14 +458,33 @@ module.exports = {
   // ---------------------------------------------------------------------------
   // Ritmo del día: bloques de prospección y racha
   // ---------------------------------------------------------------------------
-  // Qué mueve: la barra grande de la cola. Dentro del horario de un bloque (hora de Bogotá) se
-  // muestran las marcaciones de ESE bloque contra su meta y el tiempo que queda; fuera de los
-  // bloques se muestra el día completo. Lista vacía = solo el día completo.
-  // Ver el efecto: node sdr/cli.js cola --set 'BLOQUES_PROSPECCION=[{"inicio":"08:00","fin":"12:00","metaMarcaciones":40}]'
-  BLOQUES_PROSPECCION: [
-    { nombre: 'Bloque de la mañana', inicio: '08:00', fin: '10:00', metaMarcaciones: 30 },
-    { nombre: 'Bloque de la tarde',  inicio: '14:00', fin: '16:00', metaMarcaciones: 30 },
-  ],
+  // Qué mueve: la jornada de la SDR y la cola. El día se parte en bloques (hora de Bogotá) y cada
+  // bloque tiene su propia lista en la cola:
+  //   nuevas       llamadas de la secuencia a leads que todavía no conversan (nuevo, contactado)
+  //   seguimiento  compromisos del día con llamada y llamadas a leads que ya conversaron
+  //   otros        WhatsApp, correo y LinkedIn de la secuencia, y compromisos por esos canales
+  // Dentro del horario de un bloque la cola abre ese bloque primero y la barra grande muestra las
+  // marcaciones del bloque contra su meta (si tiene). Fuera de horario se muestra el día completo.
+  // Viene del análisis del 1-oct: entre 10 y 12 contestan 33 % y conversan el 60 % de los que
+  // contestan; después de las 4 pm, 20 % y 36 %.
+  // Ver el efecto: node sdr/cli.js cola --set JORNADA.cupo.nuevas=20 (y la hora: cambiar inicio/fin aquí y volver a correr cola)
+  JORNADA: {
+    bloques: [
+      { id: 'nuevas',      nombre: 'Llamadas nuevas',         inicio: '09:00', fin: '12:00', que: 'nuevas',      metaMarcaciones: 60 },
+      { id: 'seguimiento', nombre: 'Seguimientos por llamada', inicio: '14:00', fin: '15:00', que: 'seguimiento' },
+      { id: 'otros',       nombre: 'WhatsApp, correo y LinkedIn', inicio: '15:00', fin: '18:00', que: 'otros' },
+    ],
+    // Qué mueve: cuántos leads muestra cada bloque. Lo que no cabe queda "en espera" (sigue en la
+    // secuencia, sube de prioridad con los días) sin pintarse como atrasado: la cola es el plan del
+    // día, no una deuda. Ver el efecto: node sdr/cli.js cola --set JORNADA.cupo.nuevas=20
+    cupo: { nuevas: 80, seguimiento: 30, otros: 60 },
+    // Qué mueve: tope de llamadas sin conversación por lead (no contestó, buzón, gatekeeper, desde
+    // la última conversación). Al llegar al tope, las llamadas que quedaban en la secuencia se
+    // omiten y el lead sigue por los otros canales; si no quedan, aplica AL_AGOTAR_SECUENCIA.
+    // Del análisis: 4ª llamada en adelante, 0 conversaciones de 28. null = sin tope.
+    // Ver el efecto: node sdr/cli.js resultado no_contesto --paso 3
+    tope_llamadas_sin_conversacion: 3,
+  },
 
   // Qué mueve: qué cuenta como "día cumplido" para la racha: llegar a la meta de marcaciones,
   // a la de conversaciones, o a cualquiera de las dos. Solo cuentan días hábiles. Aparte de esto,

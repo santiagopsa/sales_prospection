@@ -29,17 +29,25 @@ test('ritmo: bloques, racha y semana', { skip: !url && 'sin SDR_TEST_DATABASE_UR
   const martes930 = tiempo.instante('2026-09-22', 9); martes930.setMinutes(30);
 
   await t.test('bloque en curso y fuera de bloque', async () => {
+    // Jornada: llamadas nuevas 9–12 (meta 60), seguimientos 14–15, otros canales 15–18.
     const b = await ritmo.bloqueActual(db, config, martes930);
-    assert.strictEqual(b.enCurso.nombre, 'Bloque de la mañana');
-    assert.strictEqual(b.enCurso.marcaciones, 2);
+    assert.strictEqual(b.enCurso.id, 'nuevas');
+    assert.strictEqual(b.enCurso.que, 'nuevas');
+    assert.strictEqual(b.enCurso.marcaciones, 1);      // la de las 8 cae antes del bloque (9–12)
     assert.strictEqual(b.enCurso.conversaciones, 1);
-    assert.strictEqual(b.enCurso.minutosRestantes, 30);
-    assert.strictEqual(b.siguiente.nombre, 'Bloque de la tarde');
+    assert.strictEqual(b.enCurso.minutosRestantes, 150);
+    assert.strictEqual(b.enCurso.metaMarcaciones, 60);
+    assert.strictEqual(b.siguiente.id, 'seguimiento');
     const fuera = await ritmo.bloqueActual(db, config, tiempo.instante('2026-09-22', 12));
     assert.strictEqual(fuera.enCurso, null);
     assert.strictEqual(fuera.siguiente.inicio, '14:00');
-    const sinBloques = await ritmo.bloqueActual(db, { ...config, BLOQUES_PROSPECCION: [] }, martes930);
+    const tarde = await ritmo.bloqueActual(db, config, tiempo.instante('2026-09-22', 16));
+    assert.deepStrictEqual([tarde.enCurso.id, tarde.enCurso.metaMarcaciones, tarde.siguiente], ['otros', null, null]);
+    const sinBloques = await ritmo.bloqueActual(db, { ...config, JORNADA: { ...config.JORNADA, bloques: [] } }, martes930);
     assert.deepStrictEqual(sinBloques, { enCurso: null, siguiente: null });
+    // Forma vieja (BLOQUES_PROSPECCION) sigue funcionando si no hay JORNADA.
+    const vieja = await ritmo.bloqueActual(db, { ...config, JORNADA: undefined, BLOQUES_PROSPECCION: [{ nombre: 'Mañana', inicio: '08:00', fin: '10:00', metaMarcaciones: 30 }] }, martes930);
+    assert.deepStrictEqual([vieja.enCurso.nombre, vieja.enCurso.que, vieja.enCurso.metaMarcaciones], ['Mañana', 'nuevas', 30]);
   });
 
   await t.test('racha: días hábiles seguidos, el viernes la corta', async () => {

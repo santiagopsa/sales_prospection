@@ -118,11 +118,12 @@ async function main() {
       const { consultarCola } = require('./cola');
       const c = await consultarCola(db, config, { usuario: args.usuario || null });
       const i = c.indicadores;
-      console.log(`\nCola del ${c.fecha}: ${c.tareas.length} tareas · ${i.vencidas} vencidas · ${i.deHoy} de hoy · ${i.huerfanos} huérfanos\n`);
-      console.log(`  ${pad('#', 4)}${pad('pts', 5)}${pad('etapa+canal+atraso+lista', 26)}${pad('canal', 10)}${pad('etapa', 14)}empresa`);
+      console.log(`\nJornada del ${c.fecha}: ${c.tareas.length} tareas · ${i.enEspera} en espera · ${i.huerfanos} huérfanos · bloque ahora: ${c.jornada.actual || '—'}\n`);
+      for (const b of c.jornada.bloques) console.log(`  ${pad(b.inicio + '–' + b.fin, 13)}${pad(b.nombre, 32)}${b.caben} caben · ${b.en_espera} en espera${b.compromisos ? ` · ${b.compromisos} compromisos` : ''}${b.metaMarcaciones ? ` · meta ${b.metaMarcaciones}` : ''}`);
+      console.log(`\n  ${pad('#', 4)}${pad('pts', 5)}${pad('etapa+canal+atraso+lista+cargo', 32)}${pad('bloque', 13)}${pad('canal', 10)}${pad('etapa', 14)}empresa`);
       c.tareas.forEach((t, n) => {
         const d = t.desglose;
-        console.log(`  ${pad(n + 1, 4)}${pad(t.puntaje, 5)}${pad(`${d.etapa}+${d.canal}+${d.atraso}+${d.lista || 0}${t.diasVencida ? ` (${t.diasVencida}d)` : ''}`, 26)}${pad(CANAL_LABEL[t.canal], 10)}${pad(ETAPA_LABEL[t.etapa], 14)}${t.empresa}${t.lista ? `  [lista: ${t.lista.nombre}]` : ''}`);
+        console.log(`  ${pad(n + 1, 4)}${pad(t.puntaje, 5)}${pad(`${d.etapa}+${d.canal}+${d.atraso}+${d.lista || 0}+${d.cargo || 0}${t.diasVencida ? ` (${t.diasVencida}d)` : ''}`, 32)}${pad(t.bloque + (t.en_espera ? ' ⏳' : ''), 13)}${pad(CANAL_LABEL[t.canal], 10)}${pad(ETAPA_LABEL[t.etapa], 14)}${t.empresa}${t.cargo_regla ? ` ★${t.cargo_regla}` : ''}${t.lista ? `  [lista: ${t.lista.nombre}]` : ''}`);
       });
     } else if (cmd === 'proyeccion') {
       const r = await require('./proyeccion').seguimiento(db, config, { hasta: args.hasta });

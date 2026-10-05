@@ -895,9 +895,10 @@ function stepReview() {
       <div id="ideal-list-review">
         ${(state.idealRequests || []).map((it, i) => `
           <div class="ideal-item">
-            <input type="text" data-ideal-text="${i}" value="${esc(it.text)}" placeholder="Pedido del cliente" />
+            <input type="text" data-ideal-text="${i}" value="${esc(it.text)}" placeholder="Pedido del cliente" title="${esc(it.cita || '')}" />
             <label class="toggle"><input type="checkbox" data-ideal-have="${i}" ${it.weHave?'checked':''}/> lo tenemos</label>
             <button class="btn ghost btn-sm danger" data-ideal-del="${i}" title="Eliminar">✕</button>
+            ${it.cita ? `<div class="muted chico" style="grid-column:1 / -1;font-style:italic;margin:-4px 0 6px">“${esc(it.cita)}”</div>` : ''}
           </div>
         `).join('')}
       </div>
@@ -1484,13 +1485,7 @@ function stepResult() {
           ${faltantesFund.map(x => `<li><span>${x}</span><span class="pill bad">Falta</span></li>`).join('')}
         </ul>
       ` : `<p class="pill good">✓ Todos los fundamentales cubiertos</p>`}
-
-      ${faltantesNth.length ? `
-        <h3>Nice-to-have pendientes</h3>
-        <ul class="list-clean">
-          ${faltantesNth.map(x => `<li><span class="muted">${x}</span><span class="pill warn">Sugerido</span></li>`).join('')}
-        </ul>
-      ` : ''}
+      <p class="muted chico" style="margin:8px 0 0">Qué falta en cada criterio y qué hacer para cerrarlo está en el detalle del deal (veredicto por criterio). Lo de integraciones, piloto o post-venta solo aparece ahí si este cliente lo pidió.</p>
     </div>
 
     <div class="card">
@@ -1726,41 +1721,9 @@ async function renderDealDetail(id) {
         ${d.calificacionManual ? `<p class="muted" style="font-size:12px;margin:8px 0 0">Chulos marcados en el <a href="#/tablero">tablero</a> por ${esc(d.calificacionManual.por || '—')}${d.calificacionManual.at ? ' · ' + new Date(d.calificacionManual.at).toLocaleString('es-CO') : ''}.</p>` : ''}</div>`;
     })()}
 
-    <div class="card">
-      <h2>Resumen de calidad del proceso</h2>
-      <div class="score-grid" style="margin-top: 6px;">
-        <div class="card compact score-card">
-          <div class="muted">Fundamentales</div>
-          <div class="num">${s.fundamentalsPct}%</div>
-          <div class="progress"><span style="width:${s.fundamentalsPct}%"></span></div>
-        </div>
-        <div class="card compact score-card">
-          <div class="muted">Nice-to-have</div>
-          <div class="num">${s.niceToHavePct}%</div>
-          <div class="progress"><span style="width:${s.niceToHavePct}%"></span></div>
-        </div>
-      </div>
-    </div>
-
     <div id="cotizacion-card"></div>
 
     ${iaReportHtml(d.iaExtracted)}
-
-    <div class="card">
-      <h2>⚠ Campos importantes que no se completaron</h2>
-      ${faltantesFund.length ? `
-        <h3>Fundamentales pendientes</h3>
-        <ul class="list-clean">
-          ${faltantesFund.map(x => `<li><span>${x}</span><span class="pill bad">Falta</span></li>`).join('')}
-        </ul>
-      ` : `<p class="pill good">✓ Todos los fundamentales fueron completados</p>`}
-      ${faltantesNth.length ? `
-        <h3>Nice-to-have pendientes</h3>
-        <ul class="list-clean">
-          ${faltantesNth.map(x => `<li><span class="muted">${x}</span><span class="pill warn">Sugerido</span></li>`).join('')}
-        </ul>
-      ` : ''}
-    </div>
 
     <div class="card">
       <h2>Ficha previa (SDR) · Contrato Nº 1</h2>
@@ -1808,9 +1771,11 @@ async function renderDealDetail(id) {
 
     <div class="card">
       <h2>Lo que pidió el cliente en su ideal</h2>
+      <p class="muted chico" style="margin:-4px 0 8px">Solo cuenta lo que el cliente pidió con su boca; cada pedido va con su cita. Lo que la IA se inventó, quítalo: sale también del wishlist.</p>
       ${ideal.length ? `
-        <ul class="list-clean">
-          ${ideal.map(p => `<li><span>${esc(p.text)}</span>${p.weHave ? '<span class="pill good">Lo tenemos</span>' : '<span class="pill warn">Construir</span>'}</li>`).join('')}
+        <ul class="list-clean ideal-lista">
+          ${ideal.map(p => `<li data-ideal="${esc(p.text)}"><span>${esc(p.text)}${p.cita ? `<div class="muted chico" style="font-style:italic">“${esc(p.cita)}”</div>` : '<div class="muted chico">sin cita del cliente (análisis anterior)</div>'}</span>
+            <span style="display:flex;gap:6px;align-items:center;white-space:nowrap">${p.weHave ? '<span class="pill good">Lo tenemos</span>' : '<span class="pill warn">Construir</span>'}<button class="btn ghost btn-sm" data-ideal-quitar="${esc(p.text)}" title="No lo pidió: quitar del deal y del wishlist">✕</button></span></li>`).join('')}
         </ul>
       ` : `<p class="muted">No se registraron pedidos del cliente.</p>`}    </div>
 
@@ -1836,6 +1801,17 @@ async function renderDealDetail(id) {
   el.querySelector('[data-del-detail]').addEventListener('click', async () => {
     await deleteDeal(row.id, () => { location.hash = '#/deals'; });
   });
+  el.querySelectorAll('[data-ideal-quitar]').forEach($b => $b.addEventListener('click', async () => {
+    const text = $b.dataset.idealQuitar;
+    if (!confirm(`¿Quitar "${text}"? Sale del deal y del wishlist.`)) return;
+    $b.disabled = true;
+    try {
+      const r = await fetch(`/api/deals/${row.id}/ideal/quitar`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || r.statusText);
+      const $li = $b.closest('li'); if ($li) $li.remove();
+    } catch (e) { alert('No se pudo quitar: ' + e.message); $b.disabled = false; }
+  }));
   const $re = el.querySelector('[data-reanalizar]');
   if ($re) $re.addEventListener('click', async () => {
     $re.disabled = true; $re.textContent = 'Analizando…';

@@ -305,17 +305,44 @@
     const qU = usuarioActual() ? '?usuario=' + encodeURIComponent(usuarioActual()) : '';
     const [c, com] = await Promise.all([api('cola' + qU), api('comision' + qU).catch(() => null)]);
     const i = c.indicadores;
-    const ver = params.get('ver') || 'todas';   // todas | vencidas | hoy
-    const lista = ver === 'vencidas' ? c.tareas.filter(t => t.vencida) : ver === 'hoy' ? c.tareas.filter(t => !t.vencida) : c.tareas;
-    const kpiLink = (cual, activo) => `href="#/cola${cual === 'todas' ? '' : '?ver=' + cual}" class="kpi enlace ${activo ? 'activo' : ''}"`;
     const hoy = new Date(`${c.fecha}T12:00:00-05:00`).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' });
     const b = c.bloque && c.bloque.enCurso;
     const barra = (valor, meta) => `<div class="meta"><i style="width:${Math.min(100, Math.round(valor / Math.max(meta, 1) * 100))}%"></i></div>`;
-    const pendientes = c.tareas.filter(t => !t.tocado_hoy);
-    const siguiente = pendientes.find(t => t.canal === 'llamada' && t.telefono) || pendientes[0] || c.tareas[0];
+    const J = c.jornada || { bloques: [], actual: null };
+    // Qué bloque se abre: el que corre ahora; fuera de horario, el que sigue (o el primero).
+    const abierto = params.get('bloque') || J.actual || J.siguiente || (J.bloques[0] && J.bloques[0].id);
+    const tareasDe = bq => c.tareas.filter(t => t.bloque === bq.que && !t.tocado_hoy);
+    const compsDe = bq => (c.compromisos ? c.compromisos.hoy : []).filter(x => bq.que === 'seguimiento' ? x.canal === 'llamada' : bq.que === 'otros' ? x.canal !== 'llamada' : false);
+    const tocados = c.tareas.filter(t => t.tocado_hoy);
+    const bloqueAbierto = J.bloques.find(x => x.id === abierto) || J.bloques[0];
+    const pendientesAbierto = bloqueAbierto ? tareasDe(bloqueAbierto).filter(t => !t.en_espera) : [];
+    const siguiente = pendientesAbierto.find(t => t.canal === 'llamada' && t.telefono) || pendientesAbierto[0] || c.tareas.find(t => !t.tocado_hoy && !t.en_espera) || null;
+    const estadoBloque = bq => bq.id === J.actual ? 'ahora' : (J.actual == null && bq.id === J.siguiente) ? 'siguiente' : '';
+    const resumenBloque = bq => {
+      const n = bq.que === 'seguimiento' ? bq.compromisos + bq.caben : bq.caben + (bq.que === 'otros' ? bq.compromisos : 0);
+      return `${plural(n, bq.que === 'nuevas' ? 'llamada' : bq.que === 'seguimiento' ? 'seguimiento' : 'toque', bq.que === 'nuevas' ? 'llamadas' : bq.que === 'seguimiento' ? 'seguimientos' : 'toques')}${bq.en_espera ? ` · ${bq.en_espera} en espera` : ''}`;
+    };
+    const seccionBloque = bq => {
+      const todas = tareasDe(bq), lista = todas.filter(t => !t.en_espera), espera = todas.filter(t => t.en_espera), comps = compsDe(bq);
+      const esAbierto = bq.id === (bloqueAbierto && bloqueAbierto.id);
+      const vacio = bq.que === 'nuevas' ? 'No hay llamadas nuevas pendientes. <a href="#/importar">Carga una lista</a> o <a href="#/marcar">marca un número</a>.'
+        : bq.que === 'seguimiento' ? 'Sin seguimientos por llamada hoy.' : 'Sin toques por WhatsApp, correo o LinkedIn hoy.';
+      return `<details class="bloque-dia ${estadoBloque(bq)}" ${esAbierto ? 'open' : ''} data-bloque="${esc(bq.id)}">
+        <summary>
+          <span class="bd-hora">${esc(bq.inicio)}–${esc(bq.fin)}</span>
+          <span class="bd-nombre"><b>${esc(bq.nombre)}</b>${estadoBloque(bq) === 'ahora' ? ' <span class="chip hoy">ahora</span>' : estadoBloque(bq) === 'siguiente' ? ' <span class="chip">sigue</span>' : ''}</span>
+          <span class="bd-resumen suave">${resumenBloque(bq)}${bq.metaMarcaciones ? ` · meta ${bq.metaMarcaciones} marcaciones` : ''}</span>
+        </summary>
+        <div class="bd-cuerpo">
+          ${comps.length ? `<div class="cola compromisos-bloque">${comps.map(itemCompromiso).join('')}</div>` : ''}
+          ${lista.length ? `<div class="cola">${lista.map((t, n) => tarjetaCola(t, n + 1)).join('')}</div>` : (comps.length ? '' : `<div class="panel vacio">${vacio}</div>`)}
+          ${espera.length ? `<div class="suave en-espera">Y ${plural(espera.length, 'lead más en espera', 'leads más en espera')}: entran solos cuando se despeje la lista (cupo del bloque: ${bq.cupo}). <a href="#/pipeline">Ver el pipeline</a></div>` : ''}
+        </div>
+      </details>`;
+    };
     $app.innerHTML = `
       <div class="cabeza">
-        <div><h1>Cola del día</h1><div class="suave">${esc(hoy)} · ${plural(c.tareas.length, 'toque pendiente', 'toques pendientes')}${c.usuario ? ` · ritmo de <b>${esc(c.usuario)}</b>` : ''}</div></div>
+        <div><h1>Jornada</h1><div class="suave">${esc(hoy)}${c.usuario ? ` · ritmo de <b>${esc(c.usuario)}</b>` : ''}</div></div>
         <div class="acciones" style="margin:0">
           ${siguiente ? `<a class="btn primario grande" href="#/lead/${siguiente.lead_id}${siguiente.canal === 'llamada' && siguiente.telefono ? '?llamar=1' : ''}">${siguiente.canal === 'llamada' ? '📞 Llamar al siguiente' : 'Siguiente toque'} · ${esc(siguiente.empresa)}</a>` : ''}
           <a class="btn" href="#/marcar">Marcar</a>
@@ -327,11 +354,11 @@
         <div class="ritmo-principal">
           ${b ? `
             <div class="ritmo-titulo"><b>${esc(b.nombre)}</b> <span class="suave">${b.inicio}–${b.fin} · quedan ${b.minutosRestantes} min</span></div>
-            <div class="ritmo-num"><b>${b.marcaciones}</b><span class="suave"> / ${b.metaMarcaciones} marcaciones en este bloque</span></div>
-            ${barra(b.marcaciones, b.metaMarcaciones)}
+            ${b.metaMarcaciones ? `<div class="ritmo-num"><b>${b.marcaciones}</b><span class="suave"> / ${b.metaMarcaciones} marcaciones en este bloque</span></div>${barra(b.marcaciones, b.metaMarcaciones)}`
+              : `<div class="ritmo-num"><b>${b.marcaciones}</b><span class="suave"> ${b.marcaciones === 1 ? 'llamada' : 'llamadas'} en este bloque · ${b.conversaciones} ${b.conversaciones === 1 ? 'conversación' : 'conversaciones'}</span></div>`}
             <div class="suave" style="font-size:12px;margin-top:6px">Hoy: ${i.marcaciones} / ${i.metaMarcaciones} marcaciones · ${i.conversaciones} / ${i.metaConversaciones} conversaciones${i.metaReuniones != null ? ` · ${i.reuniones || 0} / ${i.metaReuniones} reuniones` : ''}</div>`
           : `
-            <div class="ritmo-titulo"><b>Hoy</b> <span class="suave">${c.bloque && c.bloque.siguiente ? `próximo bloque: ${esc(c.bloque.siguiente.nombre)} a las ${c.bloque.siguiente.inicio}` : 'fuera de bloque de prospección'}</span></div>
+            <div class="ritmo-titulo"><b>Hoy</b> <span class="suave">${c.bloque && c.bloque.siguiente ? `próximo bloque: ${esc(c.bloque.siguiente.nombre)} a las ${c.bloque.siguiente.inicio}` : 'fuera de los bloques del día'}</span></div>
             <div class="ritmo-doble">
               <div><div class="ritmo-num"><b>${i.marcaciones}</b><span class="suave"> / ${i.metaMarcaciones} marcaciones</span></div>${barra(i.marcaciones, i.metaMarcaciones)}</div>
               <div><div class="ritmo-num"><b>${i.conversaciones}</b><span class="suave"> / ${i.metaConversaciones} conversaciones</span></div>${barra(i.conversaciones, i.metaConversaciones)}</div>
@@ -344,22 +371,15 @@
         </div>
       </div>
       <div class="alertas">
-        ${i.vencidas ? `<a ${kpiLink(ver === 'vencidas' ? 'todas' : 'vencidas', ver === 'vencidas')} data-mal><b>${i.vencidas}</b><span>${i.vencidas === 1 ? 'toque vencido' : 'toques vencidos'}</span></a>` : ''}
+        ${i.compromisosVencidos ? `<span class="kpi" data-mal><b>${i.compromisosVencidos}</b><span>${i.compromisosVencidos === 1 ? 'compromiso vencido' : 'compromisos vencidos'}</span></span>` : ''}
         ${i.huerfanos ? `<a class="kpi enlace alerta" href="#/pipeline?huerfanos=1"><b>${i.huerfanos}</b><span>${i.huerfanos === 1 ? 'lead sin próximo toque' : 'leads sin próximo toque'}</span></a>` : ''}
-        ${!i.vencidas && !i.huerfanos ? '<span class="suave" style="font-size:12px">Sin vencidos ni leads huérfanos.</span>' : ''}
-        ${ver === 'todas' ? '' : `<a class="kpi enlace" href="#/cola"><b>${c.tareas.length}</b><span>ver todos</span></a>`}
+        ${i.enEspera ? `<a class="kpi enlace" href="#/pipeline"><b>${i.enEspera}</b><span>en espera (no caben hoy)</span></a>` : ''}
+        ${!i.compromisosVencidos && !i.huerfanos && !i.enEspera ? '<span class="suave" style="font-size:12px">Todo al día.</span>' : ''}
       </div>
-      ${pintarCompromisos(c.compromisos)}
-      ${ver !== 'todas' ? `<div class="filtro-activo suave">Mostrando solo <b>${ver === 'vencidas' ? 'vencidas' : 'las de hoy'}</b> · <a href="#/cola">ver todas</a></div>` : ''}
-      ${(() => {
-        const porContactar = lista.filter(t => !t.tocado_hoy), tocados = lista.filter(t => t.tocado_hoy);
-        const vacio = ver === 'todas' ? 'No hay toques pendientes para hoy.<br><a href="#/importar">Carga una lista de leads</a> para empezar.' : 'Nada en este filtro. <a href="#/cola">Ver todas</a>';
-        return `
-        <h2 class="seccion">Por contactar <span class="suave">${plural(porContactar.length, 'lead', 'leads')} · en orden de prioridad</span></h2>
-        ${porContactar.length ? `<div class="cola">${porContactar.map((t, n) => tarjetaCola(t, n + 1)).join('')}</div>` : `<div class="panel vacio">${tocados.length ? 'Todos los de hoy ya tienen un toque. Los siguientes pasos están abajo.' : vacio}</div>`}
-        ${tocados.length ? `<h2 class="seccion" style="margin-top:18px">Ya tocados hoy <span class="suave">${plural(tocados.length, 'lead', 'leads')} · el siguiente paso de su secuencia cae hoy</span></h2>
-        <div class="cola tocados">${tocados.map((t, n) => tarjetaCola(t, null)).join('')}</div>` : ''}`;
-      })()}
+      <div class="jornada">${J.bloques.map(seccionBloque).join('')}</div>
+      ${c.compromisos && c.compromisos.proximos.length ? `<details class="panel compromisos" style="margin-top:12px"><summary class="suave" style="cursor:pointer;font-size:12px">Próximos días: ${plural(c.compromisos.proximos.length, 'compromiso', 'compromisos')}</summary>${c.compromisos.proximos.map(itemCompromiso).join('')}</details>` : ''}
+      ${tocados.length ? `<h2 class="seccion" style="margin-top:18px">Ya tocados hoy <span class="suave">${plural(tocados.length, 'lead', 'leads')} · el siguiente paso de su secuencia cae hoy</span></h2>
+        <div class="cola tocados">${tocados.map(t => tarjetaCola(t, null)).join('')}</div>` : ''}
       <div id="modal"></div>`;
 
     // Clic en la tarjeta abre la ficha; los botones de posponer no.
@@ -379,6 +399,8 @@
       const t = c.tareas.find(x => String(x.lead_id) === b.dataset.sacar);
       abrirSacar({ id: t.lead_id, empresa: t.empresa }, { alTerminar: () => vistaCola(params) });
     }));
+    // Abrir otro bloque a mano se recuerda en la URL (para volver después de una ficha).
+    $app.querySelectorAll('details.bloque-dia').forEach($d => $d.addEventListener('toggle', () => { if ($d.open) { const q = new URLSearchParams(location.hash.split('?')[1] || ''); q.set('bloque', $d.dataset.bloque); history.replaceState(null, '', '#/cola?' + q); } }));
     document.getElementById('nuevo-compromiso').addEventListener('click', () => abrirCompromiso({}, { alTerminar: () => vistaCola(params) }));
     enlazarCompromisos(() => vistaCola(params));
   }
@@ -403,8 +425,9 @@
         <div class="contexto suave">${esc(contextoToque(t))} · <span title="Paso ${t.paso} de los ${t.pasos_total} toques de la secuencia">toque ${t.paso} de ${t.pasos_total}</span></div>
       </div>
       <div class="lado">
-        ${t.vencida ? `<span class="chip vencida">Vencida ${plural(t.diasVencida, 'día', 'días')}</span>` : '<span class="chip hoy">Hoy</span>'}
+        ${t.diasVencida > 0 ? `<span class="suave pequeno" title="La secuencia la tenía para hace ${plural(t.diasVencida, 'día', 'días')}; no es una deuda, sube de prioridad sola">espera ${plural(t.diasVencida, 'día', 'días')}</span>` : '<span class="chip hoy">Hoy</span>'}
         ${t.etapa !== 'nuevo' ? `<span class="chip etapa">${esc(etiqueta(meta.etapas, t.etapa))}</span>` : ''}
+        ${t.cargo_regla ? `<span class="chip etapa" title="Cargo con prioridad: ${esc(t.cargo_regla)}">★ ${esc(t.cargo_regla)}</span>` : ''}
         <span class="mover"><button class="btn mini" data-posponer="1" data-task="${t.id}" title="Mover al siguiente día hábil">Mañana</button><button class="btn mini" data-posponer="5" data-task="${t.id}" title="Mover una semana">+1 semana</button><button class="btn mini sacar" data-sacar="${t.lead_id}" title="Descartar o pausar: sale de la cola">Sacar</button></span>
       </div>
     </div>`;
@@ -412,9 +435,9 @@
 
   // ---------------------------------------------------------------- compromisos
   const TIPO_LABEL = id => ((meta.tiposCompromiso || []).find(t => t.id === id) || {}).label || id;
-  function pintarCompromisos(cs) {
-    if (!cs || (!cs.hoy.length && !cs.proximos.length)) return '';
-    const item = t => `<div class="compromiso ${t.vencido ? 'vencido' : ''}" data-cid="${t.id}">
+  // Un compromiso (fila): hora, qué, lead, nota y botones. Lo usan la jornada y el panel de compromisos.
+  function itemCompromiso(t) {
+    return `<div class="compromiso ${t.vencido ? 'vencido' : ''}" data-cid="${t.id}">
         <div class="hora">${t.hora ? esc(t.hora) : (t.fecha ? fecha(t.due_ms) : 'hoy')}</div>
         <div class="que"><b>${esc(t.titulo || TIPO_LABEL(t.tipo))}</b> <span class="chip ${t.canal}">${esc(TIPO_LABEL(t.tipo))}</span>${t.gcal_event_id ? ` <span class="suave" title="${t.gcal_event_id === 'calendly' ? 'En el calendario (lo creó Calendly)' : t.gcal_event_id === 'sin-evento' ? 'Sin evento en Google (el calendario lo maneja Calendly)' : 'En Google Calendar'}">📅</span>` : t.gcal_error ? ` <span class="suave" title="${esc(t.gcal_error)}" style="color:var(--mal)">📅!</span>` : ''}
           ${t.lead_id ? `<div><a href="#/lead/${t.lead_id}">${esc(t.empresa || 'lead')}</a>${t.contacto ? ' · ' + esc(t.contacto) : ''}${t.telefono ? ' · <span class="num">' + esc(telVisible(t.telefono)) + '</span>' : ''}</div>` : ''}
@@ -422,6 +445,10 @@
           ${t.usuario && t.usuario !== usuarioActual() ? `<div class="suave" style="font-size:12px">de ${esc(t.usuario)}</div>` : ''}</div>
         <span class="mover"><button class="btn mini" data-checha="${esc(JSON.stringify({ id: t.id, lead_id: t.lead_id, canal: t.canal, etapa: t.etapa, telefono: t.telefono, empresa: t.empresa, contacto: t.contacto, email: t.email }))}" title="${t.lead_id && t.canal === 'llamada' ? 'Ya llamé: registrar el resultado' : 'Marcar como hecha'}">Hecha</button><button class="btn mini" data-cposponer="1" data-cid2="${t.id}" title="Mover al siguiente día hábil">Mañana</button><button class="btn mini" data-cmover="${t.id}" title="Elegir fecha y hora">Mover</button><button class="btn mini sacar" data-cquitar="${t.id}" title="Quitar (no se hizo ni se hará)">Quitar</button></span>
       </div>`;
+  }
+  function pintarCompromisos(cs) {
+    if (!cs || (!cs.hoy.length && !cs.proximos.length)) return '';
+    const item = itemCompromiso;
     return `<div class="panel compromisos">
       <h2>Compromisos de hoy <span class="suave" style="font-weight:400;font-size:12px">${cs.hoy.filter(t => t.vencido).length ? cs.hoy.filter(t => t.vencido).length + ' con la hora pasada · ' : ''}lo que quedaste con alguien, a su hora</span></h2>
       ${cs.hoy.length ? cs.hoy.map(item).join('') : '<div class="suave" style="font-size:13px">Nada pactado para hoy.</div>'}
