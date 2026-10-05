@@ -115,7 +115,7 @@ with sync_playwright() as pw:
     flujo.recorrer_guia(pg)
     flujo.pegar_transcripcion(pg, flujo.TRANSCRIPCION + " __SIN_EMPLEO__ ")
     flujo.confirmar_niveles(pg, (5, 4))
-    flujo.avanzar_hasta(pg, '[data-expest="verificada"]')
+    flujo.ir_a_fase(pg, "emp")
     tx = pg.inner_text("#stage")
     if "no se habló" not in tx.lower():
         errs.append("no muestra qué faltó cuando del empleo no se habló")
@@ -144,7 +144,7 @@ with sync_playwright() as pw:
     flujo.recorrer_guia(pg)
     flujo.pegar_transcripcion(pg, flujo.TRANSCRIPCION + " __CONTRADICE__ ")
     flujo.confirmar_niveles(pg, (5, 4))
-    flujo.avanzar_hasta(pg, '[data-expest="contradice"]')
+    flujo.ir_a_fase(pg, "emp")
     if not pg.query_selector('[data-expest="contradice"].sel'):
         errs.append("con C4 incumplido la propuesta no es 'no coincide'")
     pg.screenshot(path="/tmp/pk/emp_02_contradice.png", full_page=True)

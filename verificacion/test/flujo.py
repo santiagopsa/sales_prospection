@@ -46,6 +46,13 @@ def confirmar_niveles(pg, niveles=(5, 4), evidencias=None):
         "Rollout en Alpina 2023, nueve meses, lideró listas de materiales.",
         "Explicó la integración con un caso propio y precisó los quiebres.",
     ]
+    # La calificación arranca por el último empleo (el mismo orden que la conversación):
+    # se avanza hasta el primer requisito.
+    for _ in range(3):
+        if pg.query_selector("[data-lv]"):
+            break
+        pg.click("[data-next]")
+        pg.wait_for_timeout(340)
     for i, n in enumerate(niveles):
         if not pg.query_selector(f'[data-lv="{n}"]'):
             break
@@ -92,3 +99,9 @@ def avanzar_hasta(pg, selector, maximo=6):
         pg.click("[data-next]")
         pg.wait_for_timeout(340)
     return bool(pg.query_selector(selector))
+
+
+def ir_a_fase(pg, clave):
+    """Salta a una fase por su clave ('emp', 'ctx', 'cierre'…), como hacer clic en la barra."""
+    pg.evaluate(f"() => goFase(fases().findIndex(x => x.k === '{clave}'))")
+    pg.wait_for_timeout(350)

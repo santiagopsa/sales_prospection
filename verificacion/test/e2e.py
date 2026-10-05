@@ -92,6 +92,11 @@ with sync_playwright() as pw:
     shot(pg, "app_06_identidad")
     pg.click("[data-next]"); pg.wait_for_timeout(400)
 
+    # --- después de la apertura, el último empleo: así arranca la conversación ---
+    if not pg.query_selector("#pregEmp"):
+        errs.append("después de la apertura no viene el último empleo")
+    pg.click("[data-next]"); pg.wait_for_timeout(400)
+
     # --- requisito 1: debe traer las preguntas de la BD ---
     r1 = pg.inner_text("#stage").lower()
     for must in ["Implementación de SAP PP","QUÉ BUSCAS OÍR","último rollout de PP","se te cayó en ese go-live",
@@ -110,6 +115,10 @@ with sync_playwright() as pw:
     # --- fin de la entrevista, transcripción y confirmación de niveles ---
     flujo.recorrer_guia(pg)
     flujo.pegar_transcripcion(pg)
+    # La calificación arranca por el último empleo, como la conversación; luego los requisitos.
+    if "Último empleo" not in pg.inner_text("#phaseNav .ph.act"):
+        errs.append("la calificación no arranca por el último empleo")
+    flujo.avanzar_hasta(pg, '[data-lv="5"]')
     if not pg.query_selector('[data-lv="5"]'):
         errs.append("después de la transcripción no aparecen los niveles")
     flujo.confirmar_niveles(pg, (5, 3), [

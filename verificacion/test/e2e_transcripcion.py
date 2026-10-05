@@ -65,6 +65,7 @@ with sync_playwright() as pw:
     for k in ["grab", "cam"]:
         pg.click(f'[data-idc="{k}"]'); pg.wait_for_timeout(100)
     pg.click("[data-next]"); pg.wait_for_timeout(400)
+    pg.click("[data-next]"); pg.wait_for_timeout(400)      # el último empleo va primero; luego el requisito
 
     guia = pg.inner_text("#stage")
     if "Llévame al último rollout" not in guia:
@@ -125,6 +126,10 @@ with sync_playwright() as pw:
     pg.screenshot(path="/tmp/pk/tr_04_pegar.png", full_page=True)
     pg.click("#btnAnalizarTrans"); pg.wait_for_selector("#vLive.on", timeout=15000); pg.wait_for_timeout(600)
 
+    # La calificación arranca por el último empleo; los requisitos vienen después.
+    for _ in range(3):
+        if pg.query_selector('[data-lv="5"]'): break
+        pg.click("[data-next]"); pg.wait_for_timeout(340)
     cal = pg.inner_text("#stage")
     if "confirma o corrige" not in cal.lower():
         errs.append("la pantalla de calificación no pide confirmar")

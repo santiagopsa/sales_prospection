@@ -110,9 +110,12 @@ const hace = dias => new Date(AH - dias * 86400000).toISOString();
     const imp = p({ activado: '2026-09-01', ultimo_envio: '2026-09-10' });
     assert.strictEqual(imp.cumple_48, null); assert.strictEqual(imp.vence_48, null);
   });
-  await t('el primer destacado se pone solo al pasar de 0 a 1 o más', () => {
-    assert.strictEqual(reglas('saas', { destacados: 0, meta: 10 }, { destacados: 2 }, { ahora: AH }).primer_destacado, '2026-09-25');
-    assert.ok(!('primer_destacado' in reglas('saas', { destacados: 3, meta: 10 }, { destacados: 4 }, { ahora: AH })));
+  await t('SaaS ya no tiene "primer destacado": lo que se mide es cuándo se completaron los destacados', () => {
+    assert.ok(!OPS.ESPECS.saas.campos.some(c => c.k === 'primer_destacado'));
+    const c = reglas('saas', { destacados: 0, meta: 10 }, { destacados: 2 }, { ahora: AH });
+    assert.ok(!('primer_destacado' in c)); assert.ok(!('meta_at' in c));
+    const f = calcular('saas', { estado: 'Activa', activado: '2026-09-18', meta: 10, destacados: 10, meta_at: '2026-09-22' }, AH);
+    assert.strictEqual(f.dias_para_meta, 2);                            // vie → mar
   });
   await t('fechas imposibles: fuera de rango, en el futuro o antes de la activación', () => {
     assert.ok(normalizar('procesos', { ultima_terna: '2926-08-25' }).errores[0].includes('revisa el año'));

@@ -47,9 +47,27 @@ with sync_playwright() as pw:
     # el tramo del último empleo está siempre; con CV arranca anclado al primer empleo declarado
     nav = pg.inner_text("#phaseNav")
     if "Último empleo" not in nav: errs.append("no apareció la fase del último empleo")
+    elif nav.index("Último empleo") > nav.index("Implementación") if "Implementación" in nav else False:
+        errs.append("el último empleo no va antes de los requisitos")
     sid = pg.evaluate("() => S.sid")
 
     for k in ["grab","cam"]: pg.click(f'[data-idc="{k}"]'); pg.wait_for_timeout(90)
+    pg.click("[data-next]"); pg.wait_for_timeout(400)
+
+    # El último empleo durante la entrevista: anclado a la hoja de vida, con la pregunta literal y
+    # su criterio. Se pregunta, no se marca. La trayectoria completa queda plegada, sin verificar.
+    # Va justo después de la apertura: en la conversación se arranca por el trabajo actual.
+    if not pg.query_selector("#pregEmp"): errs.append("después de la apertura no viene el último empleo")
+    tg = pg.inner_text("#stage")
+    if pg.input_value('[data-emp="empresa"]') != "Alpina":
+        errs.append(f"el último empleo no quedó anclado al primero de la hoja de vida: {pg.input_value('[data-emp=empresa]')!r}")
+    if "Alpina" not in pg.inner_text("#pregEmp"): errs.append("la pregunta del último empleo no nombra la empresa")
+    if "Se da por buena si" not in tg: errs.append("la pregunta del último empleo no trae su criterio")
+    if "no se verifican" not in tg.lower(): errs.append("no aclara que los empleos anteriores no se verifican")
+    if "Hueco de casi un año" not in tg: errs.append("los puntos abiertos del CV no aparecen durante la entrevista")
+    if pg.query_selector('[data-expest]'):
+        errs.append("durante la entrevista deja marcar el empleo — eso viene con la transcripción")
+    pg.screenshot(path="/tmp/pk/cv_03a_empleo_guia.png", full_page=True)
     pg.click("[data-next]"); pg.wait_for_timeout(400)
 
     # requisito 1: preguntas sacadas del CV
@@ -65,19 +83,6 @@ with sync_playwright() as pw:
     r2 = pg.inner_text("#stage")
     if "no menciona" not in r2.lower(): errs.append("no avisa que el CV no cubre el segundo requisito")
 
-    # El último empleo durante la entrevista: anclado a la hoja de vida, con la pregunta literal y
-    # su criterio. Se pregunta, no se marca. La trayectoria completa queda plegada, sin verificar.
-    flujo.avanzar_hasta(pg, "#pregEmp")
-    tg = pg.inner_text("#stage")
-    if pg.input_value('[data-emp="empresa"]') != "Alpina":
-        errs.append(f"el último empleo no quedó anclado al primero de la hoja de vida: {pg.input_value('[data-emp=empresa]')!r}")
-    if "Alpina" not in pg.inner_text("#pregEmp"): errs.append("la pregunta del último empleo no nombra la empresa")
-    if "Se da por buena si" not in tg: errs.append("la pregunta del último empleo no trae su criterio")
-    if "no se verifican" not in tg.lower(): errs.append("no aclara que los empleos anteriores no se verifican")
-    if "Hueco de casi un año" not in tg: errs.append("los puntos abiertos del CV no aparecen durante la entrevista")
-    if pg.query_selector('[data-expest]'):
-        errs.append("durante la entrevista deja marcar el empleo — eso viene con la transcripción")
-    pg.screenshot(path="/tmp/pk/cv_03a_empleo_guia.png", full_page=True)
 
     # entrevista → transcripción → niveles confirmados
     flujo.recorrer_guia(pg)
@@ -94,14 +99,14 @@ with sync_playwright() as pw:
         errs.append(f"el análisis no recibió el último empleo como ancla: {ses.get('__empleo_recibido')!r}")
 
     # Último empleo en la calificación: criterio por criterio y el estado propuesto.
-    flujo.avanzar_hasta(pg, '[data-expest="verificada"]')
+    flujo.ir_a_fase(pg, "emp")
     tr = pg.inner_text("#stage")
     for must in ["Último empleo", "C1", "C3", "En Alpina, entre marzo y noviembre"]:
         if must.lower() not in tr.lower(): errs.append(f"la fase del último empleo no muestra: {must}")
     if not pg.query_selector('[data-expest="verificada"].sel'):
         errs.append("la propuesta del análisis (verificada) no quedó seleccionada")
     pg.screenshot(path="/tmp/pk/cv_03_empleo.png", full_page=True)
-    pg.click("[data-next]"); pg.wait_for_timeout(500)
+    flujo.ir_a_fase(pg, "ctx")
 
     # contexto y cierre
     pg.fill('[data-d="pretension"]', "3.500.000 COP / mes")

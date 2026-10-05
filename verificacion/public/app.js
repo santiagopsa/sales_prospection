@@ -1060,8 +1060,9 @@ function cuerpoSaaS(o){
   const focos = [
     {l: 'Vacantes que alcanzan la meta', v: pctTxt(c.meta), cls: clsPct(c.meta, 70, 50),
      sub: `${deTxt(c.meta)} publicadas en 90 días con resultado${c.en_curso ? ` · ${c.en_curso} aún en curso` : ''}`, ref: 'Referencia: 70% o más es sano en una bolsa de empleo.'},
-    {l: `Meta en ${o.promesa_habiles} días hábiles`, v: pctTxt(v.meta_48), cls: clsPct(v.meta_48, 60, 30),
-     sub: `${deTxt(v.meta_48)} que la alcanzaron · mediana ${v.mediana_meta ?? '—'} días hábiles${v.primer_48.den ? ` · primer destacado a tiempo: ${pctTxt(v.primer_48)}` : ''}`, ref: 'La promesa de PeakU: candidatos calificados en 48 h.'},
+    {l: 'Días para entregar los destacados', v: v.mediana_meta == null ? '—' : v.mediana_meta, cls: v.mediana_meta == null ? '' : v.mediana_meta <= o.promesa_habiles ? 'ok' : v.mediana_meta <= 5 ? 'par' : 'no',
+     sub: v.meta_48.den ? `días hábiles (mediana) de la publicación a completar los destacados · ${pctTxt(v.meta_48)} en ${o.promesa_habiles} o menos (${deTxt(v.meta_48)})` : 'todavía sin vacantes con los destacados completos',
+     ref: 'Es lo que nos demoramos en entregarle valor al cliente. La promesa de PeakU: candidatos calificados en 48 h.'},
     {l: 'Clientes que vuelven a publicar', v: pctTxt(cl.recurrencia), cls: clsPct(cl.recurrencia, 50, 25),
      sub: `${deTxt(cl.recurrencia)} clientes con 2 o más vacantes`},
     {l: 'Activas al día hoy', v: q.al_dia ? pctTxt(q.al_dia) : '—', cls: q.al_dia ? clsPct(q.al_dia, 90, 60) : '',
@@ -1079,7 +1080,7 @@ function cuerpoSaaS(o){
     <div class="isec">${sec.map(x => `<div class="isc"><b>${x.v}</b><span>${x.l}</span><small>${x.sub}</small></div>`).join('')}</div>
     <div class="card">
       <div class="cardhd"><h2>Últimas 8 semanas</h2><span class="cs">clic en una semana para verla</span></div>
-      ${tendenciaHtml(q.tendencia, [{k: 'publicadas', l: 'Publicadas'}, {k: 'metas', l: 'Metas cumplidas'}, {k: 'meta_48', l: 'Meta en ≤ 2 días hábiles', pct: true}])}
+      ${tendenciaHtml(q.tendencia, [{k: 'publicadas', l: 'Publicadas'}, {k: 'metas', l: 'Metas cumplidas'}, {k: 'meta_48', l: 'Destacados completos en ≤ 2 días hábiles', pct: true}])}
     </div>
     <p class="hint fuentes">Cómo se mide: "alcanza la meta" cuenta las vacantes con fecha de meta; no la alcanzó si terminó sin ella o lleva más de 10 días publicada. Los días hábiles no cuentan sábados ni domingos. Referencias: Cavuno (KPIs de bolsas de empleo: fill rate 70%+, primer candidato en 24–48 h, repetición de publicaciones).</p>`;
 }
@@ -2511,21 +2512,22 @@ function enEntrevista(){ return S.modo !== 'calificacion'; }
 
 function fases(){
   if(enEntrevista()){
-    const f = [{k:'id', t:'Apertura', min:4}];
+    // Se verifica UN empleo, el más reciente, y tiene su propio tramo en los dos momentos:
+    // durante la llamada, la pregunta y el ancla; después, marcarlo contra sus criterios.
+    // Va primero, justo después de la apertura: en una conversación lo natural es arrancar por
+    // "cuéntame de tu trabajo actual" y de ahí bajar a los requisitos, no cerrar con eso.
+    const f = [{k:'id', t:'Apertura', min:4}, {k:'emp', t:'Último empleo', min:4}];
     S.reqs.forEach((r,i) => f.push({k:'guia', i, t:r.n || ('Requisito '+(i+1)), min:6}));
     if(S.ing && S.ing.requerido) f.push({k:'ing', t:'Inglés', min:4});
     if((S.pf || []).length) f.push({k:'perfil', t:'Conducta', min:4});
-    // Se verifica UN empleo, el más reciente, y tiene su propio tramo en los dos momentos:
-    // durante la llamada, la pregunta y el ancla; después, marcarlo contra sus criterios.
-    f.push({k:'emp', t:'Último empleo', min:4});
     f.push({k:'fin', t:'Fin de la entrevista', min:2});
     return f;
   }
-  const f = [];
+  // En la calificación, el mismo orden que la conversación.
+  const f = [{k:'emp', t:'Último empleo', min:2}];
   S.reqs.forEach((r,i) => f.push({k:'req', i, t:r.n || ('Requisito '+(i+1)), min:2}));
   if(S.ing && S.ing.requerido) f.push({k:'ing', t:'Inglés', min:2});
   if((S.pf || []).length) f.push({k:'perfil', t:'Conducta', min:3});
-  f.push({k:'emp', t:'Último empleo', min:2});
   f.push({k:'ctx', t:'Contexto', min:3});
   f.push({k:'cierre', t:'Cierre', min:3});
   return f;

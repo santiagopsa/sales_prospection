@@ -89,6 +89,7 @@ with sync_playwright() as pw:
 
     # ---------- D. Calificación: criterio por criterio, demostró y brecha ----------
     flujo.pegar_transcripcion(pg); pg.wait_for_timeout(300)
+    flujo.avanzar_hasta(pg, "[data-lv]")
     cal = pg.inner_text("#stage").lower()
     if "criterio por criterio" not in cal or "cumplido" not in cal:
         errs.append("la calificación no muestra el criterio por criterio del análisis")

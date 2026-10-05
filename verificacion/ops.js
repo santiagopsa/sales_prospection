@@ -97,10 +97,10 @@ const ESPECS = {
       { k: 'estado', l: 'Estado', t: 'sel', op: SAAS_ESTADOS, req: true },
       { k: 'meta', l: 'Meta de destacados', t: 'num', ancho: 'xs', max: 1000 },
       { k: 'destacados', l: 'Destacados', t: 'num', ancho: 'xs', ayuda: 'Los de hoy. La meta se cumple con destacados, sin contar descartados.' },
+      { k: 'meta_at', l: 'Destacados completos el', t: 'fecha',
+        ayuda: 'Se pone sola el día en que los destacados llegan a la meta. De la publicación a esta fecha es lo que nos demoramos en entregarle valor al cliente.' },
       { k: 'descartados', l: 'Descartados', t: 'num', ancho: 'xs' },
       { k: 'aplicantes', l: 'Aplicantes totales', t: 'num', ancho: 'xs', ayuda: 'Aplicantes + destacados + descartados.' },
-      { k: 'primer_destacado', l: 'Primer destacado', t: 'fecha', ayuda: 'Se pone sola el día en que aparece el primer destacado. La promesa: candidatos en 2 días hábiles.' },
-      { k: 'meta_at', l: 'Meta cumplida el', t: 'fecha', ayuda: 'Se pone sola el día en que los destacados llegan a la meta.' },
       { k: 'notas', l: 'Notas', t: 'largo', ancho: 'xl' },
     ],
     calc: [
@@ -108,7 +108,7 @@ const ESPECS = {
       { k: 'faltan', l: 'Faltan destacados', t: 'num' },
       { k: 'dias_sin_actualizar', l: 'Días sin actualizar', t: 'num', ayuda: 'Desde la última vez que se tocaron los números (o se marcó "Sin cambios").' },
       { k: 'dias_publicada', l: 'Días publicada', t: 'num' },
-      { k: 'dias_para_meta', l: 'Días hábiles hasta la meta', t: 'num', ayuda: 'De la publicación a la meta, sin contar sábados ni domingos.' },
+      { k: 'dias_para_meta', l: 'Días hábiles para entregar', t: 'num', ayuda: 'De la publicación al día en que se completaron los destacados, sin contar sábados ni domingos.' },
       { k: 'pct_descartados', l: '% descartados', t: 'pct', ayuda: 'Descartados sobre aplicantes totales.' },
     ],
     buscar: ['cliente', 'cargo', 'peaku_id', 'notas'],
@@ -185,7 +185,7 @@ function sumarHabiles(desde, n) {
 const PROMESA_HABILES = 2;
 
 // Fechas que no pueden ser anteriores a la activación ni estar en el futuro (son hechos).
-const FECHAS_HECHO = { procesos: ['primer_envio', 'ultimo_envio', 'ultima_terna', 'fecha_cierre'], saas: ['primer_destacado', 'meta_at'], evaluaciones: [] };
+const FECHAS_HECHO = { procesos: ['primer_envio', 'ultimo_envio', 'ultima_terna', 'fecha_cierre'], saas: ['meta_at'], evaluaciones: [] };
 const ANIO_MIN = 2015;
 const dmy = f => (f ? `${f.slice(8, 10)}/${f.slice(5, 7)}/${f.slice(0, 4)}` : '');
 // Una activación sirve de referencia solo si es posible: no futura y dentro de rango. Si está
@@ -254,7 +254,6 @@ function calcular(tipo, fila, ahora = Date.now()) {
     f.fechas_mal = fechasMal('saas', f, hoy);
     const okS = k => f[k] && !f.fechas_mal.includes(k) ? f[k] : null;
     f.dias_para_meta = okS('activado') && okS('meta_at') ? habilesEntre(f.activado, f.meta_at) : null;
-    f.primer_destacado_habiles = okS('activado') && okS('primer_destacado') ? habilesEntre(f.activado, f.primer_destacado) : null;
     f.pct_descartados = Number(f.aplicantes) > 0 && f.descartados != null ? Math.round(100 * Number(f.descartados) / Number(f.aplicantes)) : null;
     f.dias_sin_actualizar = diasDesdeTs(f.actualizado_at || f.updated_at || f.created_at);
     f.salud = !f.abierto ? null
@@ -340,9 +339,6 @@ function reglas(tipo, antes, cambios, { ahora = Date.now(), revisado = false } =
     // tiene fecha (filas importadas de Airtable sin fecha), no se inventa la de hoy.
     const cumplia = antes && Number(antes.meta) > 0 && Number(antes.destacados) >= Number(antes.meta);
     if ((cambio('destacados') || cambio('meta')) && meta > 0 && Number(m.destacados) >= meta && !cumplia && !m.meta_at && !('meta_at' in cambios)) c.meta_at = hoy;
-    // El primer destacado: el día en que pasa de 0 a 1 o más.
-    const tenia = antes && Number(antes.destacados) > 0;
-    if (cambio('destacados') && Number(m.destacados) > 0 && !tenia && !m.primer_destacado && !('primer_destacado' in cambios)) c.primer_destacado = hoy;
     if (!antes || revisado || MUEVE.saas.some(cambio)) c.actualizado_at = new Date(ahora).toISOString();
   }
   return c;
@@ -672,7 +668,6 @@ function indicadoresOps(procesos, saas, sesiones, { fecha = null, ahora = Date.n
     return {
       publicadas: pub.length,
       metas: S.filter(s => en(ok(s, 'meta_at'), a, b)).length,
-      primeros_destacados: S.filter(s => en(ok(s, 'primer_destacado'), a, b)).length,
       clientes_nuevos: Object.values(primeros).filter(d => en(d, a, b)).length,
     };
   }
@@ -680,7 +675,6 @@ function indicadoresOps(procesos, saas, sesiones, { fecha = null, ahora = Date.n
   const cumplida = s => !!ok(s, 'meta_at');
   const fallida = s => !cumplida(s) && (s.estado !== 'Activa' || (s.dias_publicada || 0) > 10);
   const conMeta = pub90.filter(s => cumplida(s) && s.dias_para_meta != null);
-  const conPrimero = pub90.filter(s => s.primer_destacado_habiles != null && s.activado >= desde);
   const activas = S.filter(s => s.abierto);
   const vacPorCli = {};
   S.filter(s => ok(s, 'activado') && s.activado <= corte).forEach(s => { const k = cli(s); if (k) vacPorCli[k] = (vacPorCli[k] || 0) + 1; });
@@ -701,7 +695,6 @@ function indicadoresOps(procesos, saas, sesiones, { fecha = null, ahora = Date.n
     velocidad: {
       meta_48: tasaN(conMeta.filter(s => s.dias_para_meta <= PROMESA_HABILES).length, conMeta.length),
       mediana_meta: medianaN(conMeta.map(s => s.dias_para_meta)),
-      primer_48: tasaN(conPrimero.filter(s => s.primer_destacado_habiles <= PROMESA_HABILES).length, conPrimero.length),
     },
     al_dia: domingo >= hoy ? tasaN(activas.filter(s => s.dias_sin_actualizar === 0).length, activas.length) : null,
     tendencia: [],
