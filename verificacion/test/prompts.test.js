@@ -9,7 +9,7 @@
 // Ninguna de las otras pruebas lo veía: el stub no llama a Claude, así que el flujo pasaba
 // en verde de punta a punta con el prompt vacío por dentro.
 const assert = require('assert');
-const { buildIntakePrompt, buildCvPrompt, buildTranslatePrompt } = require('../prompts');
+const { buildIntakePrompt, buildCvPrompt, buildTranslatePrompt, buildTranscriptPrompt } = require('../prompts');
 
 let n = 0;
 const t = (nombre, fn) => { fn(); n++; console.log('  ✓', nombre); };
@@ -132,6 +132,24 @@ t('las preguntas del CV piden lo mismo que el criterio de la pregunta que reempl
   const p = buildCvPrompt('CV de prueba', { excluyentes: [{ text: 'Rollout de PP', q_escena: '¿Cuándo fue tu último rollout?', c_escena: 'Debe decir empresa, época y qué hizo él' }] });
   assert.ok(p.includes('Debe decir empresa, época y qué hizo él'), 'no lleva el criterio de la pregunta');
   assert.ok(/tu pregunta tiene que pedir exactamente eso/.test(p) && /LITERALES/.test(p), 'no exige que la pregunta personalizada pida lo que el criterio espera');
+});
+
+t('el análisis distingue "no lo demostró" de "falta indagar" y trae preguntas para la repregunta', () => {
+  const p = buildTranscriptPrompt('transcripción de prueba', { requisitos: [{ text: 'SAP PP' }], cargo: 'Consultor' });
+  assert.ok(/FALTA INDAGAR/.test(p) && /NO LO DEMOSTR/.test(p), 'no distingue los dos casos');
+  assert.ok(p.includes('"indagar"') && p.includes('"preguntas"'), 'el esquema no trae indagar');
+  assert.ok(!/ESTO ES UNA REPREGUNTA/.test(p), 'sin previo no es repregunta');
+});
+
+t('en la repregunta lleva lo de la primera llamada y dice qué se puede cambiar', () => {
+  const previo = { por_requisito: [
+    { indice: 1, nivel: 3, demostro: 'Lleva rollouts', brecha: 'Sin el caso de calidad', evidencia: 'yo llevé el rollout',
+      indagar: { falta: true, punto: 'la integración con calidad', preguntas: ['¿Qué hiciste tú cuando falló?'] } },
+    { indice: 2, nivel: 4, demostro: 'Domina CS01' } ] };
+  const p = buildTranscriptPrompt('repregunta corta', { requisitos: [{ text: 'SAP PP' }, { text: 'Listas' }], previo, repreguntados: [1] });
+  assert.ok(/ESTO ES UNA REPREGUNTA/.test(p), 'no avisa que es repregunta');
+  assert.ok(/\[1\] SE REPREGUNTA/.test(p) && /\[2\] NO se repregunta/.test(p), 'no marca qué se repregunta');
+  assert.ok(p.includes('¿Qué hiciste tú cuando falló?') && p.includes('yo llevé el rollout'), 'no lleva lo de la primera llamada');
 });
 
 console.log(`\n${n} pruebas · los prompts no pierden su entrada`);

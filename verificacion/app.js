@@ -11,7 +11,8 @@
 const express = require('express');
 const path = require('path');
 const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt, leerTraduccion } = require('./prompts');
-const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana, MOTIVOS_DESCARTE, RESULTADOS_CLIENTE } = require('./rules');
+const REPREGUNTA_MIN_CHARS = 150;
+const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero, normalizarRepregunta, combinarRepregunta, pulsoVacante, pulsoVacantes, indicadoresSemana, MOTIVOS_DESCARTE, RESULTADOS_CLIENTE } = require('./rules');
 const didit = require('./didit');
 const { T, SCHEMA, initSchema } = require('./schema');
 const OPS = require('./ops');
@@ -449,7 +450,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         const cs = await pool.query(`
           SELECT s.id, s.vacancy_id, s.report_code, s.candidate, s.evaluator, s.kind, s.status, s.semaforo,
                  s.started_at, s.issued_at, s.transcript_at, s.entrevista_at, s.updated_at, s.created_at,
-                 s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo, s.cliente_resultado, s.cliente_resultado_at,
+                 s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo, s.cliente_resultado, s.cliente_resultado_at, s.repregunta,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple
           FROM ${T.sessions} s WHERE s.vacancy_id=$1
@@ -675,23 +676,82 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // ---------------------------------------------------------------------------------------
+  // LA REPREGUNTA
+  // Cuando el análisis marca "falta indagar" en un requisito, el evaluador programa una llamada
+  // corta con las preguntas exactas. La sesión queda en el tablero como REPREGUNTAR hasta que se
+  // pega la transcripción de esa llamada. Tres movimientos sobre el mismo recurso:
+  //   { requisitos: [...] }  pide la repregunta (otra ronda si ya hubo una)
+  //   { cancelar: true }     la quita: se califica con lo que hay
+  //   { aplicada: true }     el navegador ya cargó el resultado en la calificación
+  // ---------------------------------------------------------------------------------------
+  r.post('/api/sessions/:id/repregunta', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const b = req.body || {};
+      let s, nReq = 0;
+      if (pool) {
+        const q = await pool.query(`SELECT s.id, s.status, s.repregunta, s.transcript_analisis IS NOT NULL AS tiene_an,
+                                           (SELECT COUNT(*) FROM ${T.requirements} r WHERE r.vacancy_id=s.vacancy_id)::int AS nreq
+                                    FROM ${T.sessions} s WHERE s.id=$1`, [id]);
+        if (!q.rows.length) return res.status(404).json({ error: 'not found' });
+        s = q.rows[0]; nReq = s.nreq;
+      } else {
+        s = mem.sessions.find(x => x.id === id);
+        if (!s) return res.status(404).json({ error: 'not found' });
+        nReq = mem.requirements.filter(q => q.vacancy_id === s.vacancy_id).length;
+        s = { ...s, tiene_an: !!s.transcript_analisis };
+      }
+      if (s.status === 'issued') return res.status(409).json({ error: 'El informe ya se emitió: no se puede repreguntar sobre él.' });
+      const ahora = new Date().toISOString();
+      const prev = s.repregunta || null;
+      let nuevo;
+      if (b.cancelar === true) nuevo = null;
+      else if (b.aplicada === true) {
+        if (!prev || !prev.hecha_at) return res.status(409).json({ error: 'No hay una repregunta analizada que aplicar.' });
+        nuevo = { ...prev, aplicada_at: prev.aplicada_at || ahora };
+      } else {
+        if (!s.tiene_an) return res.status(409).json({ error: 'Primero se analiza la transcripción de la entrevista; la repregunta completa esa, no la reemplaza.' });
+        const requisitos = normalizarRepregunta(b.requisitos, nReq);
+        if (!requisitos) return res.status(400).json({ error: 'Elige al menos un requisito para repreguntar.' });
+        nuevo = { pedida_at: ahora, requisitos, hecha_at: null, aplicada_at: null,
+                  // Cambiar la lista antes de llamar no es otra ronda; pedir otra después de una ya hecha, sí.
+                  ronda: prev && !prev.hecha_at ? (Number(prev.ronda) || 1) : (Number(prev && prev.ronda) || 0) + 1 };
+      }
+      if (pool) {
+        await pool.query(`UPDATE ${T.sessions} SET repregunta=$2::jsonb, updated_at=NOW() WHERE id=$1`,
+                         [id, nuevo ? JSON.stringify(nuevo) : null]);
+      } else {
+        const m = mem.sessions.find(x => x.id === id);
+        m.repregunta = nuevo; m.updated_at = ahora;
+      }
+      res.json({ ok: true, repregunta: nuevo });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   r.post('/api/sessions/:id/transcript', async (req, res) => {
     try {
       const id = Number(req.params.id);
       const { transcript } = req.body || {};
+      const esRepregunta = !!(req.body && req.body.repregunta === true);
       // El empleo a verificar viene de la pantalla (lo que el reclutador tiene como último empleo);
       // si no, de lo que la sesión ya guardó; si no, del primer tramo de la hoja de vida.
       const empleoDe = x => (x && typeof x === 'object' && (clean(x.empresa) || clean(x.cargo)))
         ? { empresa: clean(x.empresa), cargo: clean(x.cargo), periodo: clean(x.periodo), fuente: x.fuente === 'reclutador' ? 'reclutador' : 'cv' } : null;
       let empleo = empleoDe(req.body && req.body.empleo);
-      if (!transcript || transcript.trim().length < 400) {
-        return res.status(400).json({ error: 'La transcripción está vacía o es demasiado corta. Una entrevista de 30 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.' });
+      // La repregunta es una llamada de cinco minutos: su transcripción es corta por naturaleza.
+      const minimo = esRepregunta ? REPREGUNTA_MIN_CHARS : 400;
+      if (!transcript || transcript.trim().length < minimo) {
+        return res.status(400).json({ error: esRepregunta
+          ? 'La transcripción de la repregunta está vacía o es demasiado corta. Revisa que hayas pegado la conversación completa.'
+          : 'La transcripción está vacía o es demasiado corta. Una entrevista de 30 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.' });
       }
 
-      let cargo = '', candidato = '', modo = 'B', excluyentes = [], perfil = [];
+      let cargo = '', candidato = '', modo = 'B', excluyentes = [], perfil = [], previo = null, rep = null;
       if (pool) {
         const q = await pool.query(`
-          SELECT s.candidate, s.mode, s.experiencia, s.trayectoria, v.id AS vid, v.title, v.perfil,
+          SELECT s.candidate, s.mode, s.experiencia, s.trayectoria, s.transcript_analisis, s.repregunta,
+                 v.id AS vid, v.title, v.perfil,
                  v.ingles_requerido, v.ingles_nivel, v.ingles_uso
           FROM ${T.sessions} s LEFT JOIN ${T.vacancies} v ON v.id = s.vacancy_id
           WHERE s.id = $1`, [id]);
@@ -699,6 +759,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         cargo = q.rows[0].title || ''; candidato = q.rows[0].candidate || ''; modo = q.rows[0].mode || 'B';
         empleo = empleo || empleoDe(q.rows[0].experiencia) || empleoDe((q.rows[0].trayectoria || [])[0]);
         perfil = Array.isArray(q.rows[0].perfil) ? q.rows[0].perfil : [];
+        previo = q.rows[0].transcript_analisis || null; rep = q.rows[0].repregunta || null;
         if (q.rows[0].vid) {
           const rq = await pool.query(
             `SELECT id, text, criterio, detalles, senales, q_escena, q_friccion, q_cruce, c_escena, c_friccion, c_cruce FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`,
@@ -713,6 +774,13 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         perfil = (v && Array.isArray(v.perfil)) ? v.perfil : [];
         excluyentes = mem.requirements.filter(q => q.vacancy_id === (v && v.id)).sort((a, b) => a.ord - b.ord);
         empleo = empleo || empleoDe(s.experiencia) || empleoDe((s.trayectoria || [])[0]);
+        previo = s.transcript_analisis || null; rep = s.repregunta || null;
+      }
+      // Una repregunta solo tiene sentido sobre una primera llamada ya analizada, y con la
+      // lista de qué se repregunta: es lo que le dice al análisis qué puede cambiar.
+      const indicesRep = esRepregunta && rep && Array.isArray(rep.requisitos) ? rep.requisitos.map(x => Number(x.indice)) : [];
+      if (esRepregunta && (!previo || !rep || !rep.pedida_at || rep.hecha_at || !indicesRep.length)) {
+        return res.status(409).json({ error: 'Esta verificación no tiene una repregunta pendiente. Vuelve al tablero y ábrela de nuevo.' });
       }
 
       // ---------------------------------------------------------------------------------
@@ -741,9 +809,17 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         let an = null, error = null;
         try {
           const out = await pedirJson(
-            buildTranscriptPrompt(textoTrans, { requisitos: excluyentes, candidato, cargo, modo, perfil, empleo }),
-            { etiqueta: 'transcripcion', maxTokens: 10000 });
+            buildTranscriptPrompt(textoTrans, { requisitos: excluyentes, candidato, cargo, modo, perfil, empleo,
+                                               previo: esRepregunta ? previo : null,
+                                               repreguntados: esRepregunta ? indicesRep : null }),
+            { etiqueta: esRepregunta ? 'repregunta' : 'transcripcion', maxTokens: 10000 });
           if (out.error) error = out;
+          else if (esRepregunta) {
+            // Se combina con la primera llamada: solo cambian los requisitos repreguntados.
+            an = combinarRepregunta(previo, out.datos, indicesRep, { ronda: Number(rep.ronda) || 1 });
+            an._at = new Date().toISOString();
+            rep = { ...rep, hecha_at: an._at, aplicada_at: null };
+          }
           else {
             an = out.datos;
             // El empleo se concilia contra el ancla ANTES de guardarse: si el modelo verificó
@@ -765,9 +841,10 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
               await pool.query(
                 `UPDATE ${T.sessions} SET transcript_analisis=$2::jsonb, transcript_at=NOW(),
                                           transcript_status='lista', transcript_error=NULL,
+                                          repregunta = COALESCE($3::jsonb, repregunta),
                                           status = CASE WHEN status='issued' THEN status ELSE 'draft' END,
                                           updated_at=NOW() WHERE id=$1`,
-                [id, JSON.stringify(an)]);
+                [id, JSON.stringify(an), esRepregunta ? JSON.stringify(rep) : null]);
             } else {
               await pool.query(
                 `UPDATE ${T.sessions} SET transcript_status='error', transcript_error=$2::jsonb,
@@ -779,6 +856,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
             if (an) {
               s.transcript_analisis = an; s.transcript_at = an._at;
               s.transcript_status = 'lista'; s.transcript_error = null;
+              if (esRepregunta) s.repregunta = rep;
               if (s.status !== 'issued') s.status = 'draft';
             } else {
               s.transcript_status = 'error'; s.transcript_error = error;
@@ -1553,7 +1631,7 @@ ${!code ? `
           SELECT s.id, s.vacancy_id, s.report_code, s.candidate, s.evaluator, s.mode, s.kind, s.status, s.semaforo,
                  s.didit_status, s.face_verdict, s.face_score, s.id_note,
                  s.started_at, s.issued_at, s.transcript_at, s.entrevista_at, s.updated_at,
-                 s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo, s.cliente_resultado, s.cliente_resultado_at,
+                 s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo, s.cliente_resultado, s.cliente_resultado_at, s.repregunta,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
                  (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple,
                  v.title AS vacancy_title, c.name AS company_name
@@ -1582,7 +1660,7 @@ ${!code ? `
     if (pool) {
       const q = await pool.query(`
         SELECT s.id, s.vacancy_id, s.evaluator, s.status, s.semaforo, s.started_at, s.entrevista_at, s.issued_at, s.transcript_at,
-               s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo, s.cliente_resultado, s.cliente_resultado_at, s.updated_at, s.created_at,
+               s.transcript_status, s.transcript_started_at, s.descartado_at, s.descarte_motivo, s.cliente_resultado, s.cliente_resultado_at, s.repregunta, s.updated_at, s.created_at,
                (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id)::int AS req_total,
                (SELECT COUNT(*) FROM ${T.ratings} r WHERE r.session_id=s.id AND r.level>=4)::int AS req_cumple
         FROM ${T.sessions} s`);

@@ -140,6 +140,9 @@ async function initSchema(pool) {
     // al analizarse. Lo que queda son las citas de evidencia, que son las que van al acta.
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS transcript_analisis JSONB`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS transcript_at TIMESTAMPTZ`,
+    // La repregunta: una llamada corta para lo que en la primera quedó sin indagar. Guarda
+    // QUÉ se repregunta y CUÁNDO; el texto de esa segunda transcripción tampoco se guarda.
+    `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS repregunta JSONB`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS entrevista_at TIMESTAMPTZ`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS snapshot JSONB`,
     `ALTER TABLE ${T.sessions} ADD COLUMN IF NOT EXISTS formato TEXT`,

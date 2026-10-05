@@ -8,7 +8,7 @@ const crypto = require('crypto');
 
 const PUB = path.join(__dirname, '..', 'public');
 const MOUNT = '/verificacion'; // igual que en el servidor real
-const { LVLTXT, MAX_REQ, semaforo, bloqueos, estadoIdentidad, tipoDocumento, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana, MOTIVOS_DESCARTE, RESULTADOS_CLIENTE } = require('../rules'); // reglas reales del servidor
+const { LVLTXT, MAX_REQ, semaforo, bloqueos, estadoIdentidad, tipoDocumento, conciliarEmpleo, estadisticas, estadoTablero, pulsoVacante, pulsoVacantes, indicadoresSemana, MOTIVOS_DESCARTE, RESULTADOS_CLIENTE, normalizarRepregunta, combinarRepregunta } = require('../rules'); // reglas reales del servidor
 const A = require('../archivos'); // misma decisión de "qué es este archivo" que app.js
 
 // Lo que el stub devuelve al "leer" un .docx o .pdf, ya que no tiene mammoth ni pdf-parse.
@@ -202,6 +202,30 @@ const server = http.createServer(async (req, res) => {
     if(s.status!=='issued') return json(res,409,{error:'Solo se anota en un informe emitido.'});
     Object.assign(s,{cliente_resultado:r, cliente_resultado_at: r ? new Date().toISOString() : null, updated_at:new Date().toISOString()});
     return json(res,200,{ok:true, cliente_resultado:s.cliente_resultado, cliente_resultado_at:s.cliente_resultado_at});
+  }
+  // La repregunta: mismas reglas que el servidor.
+  const mrp = p.match(/^\/api\/sessions\/(\d+)\/repregunta$/);
+  if(mrp && m==='POST'){
+    const b = await body(req);
+    const s = db.sessions.find(x=>x.id===+mrp[1]);
+    if(!s) return json(res,404,{error:'not found'});
+    if(s.status==='issued') return json(res,409,{error:'El informe ya se emitió: no se puede repreguntar sobre él.'});
+    const prev = s.repregunta || null, ahora = new Date().toISOString();
+    let nuevo;
+    if(b.cancelar === true) nuevo = null;
+    else if(b.aplicada === true){
+      if(!prev || !prev.hecha_at) return json(res,409,{error:'No hay una repregunta analizada que aplicar.'});
+      nuevo = {...prev, aplicada_at: prev.aplicada_at || ahora};
+    } else {
+      if(!s.transcript_analisis) return json(res,409,{error:'Primero se analiza la transcripción de la entrevista; la repregunta completa esa, no la reemplaza.'});
+      const nReq = db.requirements.filter(q=>q.vacancy_id===s.vacancy_id).length;
+      const requisitos = normalizarRepregunta(b.requisitos, nReq);
+      if(!requisitos) return json(res,400,{error:'Elige al menos un requisito para repreguntar.'});
+      nuevo = {pedida_at: ahora, requisitos, hecha_at:null, aplicada_at:null,
+               ronda: prev && !prev.hecha_at ? (Number(prev.ronda)||1) : (Number(prev && prev.ronda)||0) + 1};
+    }
+    s.repregunta = nuevo; s.updated_at = ahora;
+    return json(res,200,{ok:true, repregunta:nuevo});
   }
   // Descartar / recuperar: mismas reglas que el servidor.
   const md = p.match(/^\/api\/sessions\/(\d+)\/(descartar|recuperar)$/);
@@ -477,8 +501,44 @@ const server = http.createServer(async (req, res) => {
     const s = db.sessions.find(x=>x.id===+mm[1]);
     if(!s) return json(res,404,{error:'not found'});
     const t = clean(b.transcript);
-    if(t.length < 400) return json(res,400,{error:'La transcripción está vacía o es demasiado corta. Una entrevista de 30 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.'});
     const reqs = db.requirements.filter(q=>q.vacancy_id===s.vacancy_id).sort((a,b2)=>a.ord-b2.ord);
+    // La repregunta: llamada corta, se combina con la primera solo en lo repreguntado.
+    //   __NO_SOSTUVO__  se le pidió el caso y no pudo: el nivel baja y deja de faltar indagar.
+    if(b.repregunta === true){
+      if(t.length < 150) return json(res,400,{error:'La transcripción de la repregunta está vacía o es demasiado corta. Revisa que hayas pegado la conversación completa.'});
+      const rep = s.repregunta;
+      if(!s.transcript_analisis || !rep || !rep.pedida_at || rep.hecha_at) return json(res,409,{error:'Esta verificación no tiene una repregunta pendiente. Vuelve al tablero y ábrela de nuevo.'});
+      const indices = rep.requisitos.map(x=>Number(x.indice));
+      s.transcript_status = 'procesando'; s.transcript_error = null; s.transcript_started_at = new Date().toISOString();
+      json(res,202,{ok:true, estado:'procesando'});
+      setTimeout(() => {
+        if(t.includes('__ILEGIBLE__')){
+          s.transcript_status = 'error';
+          s.transcript_error = {error:'Claude no devolvió un JSON que se pueda leer. Vuelve a intentarlo.', motivo:'ilegible'};
+          return;
+        }
+        const no = t.includes('__NO_SOSTUVO__');
+        const nuevo = {por_requisito: reqs.map((r,i)=>({
+          indice:i+1, requisito:r.text, cubierto:true,
+          nivel: indices.includes(i+1) ? (no ? 2 : 4) : 1,     // lo no repreguntado viene "mal" a propósito: no debe tocarse
+          evidencia: no ? 'Le pedí el caso y dijo: eso lo hacía otra persona del equipo, yo solo revisaba.'
+                        : 'En la repregunta contó: el rollout de calidad lo integré yo con el QM, armando los planes de inspección uno por uno.',
+          criterios:[{pregunta:'escena', estado:'cumplido', como:'Nombró el proyecto y su rol.'},
+                     {pregunta:'friccion', estado: no ? 'no_cumplido' : 'cumplido', como: no ? 'No pudo dar el caso propio.' : 'Narró lo que rehízo con calidad.'}],
+          demostro: no ? 'Conoce el proceso en términos generales.' : 'Integra calidad con producción con un caso propio y el paso a paso de lo que hizo.',
+          brecha: no ? 'Sin embargo, al pedirle el caso propio lo atribuyó a otra persona del equipo.' : 'Sin embargo, no cuantificó el resultado de la integración.',
+          recomendacion:'', detalles:[], senales:[], nota:'',
+          indagar:{falta:false, punto:'', preguntas:[]}
+        })), advertencias: [], resumen: no ? 'En la repregunta no sostuvo el caso.' : 'La repregunta completó el caso que faltaba.'};
+        const an = combinarRepregunta(s.transcript_analisis, nuevo, indices, {ronda: Number(rep.ronda)||1});
+        an._at = new Date().toISOString();
+        s.transcript_analisis = an; s.transcript_at = an._at;
+        s.transcript_status = 'lista'; s.transcript_error = null;
+        s.repregunta = {...rep, hecha_at: an._at, aplicada_at: null};
+      }, 1200);
+      return;
+    }
+    if(t.length < 400) return json(res,400,{error:'La transcripción está vacía o es demasiado corta. Una entrevista de 30 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.'});
     // El ancla del empleo: la pantalla, lo guardado en la sesión o el primer tramo del CV.
     const empleoDe = x => (x && (clean(x.empresa) || clean(x.cargo))) ? {empresa:clean(x.empresa), cargo:clean(x.cargo), periodo:clean(x.periodo), fuente: x.fuente === 'reclutador' ? 'reclutador' : 'cv'} : null;
     const empleo = empleoDe(b.empleo) || empleoDe(s.experiencia) || empleoDe((s.trayectoria||[])[0]);
@@ -500,7 +560,7 @@ const server = http.createServer(async (req, res) => {
       por_requisito: reqs.map((r,i)=>({
         indice:i+1, requisito:r.text,
         cubierto: i !== 1,
-        nivel: i === 1 ? null : (i === 0 ? 5 : 4),
+        nivel: i === 1 ? null : (i === 0 ? (t.includes('__FALTA_INDAGAR__') ? 3 : 5) : 4),
         evidencia: i === 1 ? '' : 'En Alpina, entre marzo y noviembre de 2023, yo llevé el rollout de PP… lo que se nos cayó fue el maestro de materiales la primera semana.',
         criterios: i === 1 ? [] : [
           {pregunta:'escena', estado:'cumplido', como:'Nombró Alpina, el periodo y su rol de líder del rollout.'},
@@ -515,7 +575,17 @@ const server = http.createServer(async (req, res) => {
           : 'Rinde más con autonomía sobre el módulo y un par en calidad para la integración.',
         detalles: i === 1 ? [] : [{detalle:'¿Qué transacción usa para listas de materiales?', respondio:'CS01, y CS02 para modificar', correcto:true}],
         senales: [],
-        nota: ''
+        nota: '',
+        // __FALTA_INDAGAR__: el primer requisito quedó corto sin que nadie repreguntara, y el
+        // segundo no se tocó. Son los dos casos en que el análisis pide una repregunta.
+        indagar: (t.includes('__FALTA_INDAGAR__') && i <= 1)
+          ? {falta:true,
+             punto: i === 0 ? 'Contó el rollout pero no qué hizo él cuando falló la integración con calidad; nadie se lo preguntó.' : 'El requisito no se tocó en la llamada.',
+             preguntas: i === 0
+               ? ['La vez pasada me contaste del rollout en Alpina; cuando falló la integración con calidad, ¿qué hiciste tú, paso a paso?',
+                  '¿Qué cambiaste en los planes de inspección y cómo supiste que había quedado bien?']
+               : ['Cuéntame de un proyecto en el que hayas hecho esto tú: ¿dónde fue, qué hiciste y qué se complicó?']}
+          : {falta:false, punto:'', preguntas:[]}
       })),
       // Sin `ingles`: el análisis de la transcripción ya no lo produce. El nivel de inglés
       // lo marca el evaluador en vivo, porque Meet transcribe en un solo idioma.

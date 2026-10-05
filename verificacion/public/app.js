@@ -457,6 +457,7 @@ function haceCuanto(ts){
 const ESTADO_TB = {
   fallo:      {tag:'r',   tx:'ANÁLISIS FALLÓ',       cta:'Reintentar',          orden:0},
   calificar:  {tag:'v',   tx:'LISTA PARA CALIFICAR', cta:'Calificar',           orden:1},
+  repreguntar:{tag:'a',   tx:'REPREGUNTAR',          cta:'Llamar y pegar',      orden:2},
   espera:     {tag:'a',   tx:'ESPERA TRANSCRIPCIÓN', cta:'Pegar transcripción', orden:2},
   en_curso:   {tag:'n',   tx:'EN CURSO',             cta:'Retomar',             orden:3},
   analizando: {tag:'acc', tx:'⏳ ANALIZANDO',         cta:'',                    orden:4},
@@ -521,12 +522,14 @@ function pintarCola(){
     `<span class="tag ${ESTADO_TB[k].tag}">${cuenta[k]} · ${ESTADO_TB[k].tx.replace('⏳ ', '')}</span>`).join('');
   $('#colaList').innerHTML = mias.length ? mias.slice(0, 12).map(s => {
     const e = estadoDe(s), E = ESTADO_TB[e];
-    const ref = e === 'espera' ? (s.entrevista_at || s.started_at) : e === 'seguimiento' ? s.issued_at : (s.updated_at || s.transcript_at || s.started_at);
+    const ref = e === 'espera' ? (s.entrevista_at || s.started_at) : e === 'seguimiento' ? s.issued_at
+      : e === 'repreguntar' ? ((s.repregunta && s.repregunta.pedida_at) || s.updated_at) : (s.updated_at || s.transcript_at || s.started_at);
+    const viejoRep = e === 'repreguntar' && ref && (Date.now() - new Date(ref).getTime()) > 2 * 86400000;
     const viejo = e === 'espera' && ref && (Date.now() - new Date(ref).getTime()) > 86400000;
     return `<div class="crow" data-abrir="${s.id}" role="button" tabindex="0">
       <span class="tag ${E.tag}">${E.tx}</span>
       <div class="rowmain"><b>${esc(s.candidate)}</b><span>${esc(s.vacancy_title || 'sin vacante')}${s.company_name ? ' · ' + esc(s.company_name) : ''}${evalActual() ? '' : ' · ' + esc(s.evaluator || 'sin evaluador')}</span></div>
-      <span class="cwhen ${viejo ? 'viejo' : ''}">${esc(haceCuanto(ref))}</span>
+      <span class="cwhen ${viejo || viejoRep ? 'viejo' : ''}">${esc(haceCuanto(ref))}</span>
       ${e === 'seguimiento' ? selectCliente(s) : E.cta ? `<span class="ccta">${E.cta} →</span>` : '<span class="ccta muted">en segundos</span>'}
       ${e === 'seguimiento' ? '<span></span>' : `<button class="descbtn" data-descartar="${s.id}" type="button" title="No sigue en la verificación">Descartar</button>`}
     </div>`;
@@ -1497,6 +1500,7 @@ async function verSesion(id){
       modo: s.transcript_analisis ? 'calificacion' : 'entrevista',
       esperando: s.status === 'esperando',
       transEstado: s.transcript_status || null, transError: s.transcript_error || null,
+      rep: s.repregunta || null,
       fin: s.status === 'issued', soloLectura: true,
     };
     if(s.status === 'issued'){ verActa(); }
@@ -1517,9 +1521,17 @@ function verBorrador(s){
   const fallo = S.transEstado === 'error';
   const esperando = S.esperando && !S.tran && !procesando;
   const calificando = !!S.tran && !procesando;
-  const etiqueta = procesando ? 'ANALIZANDO' : fallo && !S.tran ? 'ANÁLISIS FALLÓ'
+  // La repregunta va antes que la calificación: si quedó programada, lo que toca es llamar;
+  // si ya se analizó y nadie la ha mirado, lo que toca es ver qué cambió.
+  const repPend = repPendiente() && !procesando;
+  const repLista = repPorAplicar() && !procesando;
+  const nRep = ((S.rep && S.rep.requisitos) || []).length;
+  const etiqueta = procesando ? 'ANALIZANDO' : repPend ? 'REPREGUNTAR' : repLista ? 'REPREGUNTA LISTA'
+                 : fallo && !S.tran ? 'ANÁLISIS FALLÓ'
                  : esperando ? 'ESPERANDO TRANSCRIPCIÓN' : (calificando ? 'LISTA PARA CALIFICAR' : 'SIN EMITIR');
   const accion = procesando ? 'Ver el avance'
+               : repPend ? 'Ver las preguntas y pegar la repregunta'
+               : repLista ? 'Ver lo que cambió'
                : esperando || (fallo && !S.tran) ? 'Pegar la transcripción'
                : calificando ? 'Confirmar la calificación' : 'Retomar la sesión';
 
@@ -1528,7 +1540,7 @@ function verBorrador(s){
     <div class="card">
       <div class="cardhd">
         <h2>${esc(S.cand)}</h2>
-        <span class="tag ${esperando?'a':'n'}">${etiqueta}</span>
+        <span class="tag ${esperando||repPend?'a':'n'}">${etiqueta}</span>
       </div>
       <div class="cs" style="margin-bottom:14px">${[esc(S.rol), S.cli && esc(S.cli), S.kind==='cierre'?'cierre verificado':'sondeo'].filter(Boolean).join(' · ')} · <span class="mono">${esc(S.id)}</span></div>
       <div class="res"><div class="rn">Requisitos calificados</div><span class="rl">${cal} de ${S.reqs.length}</span></div>
@@ -1536,6 +1548,11 @@ function verBorrador(s){
       ${S.kind==='cierre' ? `<div class="res"><div class="rn">Verificación de identidad</div><span class="rl">${esc(i.texto || 'sin enviar')}</span></div>` : ''}
       <p class="hint">${procesando
         ? 'El servidor está analizando la transcripción. Tarda entre 20 y 40 segundos; el tablero se actualiza solo cuando termine.'
+        : repPend
+        ? `Quedó programada una llamada corta para ${nRep === 1 ? 'el requisito' : 'los ' + nRep + ' requisitos'} en que faltó indagar. Las preguntas están listas; después de llamar pegas esa transcripción y se combina con la primera.` +
+          (fallo ? ' <b>El último intento no terminó:</b> ' + esc((S.transError||{}).error || 'vuelve a pegarla.') : '')
+        : repLista
+        ? `La repregunta ya se analizó. Cambiaron ${nRep === 1 ? 'un requisito' : nRep + ' requisitos'}: revisa los niveles nuevos y confírmalos.`
         : fallo && !S.tran
         ? 'El análisis no terminó: ' + esc((S.transError||{}).error || 'vuelve a pegar la transcripción.')
         : esperando
@@ -1556,6 +1573,11 @@ function verBorrador(s){
     S.fase = 0;
     saveLocal(); drawSig();
     if(procesando){ pantallaProcesando(); return; }
+    if(repPend){
+      pantallaRepregunta(fallo ? {titulo:'El análisis de la repregunta no terminó.', msg:(S.transError||{}).error || 'Vuelve a pegarla.'} : null);
+      return;
+    }
+    if(repLista){ aplicarRepregunta(S.tran); return; }
     if(esperando || (fallo && !S.tran)){ pantallaTranscripcion(); return; }
     // El análisis terminó en segundo plano y nadie lo aplicó todavía: las propuestas de
     // nivel, conducta e impacto se cargan ahora, una sola vez. Si ya hay niveles, es que el
@@ -2991,6 +3013,13 @@ function render(){
         ${prop && (prop.senales||[]).length ? `<div class="detbox"><div class="dt">Señales observadas en este tema</div>
           <div class="sflags">${prop.senales.map(x => `<span class="sflag">${esc(x)}</span>`).join('')}</div></div>` : ''}
 
+        ${prop && prop.repreguntado ? `<div class="repok">
+          <span class="tag acc">REPREGUNTADO</span>
+          <span>En la primera llamada el análisis propuso <b>${prop.nivel_primera == null ? 'sin medir' : prop.nivel_primera}</b>;
+          con la repregunta propone <b>${prop.nivel == null ? 'sin medir' : prop.nivel}</b>.</span></div>` : ''}
+
+        ${cajaIndagar(f.i)}
+
         <div class="lvlttl">Calificación anclada — ${prop && prop.nivel ? 'la transcripción propone ' + prop.nivel + '; confirma o corrige' : 'marca el nivel que corresponde'}</div>
         <div class="lvls">
           ${[1,2,3,4,5].map(v => `<button class="lv ${r.lvl===v?'sel':''}" data-lv="${v}" data-v="${v}" type="button"><div class="n">${v}</div><div class="t">${LVLTXT[v]}</div></button>`).join('')}
@@ -3033,6 +3062,7 @@ function render(){
     st.querySelector('[data-brecha]').addEventListener('input', e => { r.brecha = e.target.value; touch(); });
     st.querySelector('[data-notes]').addEventListener('input', e => { r.ev = e.target.value; evNote(); touch(); });
     evNote();
+    engancharIndagar(st);
   }
 
   else if(f.k === 'emp'){
@@ -3466,6 +3496,8 @@ function render(){
         </div>
       </div>` : ''}
 
+      ${tarjetaIndagarCierre()}
+
       <div class="card">
         <div class="fttl" style="margin-bottom:6px">Idioma del informe</div>
         <p class="hint" style="margin-top:0">El cliente lo recibe en el idioma que elijas. Se puede cambiar después, desde el informe.</p>
@@ -3499,6 +3531,7 @@ function render(){
           : '<b>El informe no se puede generar todavía.</b> Arriba está señalado en rojo lo que falta, y se completa ahí mismo.'}</p>
       </div>`;
     st.querySelectorAll('[data-ir]').forEach(b => b.addEventListener('click', e => goFase(+e.currentTarget.dataset.ir)));
+    engancharIndagar(st);
     st.querySelectorAll('[data-idioma]').forEach(b => b.addEventListener('click', e => {
       S.idiomaElegido = e.currentTarget.dataset.idioma; saveLocal();
       st.querySelectorAll('[data-idioma]').forEach(m => m.classList.toggle('sel', m === e.currentTarget));
@@ -4085,7 +4118,7 @@ function pantallaProcesando(){
     <div class="setup" style="max-width:640px">
       <div class="card" style="text-align:center;padding:34px 28px">
         <div class="spin" style="margin-bottom:16px"></div>
-        <h1 style="font-size:22px">Analizando la entrevista de ${esc((S.cand||'').split(' ')[0] || 'este candidato')}</h1>
+        <h1 style="font-size:22px">${repPendiente() ? 'Combinando la repregunta de' : 'Analizando la entrevista de'} ${esc((S.cand||'').split(' ')[0] || 'este candidato')}</h1>
         <p class="lede" style="margin:8px auto 0;max-width:46ch">Tarda entre 20 y 40 segundos y no
         necesita que te quedes: <b>puedes empezar la siguiente entrevista</b> y esta verificación
         te espera en el tablero como <i>lista para calificar</i>.</p>
@@ -4108,12 +4141,21 @@ function pantallaProcesando(){
     try{
       const s = await api('/api/sessions/' + S.sid);
       if(s.transcript_status === 'lista' && s.transcript_analisis){
-        parar(); aplicarTranscripcion(s.transcript_analisis);
+        parar();
+        if(s.repregunta && s.repregunta.hecha_at && !s.repregunta.aplicada_at){
+          S.rep = s.repregunta; aplicarRepregunta(s.transcript_analisis); return;
+        }
+        aplicarTranscripcion(s.transcript_analisis);
         toast('Evidencia lista — revisa y confirma cada nivel'); return;
       }
       if(s.transcript_status === 'error'){
         parar();
         const e = s.transcript_error || {};
+        if(repPendiente()){
+          pantallaRepregunta({titulo: e.motivo === 'interrumpido' ? 'El análisis de la repregunta se interrumpió.' : 'No se pudo analizar la repregunta.',
+                              msg: e.error || 'Vuelve a intentarlo.', raw: e.raw});
+          return;
+        }
         pantallaTranscripcion({
           titulo: e.motivo === 'truncado' ? 'La transcripción es demasiado larga para una sola pasada.'
                 : e.motivo === 'interrumpido' ? 'El análisis se interrumpió.'
@@ -4203,6 +4245,232 @@ function aplicarTranscripcion(an){
   S.fase = 0; S.tFase = Date.now();
   saveLocal(); touch();
   go('vLive'); render();
+}
+
+/* ===================== la repregunta =====================
+   Un buen candidato no puede quedar mal calificado porque nadie le pidió el caso. El análisis
+   distingue "no lo demostró" (se le preguntó y no pudo) de "falta indagar" (contestó corto y
+   se pasó al siguiente tema), y para lo segundo trae preguntas listas. El evaluador decide si
+   vale una llamada de cinco minutos; lo que salga se combina con la primera llamada, solo en
+   los requisitos repreguntados. Nada de esto se imprime: es trabajo interno. */
+const repPendiente = () => !!(S && S.rep && S.rep.pedida_at && !S.rep.hecha_at);
+const repPorAplicar = () => !!(S && S.rep && S.rep.hecha_at && !S.rep.aplicada_at);
+function reqsFaltaIndagar(){
+  if(!S || !S.tran) return [];
+  return S.reqs.map((r, i) => ({r, i, p: propuestaDe(i)}))
+    .filter(x => x.p && x.p.indagar && x.p.indagar.falta);
+}
+// Lo que el evaluador eligió llevar a la llamada. Por omisión, todo lo que falta indagar.
+function repElegidos(){ S.repSel = S.repSel || {}; return reqsFaltaIndagar().filter(x => S.repSel[x.i] !== false); }
+const textoBtnRep = n => repPendiente() ? 'Ver la repregunta programada' : `Programar repregunta${n ? ` (${n})` : ''}`;
+
+function cajaIndagar(i){
+  const p = propuestaDe(i);
+  if(!p || !p.indagar || !p.indagar.falta) return '';
+  const sel = (S.repSel || {})[i] !== false;
+  const qs = Array.isArray(p.indagar.preguntas) ? p.indagar.preguntas : [];
+  return `<div class="indagar">
+    <div class="indhd"><span class="tag a">FALTA INDAGAR</span><span class="indint">Uso interno · no se imprime</span></div>
+    <p class="indpt">${esc(p.indagar.punto || 'Contestó corto y no se le pidió el caso.')}</p>
+    <p class="hint" style="margin:0 0 8px">Esto no dice que no cumpla: dice que nadie le preguntó. Antes de dejarle este
+    nivel, una llamada corta con estas preguntas lo resuelve.</p>
+    ${qs.length ? `<ol class="indq">${qs.map(q => `<li>“${esc(q)}”</li>`).join('')}</ol>` : ''}
+    <div class="indpie">
+      ${repPendiente() ? '' : `<label class="indsel"><input type="checkbox" data-repsel="${i}" ${sel ? 'checked' : ''}> Llevarlo a la repregunta</label>`}
+      <div class="tools" style="margin-top:0;flex:0 1 280px"><button class="pri" data-programar type="button">${textoBtnRep(repElegidos().length)}</button></div>
+    </div>
+  </div>`;
+}
+
+function tarjetaIndagarCierre(){
+  const xs = reqsFaltaIndagar();
+  if(!xs.length) return '';
+  const sel = x => (S.repSel || {})[x.i] !== false;
+  return `<div class="card">
+    <div class="cardhd" style="margin-bottom:8px">
+      <h2 style="font-size:17px">Faltó indagar en ${xs.length === 1 ? 'un requisito' : xs.length + ' requisitos'}</h2>
+      <span class="tag a">ANTES DE EMITIR</span>
+    </div>
+    <p class="hint" style="margin-top:0">El análisis no dice que no cumpla: dice que contestó corto y nadie le pidió
+    el caso. Si emites así, el informe lo califica con lo que hay. Una repregunta de cinco minutos puede cambiarlo.</p>
+    <div class="indlista">
+      ${xs.map(x => `<label class="indfila">
+        ${repPendiente() ? '' : `<input type="checkbox" data-repsel="${x.i}" ${sel(x) ? 'checked' : ''}>`}
+        <span><b>${esc(x.r.n)}</b> · nivel ${x.r.lvl || '–'}<small>${esc(x.p.indagar.punto || '')}</small></span>
+      </label>`).join('')}
+    </div>
+    <div class="tools" style="margin-top:12px">
+      <button class="pri" data-programar type="button">${textoBtnRep(repElegidos().length)}</button>
+    </div>
+  </div>`;
+}
+
+function engancharIndagar(st){
+  st.querySelectorAll('[data-repsel]').forEach(el => el.addEventListener('change', e => {
+    S.repSel = S.repSel || {};
+    S.repSel[+e.target.dataset.repsel] = e.target.checked;
+    saveLocal();
+    const n = repElegidos().length;
+    st.querySelectorAll('[data-programar]').forEach(b => { b.textContent = textoBtnRep(n); b.disabled = !n; });
+  }));
+  st.querySelectorAll('[data-programar]').forEach(b => {
+    b.disabled = !repPendiente() && !repElegidos().length;
+    b.addEventListener('click', () => repPendiente() ? pantallaRepregunta() : programarRepregunta());
+  });
+}
+
+async function programarRepregunta(){
+  const el = repElegidos();
+  if(!el.length || !S.sid) return;
+  const nombre = (S.cand || 'el candidato').split(' ')[0];
+  if(!await preguntar(`Repreguntarle a ${nombre}`,
+      `Se guarda lo que llevas y la verificación queda en el tablero como REPREGUNTAR, con las preguntas de ${el.length === 1 ? 'un requisito' : el.length + ' requisitos'}. ` +
+      'Llámalo por Meet con la transcripción activada: con cinco minutos alcanza. Al terminar pegas esa transcripción y se combina con la primera.',
+      'Programar', 'Cancelar')) return;
+  overlay(true, 'Programando la repregunta…', '');
+  try{
+    await flush();
+    const out = await api(`/api/sessions/${S.sid}/repregunta`, {method:'POST', body:{
+      requisitos: el.map(x => ({indice: x.i + 1, requisito: x.r.n, punto: x.p.indagar.punto || '',
+                                preguntas: x.p.indagar.preguntas || []})),
+    }});
+    S.rep = out.repregunta; saveLocal();
+    toast('Repregunta programada — también queda en el tablero');
+    pantallaRepregunta();
+  }catch(e){ toast('No se pudo programar: ' + e.message); }
+  finally{ overlay(false); }
+}
+
+function pantallaRepregunta(err){
+  go('vTrans');
+  REPINTAR = () => pantallaRepregunta(err);
+  $('#stage').innerHTML = '';
+  const R = S.rep || {requisitos: []};
+  const reqs = R.requisitos || [];
+  const nombre = esc((S.cand || '').split(' ')[0] || 'el candidato');
+  const textoPreguntas = reqs.map(x => `${x.requisito || 'Requisito ' + x.indice}\n` +
+    (x.preguntas || []).map((q, k) => `  ${k + 1}. ${q}`).join('\n')).join('\n\n');
+
+  $('#transStage').innerHTML = `
+    <button class="back" data-salir type="button">← Guardar y salir</button>
+    <div class="setup" style="max-width:760px">
+      <h1>Repregunta a ${nombre}</h1>
+      <p class="lede">Una llamada corta, solo para lo que en la primera quedó sin indagar. Graba con la
+      transcripción de Meet activada y lee las preguntas tal cual. Si contesta corto otra vez, pídele el
+      caso: <i>“¿y tú, concretamente, qué hiciste?”</i>. Esa repregunta es la que hace la diferencia.</p>
+
+      <div class="fset">
+        <div class="fttl">Las preguntas${R.ronda > 1 ? ` · ronda ${R.ronda}` : ''}</div>
+        ${reqs.map(x => `<div class="repq">
+          <div class="repn">${esc(x.requisito || 'Requisito ' + x.indice)}</div>
+          ${x.punto ? `<p class="hint" style="margin:2px 0 6px">${esc(x.punto)}</p>` : ''}
+          ${(x.preguntas || []).length ? `<ol class="indq">${x.preguntas.map(q => `<li>“${esc(q)}”</li>`).join('')}</ol>`
+            : '<p class="hint" style="margin:0">Pídele un caso propio: dónde, qué hizo él y qué se complicó.</p>'}
+        </div>`).join('')}
+        <div class="tools" style="margin-top:10px"><button id="btnCopiarRep" type="button">Copiar las preguntas</button></div>
+      </div>
+
+      <div class="fset">
+        <div class="fttl">Pega la transcripción de la repregunta</div>
+        <div class="drop" id="transDrop">
+          <div class="dropin">
+            <div class="dropic">↑</div>
+            <div class="droptx"><b id="transDropT">Arrastra el archivo o haz clic para elegirlo</b>
+              <span id="transDropS">Transcripción de Meet (.txt, .vtt), Word (.docx), PDF o texto plano</span></div>
+          </div>
+        </div>
+        <input type="file" id="transFile" accept=".txt,.vtt,.srt,.docx,.pdf,text/plain" style="display:none">
+        <div class="osep">O PEGA EL TEXTO</div>
+        <div class="f"><textarea id="transText" class="big" placeholder="Pega aquí la transcripción de la llamada corta."></textarea></div>
+        <div class="cnt"><span id="transCnt">0 caracteres</span></div>
+      </div>
+
+      ${err ? `<div class="aviso malo"><b>${esc(err.titulo)}</b>${esc(err.msg)}
+        ${err.raw ? `<details class="crudo"><summary>Ver lo que devolvió Claude</summary><pre>${esc(err.raw)}</pre></details>` : ''}</div>` : ''}
+
+      <button class="cta" id="btnAnalizarTrans" disabled>Combinar con la primera llamada</button>
+      <p class="hint">Solo cambian ${reqs.length === 1 ? 'el requisito repreguntado' : 'los ' + reqs.length + ' requisitos repreguntados'};
+      lo demás queda como estaba. <b>La transcripción no se guarda.</b></p>
+      <div class="tools" style="margin-top:6px">
+        <button class="linkbtn" id="btnCancelarRep" type="button">Ya no hace falta: calificar con lo que hay</button>
+      </div>
+    </div>`;
+
+  const ta = $('#transText'), btn = $('#btnAnalizarTrans'), cnt = $('#transCnt');
+  const revisar = () => {
+    const n = ta.value.trim().length;
+    cnt.textContent = n.toLocaleString('es-CO') + ' caracteres';
+    btn.disabled = n < REPREGUNTA_MIN;
+  };
+  ta.addEventListener('input', revisar);
+  revisar();
+
+  $('#btnCopiarRep').addEventListener('click', () => {
+    navigator.clipboard?.writeText(textoPreguntas).then(() => toast('Preguntas copiadas')).catch(() => toast('No se pudo copiar'));
+  });
+  $('#transStage').querySelector('[data-salir]').addEventListener('click', () => salirDeSesion());
+  $('#btnCancelarRep').addEventListener('click', async () => {
+    if(!await preguntar('¿Cancelar la repregunta?', 'Se califica con lo que salió de la primera llamada. Si después cambias de idea, la puedes volver a programar desde el requisito.', 'Cancelarla', 'Seguir con ella')) return;
+    try{
+      await api(`/api/sessions/${S.sid}/repregunta`, {method:'POST', body:{cancelar:true}});
+      S.rep = null; S.modo = 'calificacion'; saveLocal();
+      go('vLive'); render();
+      toast('Repregunta cancelada');
+    }catch(e){ toast('No se pudo cancelar: ' + e.message); }
+  });
+
+  const file = $('#transFile'), drop = $('#transDrop');
+  drop.addEventListener('click', () => file.click());
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault(); drop.classList.remove('over');
+    if(e.dataTransfer.files && e.dataTransfer.files[0]) leerArchivoTrans(e.dataTransfer.files[0]);
+  });
+  file.addEventListener('change', e => { if(e.target.files[0]) leerArchivoTrans(e.target.files[0]); });
+  btn.addEventListener('click', analizarRepregunta);
+}
+const REPREGUNTA_MIN = 150;
+
+async function analizarRepregunta(){
+  const texto = $('#transText').value.trim();
+  overlay(true, 'Enviando la repregunta…', 'Un momento.');
+  try{
+    const out = await api(`/api/sessions/${S.sid}/transcript`, {method:'POST', body:{transcript: texto, repregunta: true}});
+    if(out.estado === 'procesando'){ overlay(false); pantallaProcesando(); return; }
+  }catch(e){
+    pantallaRepregunta({titulo: 'No se pudo analizar la repregunta.', msg: e.message, raw: e.payload && e.payload.raw});
+  }finally{ overlay(false); }
+}
+
+// Solo se tocan los requisitos repreguntados: lo demás puede tener ya el trabajo del
+// evaluador encima. Los repreguntados vuelven a ser propuesta y hay que confirmarlos.
+async function aplicarRepregunta(an){
+  S.tran = an || S.tran || {};
+  S.modo = 'calificacion';
+  const idx = ((S.rep && S.rep.requisitos) || []).map(x => Number(x.indice) - 1).filter(i => S.reqs[i]);
+  idx.forEach(i => {
+    const r = S.reqs[i], prop = propuestaDe(i);
+    if(!prop) return;
+    r.lvl = (prop.cubierto !== false && prop.nivel) ? (Number(prop.nivel) || null) : null;
+    r.ev = String(prop.evidencia || '');
+    r.exp = String(prop.demostro || prop.por_que_ese_nivel || '');
+    r.brecha = String(prop.brecha || '');
+    r.falta = String(prop.recomendacion || '');
+    r.nivelProp = Number(prop.nivel) || null;
+    if(S.repSel) delete S.repSel[i];
+  });
+  try{
+    const out = await api(`/api/sessions/${S.sid}/repregunta`, {method:'POST', body:{aplicada:true}});
+    S.rep = out.repregunta;
+  }catch(e){ console.warn('[repregunta·aplicada]', e.message); }
+  // Directo al primer requisito que cambió: es lo que hay que confirmar.
+  const FC = fases();
+  const k = idx.length ? FC.findIndex(f => f.k === 'req' && f.i === Math.min(...idx)) : -1;
+  S.fase = k < 0 ? 0 : k; S.tFase = Date.now();
+  saveLocal(); touch();
+  go('vLive'); render();
+  toast(idx.length === 1 ? 'Repregunta lista — confirma el nivel nuevo' : `Repregunta lista — confirma los ${idx.length} niveles nuevos`);
 }
 
 

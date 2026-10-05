@@ -197,6 +197,67 @@ function conciliarEmpleo(ancla, r) {
 // ---------------------------------------------------------------------------------------
 
 // En qué punto está una verificación, desde la pregunta "¿qué me toca hacer con esta?".
+// ---------------------------------------------------------------------------------------
+// LA REPREGUNTA
+// Pasaba que un buen candidato salía mal calificado porque en la llamada nadie le pidió el
+// caso: contestó corto, el evaluador pasó al siguiente tema y el análisis no tuvo con qué
+// subirle el nivel. Eso no es "no lo demostró", es "falta indagar". El análisis lo distingue,
+// y el evaluador puede programar una llamada corta con las preguntas exactas. Lo que sale de
+// esa llamada se combina con la primera, solo en los requisitos que se repreguntaron.
+//
+// Vive en la sesión como `repregunta`: { pedida_at, requisitos:[{indice, requisito,
+// preguntas}], hecha_at, aplicada_at, ronda }.
+// ---------------------------------------------------------------------------------------
+const repreguntaPendiente = s => !!(s && s.repregunta && s.repregunta.pedida_at && !s.repregunta.hecha_at);
+const REPREGUNTA_MAX_PREG = 4;
+
+// Lo que llega del navegador se limpia aquí: índices dentro de la vacante, sin repetir, y
+// preguntas cortas. Devuelve null si no queda nada que repreguntar.
+function normalizarRepregunta(requisitos, nReq) {
+  if (!Array.isArray(requisitos)) return null;
+  const vistos = new Set(), out = [];
+  for (const r of requisitos) {
+    const i = Number(r && r.indice);
+    if (!Number.isInteger(i) || i < 1 || (nReq && i > nReq) || vistos.has(i)) continue;
+    const preguntas = (Array.isArray(r.preguntas) ? r.preguntas : [])
+      .map(q => clean(q).slice(0, 400)).filter(Boolean).slice(0, REPREGUNTA_MAX_PREG);
+    vistos.add(i);
+    out.push({ indice: i, requisito: clean(r.requisito).slice(0, 300), preguntas, punto: clean(r.punto).slice(0, 400) });
+  }
+  out.sort((a, b) => a.indice - b.indice);
+  return out.length ? out : null;
+}
+
+// El análisis de la repregunta se combina con el de la primera llamada. Lo que NO se
+// repreguntó no se toca —aunque el modelo lo devuelva distinto—, y la conducta, el impacto,
+// el empleo y lo declarado se quedan con lo de la primera llamada: la repregunta es una
+// llamada de cinco minutos sobre otra cosa.
+function combinarRepregunta(previo, nuevo, indices, { ronda = 1, at = new Date().toISOString() } = {}) {
+  const p = (previo && typeof previo === 'object') ? previo : {};
+  const n = (nuevo && typeof nuevo === 'object') ? nuevo : {};
+  const rep = new Set((indices || []).map(Number));
+  const idx = (x, k) => Number(x && x.indice) || k + 1;
+  const nuevos = Array.isArray(n.por_requisito) ? n.por_requisito : [];
+  const cambiados = [];
+  const por_requisito = (Array.isArray(p.por_requisito) ? p.por_requisito : []).map((x, k) => {
+    const i = idx(x, k);
+    if (!rep.has(i)) return x;
+    const y = nuevos.find((z, j) => idx(z, j) === i);
+    if (!y) return x;
+    cambiados.push(i);
+    return { ...y, indice: i, nivel_primera: x && x.nivel != null ? x.nivel : null, repreguntado: ronda };
+  });
+  const unir = (a, b) => [...new Set([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])])];
+  return {
+    ...p,
+    por_requisito,
+    senales_generales: unir(p.senales_generales, n.senales_generales),
+    advertencias: unir(p.advertencias, (Array.isArray(n.advertencias) ? n.advertencias : []).map(a => `Repregunta: ${a}`)),
+    _repregunta: [...(Array.isArray(p._repregunta) ? p._repregunta : []),
+                  { ronda, at, indices: cambiados, resumen: clean(n.resumen) }],
+  };
+}
+
 function estadoTablero(s, ahora = Date.now()) {
   if (!s) return 'en_curso';
   if (s.status === 'issued') {
@@ -210,6 +271,7 @@ function estadoTablero(s, ahora = Date.now()) {
   const tr = estadoTranscripcion(s, ahora).estado;
   if (tr === 'procesando') return 'analizando';
   if (tr === 'error') return 'fallo';
+  if (repreguntaPendiente(s)) return 'repreguntar';
   if (s.transcript_at || tr === 'lista') return 'calificar';
   if (s.status === 'esperando') return 'espera';
   return 'en_curso';
@@ -276,7 +338,7 @@ function estadisticas(sesiones, { evaluador = '', ahora = Date.now(), semanas = 
     racha++; d = sumarDias(d, -1);
   }
 
-  const pendientes = { calificar: 0, fallo: 0, espera: 0, analizando: 0, en_curso: 0, seguimiento: 0 };
+  const pendientes = { calificar: 0, fallo: 0, espera: 0, analizando: 0, en_curso: 0, seguimiento: 0, repreguntar: 0 };
   for (const s of mias) { const e = estadoTablero(s, t); if (pendientes[e] !== undefined) pendientes[e]++; }
   const equipoSemana = todas.filter(s => s.status === 'issued' && s.issued_at && lunesDe(diaLocal(s.issued_at)) === lunes).length;
 
@@ -525,7 +587,7 @@ function indicadoresSemana(sesiones, vacantes, { fecha = null, evaluador = '', a
 }
 
 module.exports = {
-  estadoTablero, claveEvaluador, estadisticas, diaLocal,
+  estadoTablero, repreguntaPendiente, normalizarRepregunta, combinarRepregunta, REPREGUNTA_MAX_PREG, claveEvaluador, estadisticas, diaLocal,
   pulsoVacante, pulsoVacantes, resultadoSesion, TERNA, DIAS_RECIENTE, indicadoresSemana, MOTIVOS_DESCARTE, RESULTADOS_CLIENTE, DIAS_SEGUIMIENTO,
   mismaEmpresa, conciliarEmpleo, ESTADOS_EMPLEO,
   LVLTXT, MAX_REQ, ID_ITEMS, itemsDe, KINDS, esCierre, clean, estadoTranscripcion, TRANSCRIPCION_STALE_MS,

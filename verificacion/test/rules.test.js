@@ -436,4 +436,64 @@ console.log('descartar candidatos');
   t('hay una lista cerrada de motivos', () => { assert.ok(MOTIVOS_DESCARTE.length >= 5 && MOTIVOS_DESCARTE.includes('Otro')); });
 }
 
+{
+  console.log('\nLa repregunta');
+  const { estadoTablero, estadisticas, repreguntaPendiente, normalizarRepregunta, combinarRepregunta } = require('../rules');
+  const AH = new Date('2026-10-05T15:00:00Z').getTime();
+  const base = {status:'draft', transcript_status:'lista', transcript_at:'2026-10-05T10:00:00Z', transcript_analisis:{}};
+  t('pedida y sin hacer: el tablero dice REPREGUNTAR, no calificar', () => {
+    const s = {...base, repregunta:{pedida_at:'2026-10-05T11:00:00Z', requisitos:[{indice:1}]}};
+    assert.strictEqual(repreguntaPendiente(s), true);
+    assert.strictEqual(estadoTablero(s, AH), 'repreguntar');
+    assert.strictEqual(estadisticas([{...s, evaluator:'W'}], {ahora:AH}).pendientes.repreguntar, 1);
+  });
+  t('hecha: vuelve a calificar; analizando y fallo mandan sobre ella', () => {
+    const hecha = {...base, repregunta:{pedida_at:'x', hecha_at:'y', requisitos:[{indice:1}]}};
+    assert.strictEqual(estadoTablero(hecha, AH), 'calificar');
+    const pend = {...base, repregunta:{pedida_at:'x', requisitos:[{indice:1}]}};
+    assert.strictEqual(estadoTablero({...pend, transcript_status:'procesando', transcript_started_at:'2026-10-05T14:59:00Z'}, AH), 'analizando');
+    assert.strictEqual(estadoTablero({...pend, transcript_status:'error'}, AH), 'fallo');
+    assert.strictEqual(estadoTablero({...pend, descartado_at:'z'}, AH), 'descartado');
+    assert.strictEqual(estadoTablero({...pend, status:'issued', issued_at:'2026-10-05T14:00:00Z'}, AH), 'emitido');
+  });
+  t('lo que llega del navegador se limpia: índices válidos, sin repetir, preguntas acotadas', () => {
+    const r = normalizarRepregunta([
+      {indice:2, requisito:' SAP PP ', preguntas:['a', '', 'b', 'c', 'd', 'e']},
+      {indice:2, preguntas:['dup']}, {indice:9}, {indice:0}, {indice:'1', preguntas:'no es lista'},
+    ], 3);
+    assert.deepStrictEqual(r.map(x => x.indice), [1, 2]);
+    assert.strictEqual(r[1].requisito, 'SAP PP');
+    assert.deepStrictEqual(r[1].preguntas, ['a', 'b', 'c', 'd']);
+    assert.strictEqual(normalizarRepregunta([], 3), null);
+    assert.strictEqual(normalizarRepregunta('x', 3), null);
+  });
+  t('se combina solo lo repreguntado; lo demás y la conducta quedan de la primera llamada', () => {
+    const previo = {
+      por_requisito:[{indice:1, nivel:3, demostro:'uno', indagar:{falta:true}}, {indice:2, nivel:4, demostro:'dos'}],
+      perfil:[{rasgo:'Autonomía', presente:true}], experiencia_reciente:{estado:'verificada'},
+      advertencias:['vieja'], senales_generales:['s1'], resumen:'primera',
+    };
+    const nuevo = {
+      por_requisito:[{indice:1, nivel:4, demostro:'uno+', indagar:{falta:false}}, {indice:2, nivel:1, demostro:'NO TOCAR'}],
+      perfil:[], experiencia_reciente:{}, advertencias:['corta'], senales_generales:['s1', 's2'], resumen:'repregunta',
+    };
+    const c = combinarRepregunta(previo, nuevo, [1], {ronda:1, at:'2026-10-05T12:00:00Z'});
+    assert.strictEqual(c.por_requisito[0].nivel, 4);
+    assert.strictEqual(c.por_requisito[0].nivel_primera, 3);
+    assert.strictEqual(c.por_requisito[0].repreguntado, 1);
+    assert.strictEqual(c.por_requisito[0].indagar.falta, false);
+    assert.strictEqual(c.por_requisito[1].demostro, 'dos');
+    assert.deepStrictEqual(c.perfil, previo.perfil);
+    assert.deepStrictEqual(c.experiencia_reciente, previo.experiencia_reciente);
+    assert.strictEqual(c.resumen, 'primera');
+    assert.deepStrictEqual(c.advertencias, ['vieja', 'Repregunta: corta']);
+    assert.deepStrictEqual(c.senales_generales, ['s1', 's2']);
+    assert.deepStrictEqual(c._repregunta, [{ronda:1, at:'2026-10-05T12:00:00Z', indices:[1], resumen:'repregunta'}]);
+    // Si el modelo no devolvió el requisito repreguntado, se queda el de la primera llamada.
+    const c2 = combinarRepregunta(previo, {por_requisito:[]}, [1]);
+    assert.strictEqual(c2.por_requisito[0].demostro, 'uno');
+    assert.deepStrictEqual(c2._repregunta[0].indices, []);
+  });
+}
+
 console.log(`\n${n} pruebas · todo en verde`);

@@ -152,6 +152,8 @@ node verificacion/test/pulso.test.js       # el pulso, los candidatos por vacant
 node verificacion/test/ops.test.js         # operaciones: cálculos, validación, lo que se llena solo, tier por empresa, importación
 PG_PRUEBA="host=/tmp/pgt port=5499 user=postgres" node verificacion/test/rutas_pg.test.js  # las rutas reales (migraciones, listas, tablero, descartar, ops) contra un Postgres local
 PG_PRUEBA="host=/tmp/pgt port=5499 user=postgres" node verificacion/test/ops_pg.test.js  # el SQL de operaciones contra un Postgres local (se salta sin PG_PRUEBA)
+PG_PRUEBA="host=/tmp/pgt port=5499 user=postgres" node verificacion/test/repregunta_pg.test.js  # la repregunta con las rutas reales y un Claude falso
+python3 verificacion/test/e2e_repregunta.py  # falta indagar → programar → tablero → combinar → cancelar
 python3 verificacion/test/e2e_nombre.py    # el lápiz junto al nombre, en sesión y sobre el acta
 python3 verificacion/test/e2e_empleo.py    # se verifica el último empleo declarado y no otro
 python3 verificacion/test/e2e_tablero.py   # el pulso, la cola, la meta, cerrar/reabrir, candidatos por vacante y el buscador
@@ -569,6 +571,17 @@ Dos cosas que manda el mundo real y que el diseño respeta:
 Un requisito que **no se tocó** en la conversación queda sin nivel y la pantalla lo dice de frente. No se rellena con lo que diga el CV ni con lo que parezca razonable: un requisito sin conversación es un requisito sin medir, y eso es un dato.
 
 **El orden sigue a la conversación.** Después de la apertura viene el **último empleo** ("cuéntame de tu trabajo más reciente"), y de ahí se baja a los requisitos, el inglés y la conducta. La calificación usa el mismo orden: primero el empleo, después los requisitos. Antes el empleo iba al final, y en la llamada no tenía sentido cerrar con la pregunta con la que se suele arrancar.
+
+### Falta indagar y la repregunta
+
+Pasaba que un buen candidato salía mal calificado porque en la llamada **nadie le pidió el caso**: contestó corto, el evaluador pasó al siguiente tema y el análisis no tuvo con qué subirle el nivel. Eso no es "no lo demostró"; es "falta indagar", y el análisis ahora lo distingue:
+
+- **No lo demostró**: se le preguntó, se le repreguntó ("¿y concretamente qué hiciste tú?") y no pudo sostenerlo. Eso es evidencia y el nivel lo refleja.
+- **Falta indagar**: un criterio quedó parcial porque la respuesta fue corta y nadie volvió sobre ella, o el requisito no se tocó. El análisis propone igual el nivel con lo que hay, pero marca el punto abierto y trae **1 a 3 preguntas listas** para una llamada corta.
+
+En la calificación, el requisito muestra el recuadro **FALTA INDAGAR** (uso interno, nunca se imprime) con el punto y las preguntas, y el cierre lo resume antes de emitir: "Faltó indagar en N requisitos". El evaluador elige cuáles llevar a la llamada y la programa. La verificación queda en el tablero como **REPREGUNTAR** con las preguntas a la mano; se llama al candidato por Meet (cinco minutos alcanzan), se pega esa transcripción y **se combina con la primera llamada solo en los requisitos repreguntados**: lo demás —los otros requisitos, la conducta, el impacto, el empleo, lo declarado— queda como estaba, aunque el modelo lo devuelva distinto (`rules.js · combinarRepregunta`). El requisito repreguntado dice de dónde viene su nivel ("la primera llamada propuso 3; con la repregunta propone 4") y vuelve a ser una propuesta que el evaluador confirma.
+
+Si en la repregunta se le pidió el caso y no pudo, eso ya es evidencia: el nivel baja y deja de faltar indagar. Se puede pedir otra ronda, o cancelarla y calificar con lo que hay. La transcripción de la repregunta tampoco se guarda. Lo que queda en la sesión es `repregunta` (qué se preguntó, cuándo se pidió, se hizo y se aplicó) y, dentro del análisis, `_repregunta` con cada ronda.
 
 ## El acta impresa
 
