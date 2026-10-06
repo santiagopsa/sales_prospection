@@ -568,7 +568,7 @@ MÉTODO SANDLER (para calificar el deal):
 - Fase 1 · Construcción: contrato previo (tiempo, agenda, permiso para decir "no") + vínculo.
 - Fase 2 · Calificación: cuatro criterios, cada uno con SU regla escrita (es la regla de Peaku, aplícala literal, no la versión genérica de Sandler):
 ${CALIFICACION.reglasTexto()}
-  Reglas de juicio: un criterio cumple SOLO si la transcripción lo respalda con una cita. Que el ejecutivo haya preguntado no basta: cuenta la respuesta del cliente. "Presupuesto" NO cumple si la plata es del próximo año o el cliente dijo que no tiene; tampoco cumple si el ejecutivo nunca dijo un precio o rango (sin precio no hay reacción al precio). "Decisión" NO cumple con "lo paso a RRHH / lo reviso con mi jefe" sin saber quién aprueba y cómo. "Fecha" es una fecha para DECIDIR acordada con el cliente, no la fecha de la capacitación, del envío de la propuesta ni de la prueba. Si dudas, NO cumple, y explica qué falta.
+  Reglas de juicio: un criterio cumple SOLO si la transcripción lo respalda con una cita. Que el ejecutivo haya preguntado no basta: cuenta la respuesta del cliente. "Presupuesto" NO cumple si la plata es del próximo año o el cliente dijo que no tiene; tampoco cumple si el ejecutivo nunca dijo un precio o rango (sin precio no hay reacción al precio). "Decisión" NO cumple con "lo paso a RRHH / lo reviso con mi jefe" sin saber quién aprueba y cómo. "Fecha" es el momento en que el cliente DECIDE: cumple con un día, un mes o un hito concreto ("en enero cuando aprueban presupuesto", "después del cierre de diciembre"), aunque sea del próximo año; NO cumple con "más adelante" o "te aviso" sin mes ni hito, ni con la fecha de la capacitación, del envío de la propuesta o de la prueba. Si dudas, NO cumple, y explica qué falta.
 - Fase 3 · Cierre: el ejecutivo propone los próximos pasos (no el cliente). Piloto > cotización fría.
 - CALIFICACIÓN: Completa = los 4 criterios cumplen. Parcial = 2-3 de 4. No califica = 0-1 de 4. calificacion_sandler DEBE ser coherente con criterios_sandler (cuenta los cumple:true).
 
@@ -616,7 +616,7 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL (ni cercas de código ni com
   "presupuesto": "info de presupuesto que salió (cifra, comparación, o 'no se preguntó')",
   "decisor": "nombres/roles de decisores mencionados",
   "procesoDecision": "pasos internos, comité, plazos",
-  "fechaLimiteDecision": "YYYY-MM-DD si se acordó fecha específica, vacío si no",
+  "fechaLimiteDecision": "YYYY-MM-DD de la decisión; si el cliente dio solo el mes o un hito ('en enero'), el primer día de ese mes (YYYY-MM-01); vacío si no dijo cuándo",
   "idealRequests": [
     {"text": "pedido del cliente, en sus palabras", "cita": "cita textual del CLIENTE donde lo pide (obligatoria)", "weHave": true}
   ],

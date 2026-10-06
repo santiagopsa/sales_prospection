@@ -184,7 +184,7 @@ const CRITERIOS_AYUDA = {
   dolor: 'El cliente cuantificó el problema, contó qué ha intentado o describió el impacto (al menos 2 de las 3).',
   presupuesto: 'Ya gastan en resolver esto (herramienta paga, agencia o alguien dedicado: se infiere, no se pregunta el monto) y nuestro rango de precios no les pareció lejos, con plata de este ciclo (no "para el presupuesto del próximo año").',
   decision: 'Se sabe quién aprueba la compra (nombre o cargo; no necesariamente quien usa la herramienta) y cómo la aprueba (pasos, quién más opina, compras o comité). "Lo reviso con mi jefe" no alcanza.',
-  fecha: 'Hay una fecha acordada con el cliente para decidir ("¿para cuándo necesitan esto resuelto?").',
+  fecha: 'El cliente dijo cuándo se decide: un día, un mes o un hito concreto ("en enero, cuando se aprueba el presupuesto", "después del cierre de diciembre", "en el comité del 15"). Cuenta aunque sea lejos (que la plata sea del otro año pega en Presupuesto, no aquí). "Más adelante" o "yo te aviso", sin mes ni hito, no cuenta.',
 };
 
 // ---------- Router ----------

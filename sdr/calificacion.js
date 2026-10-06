@@ -17,7 +17,7 @@ const CRITERIOS = [
   { clave: 'decision', label: 'Decisión',
     ayuda: 'Se sabe quién aprueba la compra (nombre o cargo; no necesariamente quien usa la herramienta) y cómo la aprueba (pasos, quién más opina, compras o comité). "Lo reviso con mi jefe" no alcanza.' },
   { clave: 'fecha', label: 'Fecha límite',
-    ayuda: 'Hay una fecha acordada con el cliente para decidir ("¿para cuándo necesitan esto resuelto?").' },
+    ayuda: 'El cliente dijo cuándo se decide: un día, un mes o un hito concreto ("en enero, cuando se aprueba el presupuesto", "después del cierre de diciembre", "en el comité del 15"). Cuenta aunque sea lejos (que la plata sea del otro año pega en Presupuesto, no aquí). "Más adelante" o "yo te aviso", sin mes ni hito, no cuenta.' },
 ];
 const CLAVES = CRITERIOS.map(c => c.clave);
 
