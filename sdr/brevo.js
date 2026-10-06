@@ -115,6 +115,10 @@ async function dealsSandler(db, config) {
   return [...porId.values()];
 }
 
+// Luisa nombra los deals "Empresa - Contacto" ("Ujueta - Maria Leonor Gamez"): la empresa es lo de
+// antes del guion.
+const empresaDelNombre = nombre => String(nombre || '').split(/\s+[-–—|]\s+/)[0];
+
 // Empareja y compara. Puro: recibe las dos listas (para probarlo sin Brevo ni base).
 function cruzar(config, sandler, brevo) {
   const clave = s => normalizarEmpresa(s);
@@ -127,7 +131,7 @@ function cruzar(config, sandler, brevo) {
     }
     const k = clave(d.empresa);
     if (k) {
-      const b = brevo.find(x => !usados.has(x.id) && (x.empresas.some(e => clave(e.nombre) === k) || clave(x.nombre) === k));
+      const b = brevo.find(x => !usados.has(x.id) && (x.empresas.some(e => clave(e.nombre) === k) || clave(x.nombre) === k || clave(empresaDelNombre(x.nombre)) === k));
       if (b) return { b, por: 'empresa' };
     }
     return null;

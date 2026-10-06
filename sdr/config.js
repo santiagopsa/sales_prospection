@@ -470,12 +470,14 @@ module.exports = {
     // Solo con esto se marcan "diferencias"; una etapa de Brevo que no esté aquí se muestra sin
     // comparar y sale en "etapas sin regla" de la pestaña.
     etapas: {
-      'Nuevo': 'sin_calificar', 'Nuevo deal': 'sin_calificar', 'Contactado': 'sin_calificar',
-      'Calificado': 'calificado', 'Reunión': 'calificado', 'Demo': 'calificado',
-      'Propuesta': 'propuesta', 'Cotización': 'propuesta', 'Prueba gratis': 'propuesta',
-      'Negociación': 'interesado', 'Interesado': 'interesado',
-      'Ganado': 'ganado', 'Cerrado ganado': 'ganado', 'Won': 'ganado',
-      'Perdido': 'perdido', 'Cerrado perdido': 'perdido', 'Lost': 'perdido',
+      // El pipeline de Luisa (oct-2026): Qualified Leads → Presentación realizada → Demostración
+      // realizada → Cotización enviada → Prueba Gratis → StanBy → Ganada → Perdida.
+      'Qualified Leads': 'calificado',
+      'Presentación realizada': 'sin_calificar', 'Demostración realizada': 'sin_calificar',
+      'Cotización enviada': 'propuesta', 'Prueba Gratis': 'propuesta',
+      // 'StanBy' queda sin regla a propósito: es "en pausa", no una etapa del embudo. Si se quiere
+      // comparar, aquí: 'StanBy': 'interesado'.
+      'Ganada': 'ganado', 'Perdida': 'perdido',
     },
     // Qué mueve: cuántos minutos se guarda lo leído de Brevo antes de volver a pedirlo (la pestaña
     // tiene "Actualizar" para forzarlo).

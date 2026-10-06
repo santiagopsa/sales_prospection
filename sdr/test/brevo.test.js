@@ -13,7 +13,7 @@ function brevoFalso() {
     ],
     '/crm/deals': { items: [
       { id: 'b1', attributes: { deal_name: 'ACME - SaaS', deal_stage: 's2', pipeline: 'p1', amount: 1200, close_date: '2026-11-15' }, linkedCompaniesIds: ['e1'], linkedContactsIds: ['c1'] },
-      { id: 'b2', attributes: { deal_name: 'Delta Ltda', deal_stage: 's3', pipeline: 'p1' }, linkedCompaniesIds: [], linkedContactsIds: ['c2'] },
+      { id: 'b2', attributes: { deal_name: 'Delta Ltda - Juan Pérez', deal_stage: 's3', pipeline: 'p1' }, linkedCompaniesIds: [], linkedContactsIds: ['c2'] },
       { id: 'b3', attributes: { deal_name: 'Omega', deal_stage: 's1', pipeline: 'p1' }, linkedCompaniesIds: ['e3'], linkedContactsIds: [] },
       { id: 'b4', attributes: { deal_name: 'Zeta', deal_stage: 's9', pipeline: 'p1' }, linkedCompaniesIds: [], linkedContactsIds: [] },
       { id: 'b5', attributes: { deal_name: 'Viejo', deal_stage: 's3', pipeline: 'p1' }, linkedCompaniesIds: [], linkedContactsIds: [] },
