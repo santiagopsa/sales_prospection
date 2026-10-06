@@ -312,18 +312,17 @@
     // Qué bloque se abre: el que corre ahora; fuera de horario, el que sigue (o el primero).
     const abierto = params.get('bloque') || J.actual || J.siguiente || (J.bloques[0] && J.bloques[0].id);
     const tareasDe = bq => c.tareas.filter(t => t.bloque === bq.que && !t.tocado_hoy);
-    const compsDe = bq => (c.compromisos ? c.compromisos.hoy : []).filter(x => bq.que === 'seguimiento' ? x.canal === 'llamada' : bq.que === 'otros' ? x.canal !== 'llamada' : false);
     const tocados = c.tareas.filter(t => t.tocado_hoy);
     const bloqueAbierto = J.bloques.find(x => x.id === abierto) || J.bloques[0];
     const pendientesAbierto = bloqueAbierto ? tareasDe(bloqueAbierto).filter(t => !t.en_espera) : [];
     const siguiente = pendientesAbierto.find(t => t.canal === 'llamada' && t.telefono) || pendientesAbierto[0] || c.tareas.find(t => !t.tocado_hoy && !t.en_espera) || null;
     const estadoBloque = bq => bq.id === J.actual ? 'ahora' : (J.actual == null && bq.id === J.siguiente) ? 'siguiente' : '';
     const resumenBloque = bq => {
-      const n = bq.que === 'seguimiento' ? bq.compromisos + bq.caben : bq.caben + (bq.que === 'otros' ? bq.compromisos : 0);
+      const n = bq.caben;
       return `${plural(n, bq.que === 'nuevas' ? 'llamada' : bq.que === 'seguimiento' ? 'seguimiento' : 'toque', bq.que === 'nuevas' ? 'llamadas' : bq.que === 'seguimiento' ? 'seguimientos' : 'toques')}${bq.en_espera ? ` · ${bq.en_espera} en espera` : ''}`;
     };
     const seccionBloque = bq => {
-      const todas = tareasDe(bq), lista = todas.filter(t => !t.en_espera), espera = todas.filter(t => t.en_espera), comps = compsDe(bq);
+      const todas = tareasDe(bq), lista = todas.filter(t => !t.en_espera), espera = todas.filter(t => t.en_espera), comps = [];
       const esAbierto = bq.id === (bloqueAbierto && bloqueAbierto.id);
       const vacio = bq.que === 'nuevas' ? 'No hay llamadas nuevas pendientes. <a href="#/importar">Carga una lista</a> o <a href="#/marcar">marca un número</a>.'
         : bq.que === 'seguimiento' ? 'Sin seguimientos por llamada hoy.' : 'Sin toques por WhatsApp, correo o LinkedIn hoy.';
@@ -376,8 +375,8 @@
         ${i.enEspera ? `<a class="kpi enlace" href="#/pipeline"><b>${i.enEspera}</b><span>en espera (no caben hoy)</span></a>` : ''}
         ${!i.compromisosVencidos && !i.huerfanos && !i.enEspera ? '<span class="suave" style="font-size:12px">Todo al día.</span>' : ''}
       </div>
+      ${pintarCompromisos(c.compromisos)}
       <div class="jornada">${J.bloques.map(seccionBloque).join('')}</div>
-      ${c.compromisos && c.compromisos.proximos.length ? `<details class="panel compromisos" style="margin-top:12px"><summary class="suave" style="cursor:pointer;font-size:12px">Próximos días: ${plural(c.compromisos.proximos.length, 'compromiso', 'compromisos')}</summary>${c.compromisos.proximos.map(itemCompromiso).join('')}</details>` : ''}
       ${tocados.length ? `<h2 class="seccion" style="margin-top:18px">Ya tocados hoy <span class="suave">${plural(tocados.length, 'lead', 'leads')} · el siguiente paso de su secuencia cae hoy</span></h2>
         <div class="cola tocados">${tocados.map(t => tarjetaCola(t, null)).join('')}</div>` : ''}
       <div id="modal"></div>`;
@@ -450,7 +449,7 @@
     if (!cs || (!cs.hoy.length && !cs.proximos.length)) return '';
     const item = itemCompromiso;
     return `<div class="panel compromisos">
-      <h2>Compromisos de hoy <span class="suave" style="font-weight:400;font-size:12px">${cs.hoy.filter(t => t.vencido).length ? cs.hoy.filter(t => t.vencido).length + ' con la hora pasada · ' : ''}lo que quedaste con alguien, a su hora</span></h2>
+      <h2>Compromisos de hoy <span class="suave" style="font-weight:400;font-size:12px">${cs.hoy.filter(t => t.vencido).length ? plural(cs.hoy.filter(t => t.vencido).length, 'vencido', 'vencidos') + ' (de días anteriores o con la hora pasada) · ' : ''}lo que quedaste con alguien, a su hora · van aparte de los bloques</span></h2>
       ${cs.hoy.length ? cs.hoy.map(item).join('') : '<div class="suave" style="font-size:13px">Nada pactado para hoy.</div>'}
       ${cs.proximos.length ? `<details style="margin-top:8px"><summary class="suave" style="cursor:pointer;font-size:12px">Próximos días: ${plural(cs.proximos.length, 'compromiso', 'compromisos')}</summary>${cs.proximos.map(item).join('')}</details>` : ''}
     </div>`;

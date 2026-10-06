@@ -168,10 +168,12 @@ país, LinkedIn, sitio web, keywords y tecnologías quedan en la ficha del lead.
 ## Jornada: la cola por bloques del día
 La cola (`#/cola`) es el plan del día, partido en los bloques de `JORNADA.bloques` (hora de Bogotá):
 **Llamadas nuevas** 9–12 (llamadas de la secuencia a leads que todavía no conversan; meta 60 marcaciones),
-**Seguimientos por llamada** 14–15 (compromisos del día por llamada y llamadas a leads que ya conversaron) y
-**WhatsApp, correo y LinkedIn** 15–18 (toques de la secuencia por esos canales y compromisos por ellos). El
+**Seguimientos por llamada** 14–15 (llamadas a leads que ya conversaron) y
+**WhatsApp, correo y LinkedIn** 15–18 (toques de la secuencia por esos canales). El
 bloque que corre ahora sale abierto y marcado "ahora"; los otros, plegados con su conteo. "Llamar al siguiente"
-toma el primero del bloque abierto. Viene del análisis del 1-oct (10–12 contestan 33 % y conversan el 60 % de
+toma el primero del bloque abierto. Los **compromisos** (lo que Angie pactó con alguien, con su hora) van
+aparte, arriba de los bloques y siempre visibles, con los vencidos primero: tienen hora propia, así que no se
+meten en un bloque ni se esconden al plegarlo. Viene del análisis del 1-oct (10–12 contestan 33 % y conversan el 60 % de
 los que contestan; después de las 4 pm, 20 % y 36 %).
 
 Cada bloque muestra como mucho `JORNADA.cupo` leads; el resto queda **en espera**, sin alarma: la secuencia
