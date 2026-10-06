@@ -73,6 +73,25 @@ test('brevo: cruce puro por correo y por empresa, con diferencias', async () => 
   // Solo Brevo: Zeta (etapa sin regla, se muestra); Viejo está ganado en Brevo → no es pendiente.
   assert.deepStrictEqual(x.solo_brevo.map(b => b.id), ['b4']);
   assert.strictEqual(B.etapaEquivalente(config, 'PROPUESTA'), 'propuesta');
+  // Claves de empresa: sin espacios, base del dominio (correo o nombre tipo dominio), nunca gmail.
+  assert.deepStrictEqual(B.clavesEmpresa({ nombres: ['Gestar Innovacion Sas'], correos: ['sally@gestarinnovacion.com'] }), ['gestarinnovacion']);
+  assert.deepStrictEqual(B.clavesEmpresa({ nombres: ['Busqo.com'], correos: ['x@gmail.com'] }), ['busqocom', 'busqo']);
+  // Una etapa de Brevo que cubre dos del embudo no marca diferencia en ninguna de las dos.
+  const cfg2 = { ...config, BREVO: { ...config.BREVO, etapas: { Propuesta: ['propuesta', 'interesado'] } } };
+  const brevo2 = [
+    { id: 'x1', nombre: 'Gestarinnovacion - Sally Rotta', etapa: 'Propuesta', empresas: [], contactos: [{ email: 'sally@gestarinnovacion.com' }] },
+    { id: 'x2', nombre: 'Meper - Susana', etapa: 'Propuesta', empresas: [], contactos: [{ email: 'c@meper.com.co' }] },
+    { id: 'x3', nombre: 'Unab - Viviana', etapa: 'Propuesta', empresas: [], contactos: [] },
+  ];
+  const y = B.cruzar(cfg2, [
+    { id: 1, empresa: 'Gestar Innovacion Sas', email: null, etapa: 'interesado' },
+    { id: 2, empresa: 'Meper Solutions', email: null, etapa: 'calificado' },
+    { id: 3, empresa: 'UNAB', email: 'v@unab.edu.co', etapa: 'propuesta' },
+    { id: 4, empresa: 'Mega Soluciones', email: null, etapa: 'calificado' },
+  ], brevo2);
+  assert.deepStrictEqual(y.pares.map(p => [p.sandler.id, p.brevo.id, p.por, p.diferencias.length]), [[1, 'x1', 'empresa', 0], [2, 'x2', 'empresa (aprox.)', 1], [3, 'x3', 'empresa', 0]]);
+  assert.match(y.pares[1].diferencias[0], /equivale a Prueba gratis o cotización o Interesados/);
+  assert.deepStrictEqual(y.solo_sandler.map(d => d.id), [4]);
   assert.strictEqual(B.etapaEquivalente(config, 'En pausa'), null);
 });
 

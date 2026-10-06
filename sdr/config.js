@@ -465,7 +465,7 @@ module.exports = {
   BREVO: {
     // Qué mueve: qué pipeline de Brevo se cruza (por nombre). null = todos.
     pipeline: null,
-    // Qué mueve: a qué etapa del embudo (sdr/embudo.js: sin_calificar, calificado, propuesta,
+    // Qué mueve: a qué etapa (o etapas) del embudo (sdr/embudo.js: sin_calificar, calificado, propuesta,
     // interesado, ganado, perdido) equivale cada etapa de Brevo, por nombre (da igual mayúsculas).
     // Solo con esto se marcan "diferencias"; una etapa de Brevo que no esté aquí se muestra sin
     // comparar y sale en "etapas sin regla" de la pestaña.
@@ -474,7 +474,8 @@ module.exports = {
       // realizada → Cotización enviada → Prueba Gratis → StanBy → Ganada → Perdida.
       'Qualified Leads': 'calificado',
       'Presentación realizada': 'sin_calificar', 'Demostración realizada': 'sin_calificar',
-      'Cotización enviada': 'propuesta', 'Prueba Gratis': 'propuesta',
+      // Una etapa de Brevo puede cubrir varias del embudo (lista): no es diferencia estar en cualquiera.
+      'Cotización enviada': ['propuesta', 'interesado'], 'Prueba Gratis': ['propuesta', 'interesado'],
       // 'StanBy' queda sin regla a propósito: es "en pausa", no una etapa del embudo. Si se quiere
       // comparar, aquí: 'StanBy': 'interesado'.
       'Ganada': 'ganado', 'Perdida': 'perdido',

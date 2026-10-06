@@ -89,12 +89,16 @@ async function leerBrevo(config, env, { ahora = new Date(), forzar = false, fetc
   return cache.datos;
 }
 
-// Reglas del cruce: etapa de Brevo (por nombre, sin mayúsculas) → etapa del embudo.
-function etapaEquivalente(config, nombreBrevo) {
+// Reglas del cruce: etapa de Brevo (por nombre, sin mayúsculas) → etapa(s) del embudo. Una etapa de
+// Brevo puede equivaler a varias del embudo ("Cotización enviada" cubre propuesta e interesado):
+// `etapasEquivalentes` da la lista; `etapaEquivalente`, la primera (para mostrar).
+function etapasEquivalentes(config, nombreBrevo) {
   const m = (config.BREVO || {}).etapas || {};
   const k = Object.keys(m).find(x => x.toLowerCase() === String(nombreBrevo || '').toLowerCase());
-  return k ? m[k] : null;
+  if (!k) return [];
+  return [].concat(m[k]).filter(Boolean);
 }
+function etapaEquivalente(config, nombreBrevo) { return etapasEquivalentes(config, nombreBrevo)[0] || null; }
 const cerradaEnBrevo = (config, d) => ['ganado', 'perdido'].includes(etapaEquivalente(config, d.etapa));
 
 // Los deals del Sandler con su etapa del embudo y el correo del lead de Angie (si lo hay).
@@ -118,21 +122,52 @@ async function dealsSandler(db, config) {
 // Luisa nombra los deals "Empresa - Contacto" ("Ujueta - Maria Leonor Gamez"): la empresa es lo de
 // antes del guion.
 const empresaDelNombre = nombre => String(nombre || '').split(/\s+[-–—|]\s+/)[0];
+const DOMINIOS_GENERICOS = ['gmail', 'hotmail', 'outlook', 'yahoo', 'icloud', 'live', 'msn', 'protonmail'];
+// Primera etiqueta del dominio de un correo o de un nombre tipo dominio: "ana@acme.com.co" → "acme",
+// "Busqo.com" → "busqo". null para gmail/hotmail… y para lo que no parece dominio.
+function baseDominio(valor) {
+  const v = String(valor || '').trim().toLowerCase();
+  const dom = v.includes('@') ? v.split('@')[1] : /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(v) ? v.replace(/^www\./, '') : null;
+  if (!dom) return null;
+  const base = dom.split('.')[0];
+  return base && !DOMINIOS_GENERICOS.includes(base) ? base : null;
+}
+// Claves con las que un deal se deja emparejar por empresa: el nombre normalizado sin espacios
+// ("gestar innovacion" ↔ "gestarinnovacion") y la base del dominio del correo o del nombre.
+function clavesEmpresa({ nombres = [], correos = [] }) {
+  const out = new Set();
+  for (const n of nombres) {
+    const k = normalizarEmpresa(n);
+    if (k) out.add(k.replace(/ /g, ''));
+    const bd = baseDominio(n);
+    if (bd) out.add(bd);
+  }
+  for (const c of correos) { const bd = baseDominio(c); if (bd) out.add(bd); }
+  return [...out].filter(k => k.length >= 3);
+}
+// "Meper" ↔ "Meper Solutions": una clave de una sola palabra (≥ 5 letras) que es la primera palabra
+// de la otra. Aproximado: se marca como tal.
+function primeraPalabra(nombre) { const k = normalizarEmpresa(nombre); return k ? k.split(' ')[0] : null; }
 
 // Empareja y compara. Puro: recibe las dos listas (para probarlo sin Brevo ni base).
 function cruzar(config, sandler, brevo) {
-  const clave = s => normalizarEmpresa(s);
   const usados = new Set();
   const pares = [], solo_sandler = [];
+  const clavesB = new Map(brevo.map(b => [b.id, clavesEmpresa({ nombres: [empresaDelNombre(b.nombre), ...b.empresas.map(e => e.nombre)], correos: b.contactos.map(c => c.email) })]));
   const encontrar = d => {
     if (d.email) {
       const b = brevo.find(x => !usados.has(x.id) && x.contactos.some(c => c.email === d.email));
       if (b) return { b, por: 'correo' };
     }
-    const k = clave(d.empresa);
-    if (k) {
-      const b = brevo.find(x => !usados.has(x.id) && (x.empresas.some(e => clave(e.nombre) === k) || clave(x.nombre) === k || clave(empresaDelNombre(x.nombre)) === k));
+    const ks = clavesEmpresa({ nombres: [d.empresa], correos: d.email ? [d.email] : [] });
+    if (ks.length) {
+      const b = brevo.find(x => !usados.has(x.id) && clavesB.get(x.id).some(k => ks.includes(k)));
       if (b) return { b, por: 'empresa' };
+    }
+    const p1 = primeraPalabra(d.empresa);
+    if (p1 && p1.length >= 5) {
+      const b = brevo.find(x => !usados.has(x.id) && [empresaDelNombre(x.nombre), ...x.empresas.map(e => e.nombre)].some(n => { const k = normalizarEmpresa(n); return k && (k === p1 || k.split(' ')[0] === p1 && (!k.includes(' ') || !normalizarEmpresa(d.empresa).includes(' '))); }));
+      if (b) return { b, por: 'empresa (aprox.)' };
     }
     return null;
   };
@@ -140,14 +175,14 @@ function cruzar(config, sandler, brevo) {
     const m = encontrar(d);
     if (!m) { if (!['ganado', 'perdido'].includes(d.etapa)) solo_sandler.push(d); continue; }
     usados.add(m.b.id);
-    const eq = etapaEquivalente(config, m.b.etapa);
+    const eqs = etapasEquivalentes(config, m.b.etapa), eq = eqs[0] || null;
     const diferencias = [];
-    if (eq && eq !== d.etapa) {
+    if (eqs.length && !eqs.includes(d.etapa)) {
       const cerradoB = ['ganado', 'perdido'].includes(eq), cerradoS = ['ganado', 'perdido'].includes(d.etapa);
       const cerrado = e => e === 'ganado' ? 'ganado' : 'perdido';
       diferencias.push(cerradoB && !cerradoS ? `En Brevo está ${cerrado(eq)} y en el Sandler sigue abierto (${ETAPA_LABEL[d.etapa]})`
         : cerradoS && !cerradoB ? `En el Sandler está ${cerrado(d.etapa)} y en Brevo sigue abierto (${m.b.etapa})`
-        : `Etapa distinta: Sandler "${ETAPA_LABEL[d.etapa]}", Brevo "${m.b.etapa}" (equivale a ${ETAPA_LABEL[eq]})`);
+        : `Etapa distinta: Sandler "${ETAPA_LABEL[d.etapa]}", Brevo "${m.b.etapa}" (equivale a ${eqs.map(e => ETAPA_LABEL[e]).join(' o ')})`);
     }
     pares.push({ sandler: d, brevo: m.b, por: m.por, etapa_equivalente: eq, diferencias });
   }
@@ -177,4 +212,4 @@ async function dealDe(db, config, env, { email, empresa, dealId } = {}, opts = {
   return p ? { ...p.brevo, por: p.por, etapa_equivalente: p.etapa_equivalente } : null;
 }
 
-module.exports = { activo, cliente, leerBrevo, cruzar, chequeo, dealDe, etapaEquivalente, dealsSandler, _reiniciar: () => { cache = { at: 0, datos: null }; } };
+module.exports = { activo, cliente, leerBrevo, cruzar, chequeo, dealDe, etapaEquivalente, etapasEquivalentes, dealsSandler, clavesEmpresa, baseDominio, _reiniciar: () => { cache = { at: 0, datos: null }; } };
