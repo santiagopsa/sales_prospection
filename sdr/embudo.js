@@ -290,4 +290,4 @@ async function cotizacion(db, dealId) {
   return { deal_id: d.id, cotizacion: data.cotizacion || null, analisis: data.cotizacionAnalisis || null, pedido: loQuePidio(data) };
 }
 
-module.exports = { ETAPAS, tablero, calificar, mover, etapaDe, alcanza, guardarCotizacion, analizarCotizacion, cotizacion, loQuePidio, _reiniciar: () => { columnasListas = false; } };
+module.exports = { ETAPAS, asegurarColumnas, tablero, calificar, mover, etapaDe, alcanza, guardarCotizacion, analizarCotizacion, cotizacion, loQuePidio, _reiniciar: () => { columnasListas = false; } };

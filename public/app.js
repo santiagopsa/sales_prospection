@@ -2060,9 +2060,26 @@ async function renderBrevo(params = new URLSearchParams((location.hash.split('?'
     ${c.etapas_sin_regla.length ? `<div class="tb-aviso">Etapas de Brevo sin regla (se muestran, no se comparan): <b>${c.etapas_sin_regla.map(esc).join(', ')}</b>. Se mapean en <code>BREVO.etapas</code> de <code>sdr/config.js</code>. Pipelines: ${c.pipelines.map(p => `<b>${esc(p.nombre)}</b> (${p.etapas.map(esc).join(' → ')})`).join(' · ')}</div>` : ''}
     ${conDif.length ? `<div class="card"><h2>No cuadran <span class="muted chico" style="font-weight:400">${conDif.length}</span></h2>${tabla(conDif.map(p => `<tr><td>${sandlerCol(p.sandler)}</td><td>${brevoCol(p.brevo)}</td><td>${p.diferencias.map(esc).join('<br>')}</td></tr>`), ['Sandler', 'Brevo', 'Diferencia'])}</div>` : ''}
     ${c.solo_sandler.length ? `<div class="card"><h2>Solo en el Sandler <span class="muted chico" style="font-weight:400">${c.solo_sandler.length} abiertos · falta crearlos en Brevo o cerrarlos aquí</span></h2>${tabla(c.solo_sandler.map(d => `<tr><td>${sandlerCol(d)}</td><td class="muted chico">${d.creado ? 'creado ' + new Date(d.creado).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }) : ''}</td></tr>`), ['Deal', ''])}</div>` : ''}
-    ${c.solo_brevo.length ? `<div class="card"><h2>Solo en Brevo <span class="muted chico" style="font-weight:400">${c.solo_brevo.length} abiertos · no tienen demo en el Sandler</span></h2>${tabla(c.solo_brevo.map(b => `<tr><td>${brevoCol(b)}</td><td class="muted chico">${b.actualizado ? 'movido ' + new Date(b.actualizado).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }) : ''}</td></tr>`), ['Deal', ''])}</div>` : ''}
+    ${c.solo_brevo.length ? `<div class="card"><div class="split"><h2 style="margin:0">Solo en Brevo <span class="muted chico" style="font-weight:400">${c.solo_brevo.length} abiertos · no tienen demo en el Sandler</span></h2><button class="btn ghost btn-sm" data-brevo-importar-todos title="Crea en el Sandler un deal por cada uno, en la etapa equivalente, sin transcripción (demos de antes de la plataforma)">Crear los ${c.solo_brevo.length} en el Sandler</button></div>${tabla(c.solo_brevo.map(b => `<tr><td>${brevoCol(b)}</td><td style="white-space:nowrap"><button class="btn ghost btn-sm" data-brevo-importar="${esc(b.id)}" title="Crea el deal en el Sandler en la etapa equivalente, con empresa, contacto y correo de Brevo; queda enlazado por id">Crear en el Sandler</button></td></tr>`), ['Deal', ''])}</div>` : ''}
     <details class="card" style="margin-top:12px"><summary class="muted" style="cursor:pointer">Cuadran (${sinDif.length})</summary>${sinDif.length ? tabla(sinDif.map(p => `<tr><td>${sandlerCol(p.sandler)}</td><td>${brevoCol(p.brevo)}</td><td class="muted chico">por ${p.por}</td></tr>`), ['Sandler', 'Brevo', '']) : '<p class="muted chico">Ninguno todavía.</p>'}</details>
-    <p class="muted chico">Se emparejan primero por el correo del lead de Angie (el contacto del deal en Brevo) y si no, por el nombre de la empresa (sin S.A.S., tildes ni mayúsculas). Los cerrados en los dos lados no se listan. Esto no escribe en Brevo ni en el Sandler.</p>`);
+    <p class="muted chico">Se emparejan por el id de Brevo (los importados), por el correo del lead de Angie (el contacto del deal en Brevo) y si no, por la empresa (nombre sin S.A.S., tildes ni mayúsculas, o el dominio del correo). Los cerrados en los dos lados no se listan. Nada de esto escribe en Brevo; "Crear en el Sandler" sí crea el deal aquí.</p>`);
+  const importar = async ids => {
+    const usuario = (() => { try { return localStorage.getItem('sdr_usuario') || ''; } catch (_) { return ''; } })();
+    let ok = 0; const errores = [];
+    for (const id of ids) {
+      try {
+        const r = await fetch('/sdr/api/brevo/importar', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ brevo_id: id, usuario }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || r.status);
+        ok++;
+      } catch (e) { errores.push(`${id}: ${e.message}`); }
+    }
+    alert(`${ok} ${ok === 1 ? 'deal creado' : 'deals creados'} en el Sandler.${errores.length ? '\nNo se pudo: ' + errores.join('\n') : ''}`);
+    location.hash = '#/brevo?forzar=1&t=' + Date.now();
+  };
+  el.querySelectorAll('[data-brevo-importar]').forEach(b => b.addEventListener('click', () => { b.disabled = true; b.textContent = 'Creando…'; importar([b.dataset.brevoImportar]); }));
+  const $todos = el.querySelector('[data-brevo-importar-todos]');
+  if ($todos) $todos.addEventListener('click', () => { if (window.confirm(`¿Crear ${c.solo_brevo.length} deals en el Sandler? Quedan en la etapa equivalente, sin transcripción, enlazados a Brevo.`)) { $todos.disabled = true; importar(c.solo_brevo.map(b => b.id)); } });
 }
 
 async function renderWishlistLista(tabs) {

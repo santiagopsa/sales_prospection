@@ -497,6 +497,11 @@ embudo), los abiertos solo en el Sandler y los abiertos solo en Brevo. El detall
 lead muestran el deal de Brevo (etapa, monto, cierre, enlace). Nada escribe en Brevo. Lo leído se guarda
 `BREVO.cache_min` minutos ("Actualizar" lo fuerza). Sin llave, nada cambia.
 
+Los deals que solo están en Brevo (demos de antes de la plataforma) se pueden **crear en el Sandler** desde
+la pestaña, uno a uno o todos: quedan con empresa y contacto del nombre del deal ("Empresa - Contacto"),
+el correo del contacto, la etapa equivalente (sin pasar por la regla de calificación: no hay demo) y el id
+de Brevo en `data.brevo`, con el que el cruce siguiente los empareja por id. Ruta `POST /api/brevo/importar`.
+
 `node sdr/cli.js brevo` lista los pipelines con sus etapas (para llenar `BREVO.etapas`), las etapas sin
 regla y el cruce completo. Módulo: `sdr/brevo.js`; rutas `/api/brevo/estado`, `/api/brevo/chequeo`,
 `/api/brevo/deal?lead_id=|deal_id=`.

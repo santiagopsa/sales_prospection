@@ -112,8 +112,9 @@ test('brevo: chequeo contra la base (deals del Sandler con el correo del lead de
   await db.query('DROP SCHEMA IF EXISTS sdr CASCADE');
   await initSchema(db, { log() {}, error: console.error });
   await db.query('DROP TABLE IF EXISTS public.deals');
-  await db.query(`CREATE TABLE public.deals (id SERIAL PRIMARY KEY, executive TEXT, company TEXT, data JSONB NOT NULL DEFAULT '{}', outcome TEXT, etapa_embudo TEXT, quoted_at TIMESTAMPTZ, calificacion_sandler TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), closed_at TIMESTAMPTZ)`);
+  await db.query(`CREATE TABLE public.deals (id SERIAL PRIMARY KEY, executive TEXT, company TEXT, data JSONB NOT NULL DEFAULT '{}', outcome TEXT, etapa_embudo TEXT, quoted_at TIMESTAMPTZ, calificacion_sandler TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), closed_at TIMESTAMPTZ, canal_adquisicion TEXT, outcome_reason TEXT)`);
   require('../embudo')._reiniciar();
+  await require('../embudo').asegurarColumnas(db);
   const deal = async (company, extra = {}) => (await db.query(`INSERT INTO public.deals (company, outcome, etapa_embudo, calificacion_sandler) VALUES ($1, $2, $3, $4) RETURNING id`, [company, extra.outcome || 'open', extra.etapa || null, extra.cal || null])).rows[0].id;
   const d1 = await deal('Acme Colombia', { etapa: 'calificado' });
   await db.query(`INSERT INTO sdr.leads (empresa, contacto, email, etapa, deal_id) VALUES ('Acme Colombia', 'Ana', 'ANA@acme.com', 'calificado', $1)`, [d1]);
@@ -133,5 +134,21 @@ test('brevo: chequeo contra la base (deals del Sandler con el correo del lead de
   const porLead = await B.dealDe(db, config, env, { email: 'ana@acme.com', empresa: 'Otra' }, { fetchFn });
   assert.deepStrictEqual([porLead.id, porLead.por, porLead.etapa_equivalente], ['b1', 'correo', 'propuesta']);
   assert.strictEqual(await B.dealDe(db, config, env, { email: null, empresa: 'Nadie' }, { fetchFn }), null);
+  // Importar un deal que solo está en Brevo: queda en el Sandler con su etapa, contacto y el id de Brevo,
+  // y el cruce siguiente lo empareja por id.
+  const cfgEt = { ...config, BREVO: { ...config.BREVO, etapas: { ...config.BREVO.etapas, 'En pausa': 'interesado' } } };
+  const imp = await B.importar(db, cfgEt, env, { brevoId: 'b4', usuario: 'Luisa', ahora: new Date('2026-10-06T16:00:00Z') }, { fetchFn });
+  assert.deepStrictEqual([imp.empresa, imp.etapa, imp.tipo, imp.brevo_id], ['Zeta', 'interesado', null, 'b4']);
+  const fila = (await db.query(`SELECT * FROM public.deals WHERE id = $1`, [imp.deal_id])).rows[0];
+  assert.deepStrictEqual([fila.company, fila.executive, fila.etapa_embudo, fila.outcome, fila.data.brevo.id, fila.data.embudoHistorial[0].origen], ['Zeta', 'Luisa', 'interesado', 'open', 'b4', 'brevo']);
+  await assert.rejects(B.importar(db, cfgEt, env, { brevoId: 'b4', usuario: 'Luisa' }, { fetchFn }), /Ya existe en el Sandler/);
+  await assert.rejects(B.importar(db, cfgEt, env, { brevoId: 'nope' }, { fetchFn }), /no está en Brevo/);
+  // Uno con cotización: propuesta/cotizacion, quoted_at, contacto del nombre y correo del contacto.
+  const imp2 = await B.importar(db, cfgEt, env, { brevoId: 'b1', usuario: 'Luisa' }, { fetchFn });
+  const f2 = (await db.query(`SELECT * FROM public.deals WHERE id = $1`, [imp2.deal_id])).rows[0];
+  assert.deepStrictEqual([f2.company, f2.etapa_embudo, f2.propuesta_tipo, !!f2.quoted_at, f2.data.contactName, f2.data.contactEmail], ['ACME S.A.S.', 'propuesta', 'cotizacion', true, 'SaaS', 'ana@acme.com']);
+  const c2 = await B.chequeo(db, cfgEt, env, { fetchFn });
+  assert.strictEqual(c2.pares.find(p => p.sandler.id === imp.deal_id).por, 'id');
+  assert.deepStrictEqual(c2.solo_brevo.map(b => b.id), ['b3']);   // Omega sigue sin par; Zeta ya se importó
   await db.end();
 });

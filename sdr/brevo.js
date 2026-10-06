@@ -105,14 +105,15 @@ const cerradaEnBrevo = (config, d) => ['ganado', 'perdido'].includes(etapaEquiva
 async function dealsSandler(db, config) {
   const r = await db.query(
     `SELECT d.id, d.company, d.executive, d.outcome, d.etapa_embudo, d.quoted_at, d.calificacion_sandler, d.created_at, d.closed_at,
+            d.data->'brevo'->>'id' AS brevo_id, d.data->>'contactEmail' AS contact_email,
             l.id AS lead_id, l.email AS lead_email, l.contacto AS lead_contacto
      FROM public.deals d LEFT JOIN ${T.leads} l ON l.deal_id = d.id
      ORDER BY d.id`);
   // Un deal con varios leads (fusiones a medias): se queda el primero con correo.
   const porId = new Map();
   for (const x of r.rows) {
-    const d = porId.get(x.id) || { id: x.id, empresa: x.company || '', ejecutiva: x.executive, etapa: EMB.etapaDe(config, x), calificacion: x.calificacion_sandler, creado: x.created_at, cerrado: x.closed_at, lead_id: null, email: null, contacto: null };
-    if (!d.email && x.lead_email) { d.lead_id = x.lead_id; d.email = String(x.lead_email).toLowerCase(); d.contacto = x.lead_contacto; }
+    const d = porId.get(x.id) || { id: x.id, empresa: x.company || '', ejecutiva: x.executive, etapa: EMB.etapaDe(config, x), calificacion: x.calificacion_sandler, creado: x.created_at, cerrado: x.closed_at, brevo_id: x.brevo_id || null, lead_id: null, email: x.contact_email ? String(x.contact_email).toLowerCase() : null, contacto: null };
+    if (x.lead_email && (!d.email || d.email === (x.contact_email || '').toLowerCase())) { d.lead_id = x.lead_id; d.email = String(x.lead_email).toLowerCase(); d.contacto = x.lead_contacto; }
     if (!d.lead_id && x.lead_id) d.lead_id = x.lead_id;
     porId.set(x.id, d);
   }
@@ -155,6 +156,10 @@ function cruzar(config, sandler, brevo) {
   const pares = [], solo_sandler = [];
   const clavesB = new Map(brevo.map(b => [b.id, clavesEmpresa({ nombres: [empresaDelNombre(b.nombre), ...b.empresas.map(e => e.nombre)], correos: b.contactos.map(c => c.email) })]));
   const encontrar = d => {
+    if (d.brevo_id) {
+      const b = brevo.find(x => !usados.has(x.id) && String(x.id) === String(d.brevo_id));
+      if (b) return { b, por: 'id' };
+    }
     if (d.email) {
       const b = brevo.find(x => !usados.has(x.id) && x.contactos.some(c => c.email === d.email));
       if (b) return { b, por: 'correo' };
@@ -202,14 +207,48 @@ async function chequeo(db, config, env = process.env, opts = {}) {
   };
 }
 
+// Crear en el Sandler un deal que solo existe en Brevo (demos de antes de la plataforma): empresa y
+// contacto del nombre "Empresa - Contacto", correo del contacto enlazado, la etapa del embudo
+// equivalente (sin pasar por la regla de calificación: no hay demo que calificar) y el id de Brevo en
+// data.brevo para que el cruce siguiente lo empareje por id. No toca Brevo.
+async function importar(db, config, env, { brevoId, usuario, ahora = new Date() }, opts = {}) {
+  const datos = await leerBrevo(config, env, opts);
+  const b = datos.deals.find(x => String(x.id) === String(brevoId));
+  if (!b) throw error(404, 'Ese deal no está en Brevo (o la lectura está vieja: Actualizar)');
+  const ya = await db.query(`SELECT id FROM public.deals WHERE data->'brevo'->>'id' = $1 LIMIT 1`, [String(b.id)]);
+  if (ya.rows[0]) throw error(409, `Ya existe en el Sandler como deal #${ya.rows[0].id}`);
+  const partes = String(b.nombre || '').split(/\s+[-–—|]\s+/);
+  const empresa = (b.empresas[0] && b.empresas[0].nombre) || partes[0] || b.nombre || 'Sin empresa';
+  const contacto = partes.slice(1).join(' - ') || (b.contactos[0] && b.contactos[0].nombre) || '';
+  const email = (b.contactos[0] && b.contactos[0].email) || '';
+  const ejecutiva = usuario || (config.CALENDLY || {}).ejecutiva || null;
+  const eqs = etapasEquivalentes(config, b.etapa);
+  const etapa = eqs[0] || 'sin_calificar';
+  const tipo = etapa === 'propuesta' ? (/prueba/i.test(b.etapa) ? 'prueba' : 'cotizacion') : null;
+  const data = {
+    company: empresa, executive: ejecutiva, contactName: contacto, contactEmail: email,
+    canalAdquisicion: 'otro', fichaAdicional: `Importado de Brevo el ${ahora.toISOString().slice(0, 10)}: demo previo a la plataforma (${b.etapa}${b.monto != null ? `, ${b.monto}` : ''}). ${b.url}`,
+    idealRequests: [], qualif: {},
+    brevo: { id: String(b.id), nombre: b.nombre, etapa: b.etapa, url: b.url, importado_at: ahora.toISOString() },
+    embudoHistorial: [{ de: null, a: etapa, por: ejecutiva, at: ahora.toISOString(), origen: 'brevo', ...(tipo ? { tipo } : {}) }],
+  };
+  const cerrado = etapa === 'ganado' || etapa === 'perdido';
+  const r = await db.query(
+    `INSERT INTO public.deals (executive, company, data, canal_adquisicion, outcome, etapa_embudo, etapa_embudo_at, propuesta_tipo, quoted_at, outcome_reason, closed_at)
+     VALUES ($1, $2, $3::jsonb, 'otro', $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+    [ejecutiva, empresa, JSON.stringify(data), cerrado ? (etapa === 'ganado' ? 'won' : 'lost') : 'open', etapa, ahora.toISOString(), tipo,
+      tipo === 'cotizacion' ? (b.creado || ahora.toISOString()) : null, cerrado ? `Según Brevo (${b.etapa})` : null, cerrado ? (b.cierre || ahora.toISOString()) : null]);
+  return { deal_id: r.rows[0].id, empresa, contacto, email, etapa, tipo, brevo_id: String(b.id) };
+}
+
 // Lo de Brevo para un lead o un deal (la ficha de Angie y el detalle del deal): el deal emparejado.
-async function dealDe(db, config, env, { email, empresa, dealId } = {}, opts = {}) {
+async function dealDe(db, config, env, { email, empresa, dealId, brevoId } = {}, opts = {}) {
   if (!activo(env)) return null;
   const datos = await leerBrevo(config, env, opts);
-  const d = { id: dealId || 0, empresa: empresa || '', email: email ? String(email).toLowerCase() : null, etapa: 'sin_calificar' };
+  const d = { id: dealId || 0, empresa: empresa || '', email: email ? String(email).toLowerCase() : null, brevo_id: brevoId || null, etapa: 'sin_calificar' };
   const x = cruzar(config, [d], datos.deals);
   const p = x.pares[0];
   return p ? { ...p.brevo, por: p.por, etapa_equivalente: p.etapa_equivalente } : null;
 }
 
-module.exports = { activo, cliente, leerBrevo, cruzar, chequeo, dealDe, etapaEquivalente, etapasEquivalentes, dealsSandler, clavesEmpresa, baseDominio, _reiniciar: () => { cache = { at: 0, datos: null }; } };
+module.exports = { activo, cliente, leerBrevo, cruzar, chequeo, dealDe, importar, etapaEquivalente, etapasEquivalentes, dealsSandler, clavesEmpresa, baseDominio, _reiniciar: () => { cache = { at: 0, datos: null }; } };

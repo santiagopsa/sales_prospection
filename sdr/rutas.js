@@ -81,14 +81,20 @@ function rutas({ db, config, anthropic = null }) {
     // Brevo (el CRM de Luisa): el cruce completo y el deal de Brevo de un lead o un deal del Sandler.
     ['get', '/api/brevo/estado', async () => ({ activo: require('./brevo').activo(process.env) })],
     ['get', '/api/brevo/chequeo', async ({ query }) => { sinDb(); return require('./brevo').chequeo(db, config, process.env, { forzar: query.forzar === '1' }); }],
+    ['post', '/api/brevo/importar', async ({ body }) => {
+      sinDb();
+      const b = body || {};
+      await require('./embudo').asegurarColumnas(db);   // las columnas del embudo en public.deals
+      return require('./brevo').importar(db, config, process.env, { brevoId: b.brevo_id, usuario: require('./resultados').usuarioValido(config, b.usuario) });
+    }],
     ['get', '/api/brevo/deal', async ({ query }) => {
       sinDb();
       const B = require('./brevo');
       if (!B.activo(process.env)) return { activo: false, deal: null };
-      let email = query.email || null, empresa = query.empresa || null;
+      let email = query.email || null, empresa = query.empresa || null, brevoId = null;
       if (query.lead_id) { const l = await L.detalleLead(db, query.lead_id); email = l.email; empresa = l.empresa; }
-      else if (query.deal_id) { const r = await db.query(`SELECT d.company, l.email FROM public.deals d LEFT JOIN ${require('./schema').T.leads} l ON l.deal_id = d.id WHERE d.id = $1 LIMIT 1`, [query.deal_id]); if (r.rows[0]) { empresa = r.rows[0].company; email = r.rows[0].email; } }
-      return { activo: true, deal: await B.dealDe(db, config, process.env, { email, empresa, dealId: query.deal_id }) };
+      else if (query.deal_id) { const r = await db.query(`SELECT d.company, d.data->'brevo'->>'id' AS brevo_id, COALESCE(l.email, d.data->>'contactEmail') AS email FROM public.deals d LEFT JOIN ${require('./schema').T.leads} l ON l.deal_id = d.id WHERE d.id = $1 LIMIT 1`, [query.deal_id]); if (r.rows[0]) { empresa = r.rows[0].company; email = r.rows[0].email; brevoId = r.rows[0].brevo_id; } }
+      return { activo: true, deal: await B.dealDe(db, config, process.env, { email, empresa, dealId: query.deal_id, brevoId }) };
     }],
     ['get', '/api/calendly/estado', async () => { sinDb(); return require('./calendly').estado(db, config, process.env); }],
     ['post', '/api/calendly/sincronizar', async () => { sinDb(); return require('./calendly').sincronizar(db, config, process.env); }],
