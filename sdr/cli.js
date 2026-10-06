@@ -7,6 +7,7 @@
 //   node sdr/cli.js proyeccion                                  plan de la silla vs real, mes a mes (reglas PROYECCION)
 //   node sdr/cli.js embudo                                      deals por etapa del embudo de la ejecutiva (reglas EMBUDO)
 //   node sdr/cli.js invitados <lead_id>                         reunión del lead: formulario de Calendly, invitados y si aceptaron (Google)
+//   node sdr/cli.js brevo [--forzar]                           cruce de los deals del Sandler con Brevo (pipelines, etapas sin regla, diferencias)
 //   node sdr/cli.js importar archivo.csv|.xlsx [--confirmar]   carga desde la terminal (sin --confirmar, simula)
 //   node sdr/cli.js lista-negra archivo.csv|.xlsx [--confirmar] carga la base de lista negra (empresa, teléfono, correo, dominio, motivo)
 //   node sdr/cli.js semana [--fecha 2026-09-22] [--usuario Angie]  resumen semanal (actividad, racha, tasas si MOSTRAR_RATIOS)
@@ -147,6 +148,18 @@ async function main() {
       }
       if (r.omitido) console.log(r.omitido);
       if (r.errores && r.errores.length) console.log('Errores:', r.errores.join('\n'));
+    } else if (cmd === 'brevo') {
+      const B = require('./brevo');
+      if (!B.activo(process.env)) { console.log('Falta BREVO_API_KEY en el entorno (en Render: Environment).'); return; }
+      const c = await B.chequeo(db, config, process.env, { forzar: !!args.forzar });
+      console.log(`\nBrevo leído ${c.leido_at} · ${c.resumen.brevo} deals en Brevo · ${c.resumen.sandler} en el Sandler · ${c.resumen.pares} emparejados (${c.resumen.con_diferencias} con diferencias) · ${c.resumen.solo_sandler} solo Sandler · ${c.resumen.solo_brevo} solo Brevo\n`);
+      for (const p of c.pipelines) console.log(`  pipeline "${p.nombre}": ${p.etapas.join(' → ')}`);
+      if (c.etapas_sin_regla.length) console.log(`\n  Etapas de Brevo sin regla en BREVO.etapas (no se comparan): ${c.etapas_sin_regla.join(', ')}`);
+      const fila = (a, b, por, dif) => console.log(`  ${pad(a, 36)}${pad(b, 36)}${pad(por, 9)}${dif}`);
+      console.log(`\n  ${pad('Sandler', 36)}${pad('Brevo', 36)}${pad('por', 9)}diferencia`);
+      for (const p of c.pares) fila(`#${p.sandler.id} ${p.sandler.empresa} [${p.sandler.etapa}]`, `${p.brevo.nombre} [${p.brevo.etapa}]`, p.por, p.diferencias.join(' · ') || '—');
+      if (c.solo_sandler.length) { console.log('\n  Solo en el Sandler (abiertos):'); for (const d of c.solo_sandler) console.log(`    #${d.id} ${d.empresa} [${d.etapa}]${d.email ? ' · ' + d.email : ''}`); }
+      if (c.solo_brevo.length) { console.log('\n  Solo en Brevo (abiertos):'); for (const b of c.solo_brevo) console.log(`    ${b.nombre} [${b.etapa}]${b.empresas.length ? ' · ' + b.empresas.map(e => e.nombre).join(', ') : ''}${b.contactos.length ? ' · ' + b.contactos.map(x => x.email).join(', ') : ''}`); }
     } else if (cmd === 'embudo') {
       const r = await require('./embudo').tablero(db, config);
       if (r.sin_tabla) console.log('No está la tabla public.deals del Sandler.');

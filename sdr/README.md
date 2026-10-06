@@ -487,6 +487,20 @@ por tamaño de empresa (A/B/C), con "¿lo tenemos?" según lo que marcó la ejec
 pedidos, así que solo se vuelve a clasificar cuando hay pedidos nuevos (o con `?refrescar=1`). La
 lista completa sigue en "Lista completa".
 
+## Brevo: cruce con el CRM de Luisa (Ventas → Brevo)
+Luisa lleva los negocios también en el CRM de Brevo. Con `BREVO_API_KEY` en Render (Brevo → SMTP & API →
+API keys; solo lectura), el Sandler tiene la pestaña **Brevo**: los deals de Brevo y los del Sandler
+emparejados, primero por el correo del lead de Angie (el contacto enlazado al deal de Brevo) y si no por
+el nombre de la empresa normalizado (sin S.A.S., tildes ni mayúsculas). Sale lo que no cuadra: etapa
+distinta o cerrado en un solo lado (según `BREVO.etapas`, que traduce cada etapa de Brevo a una del
+embudo), los abiertos solo en el Sandler y los abiertos solo en Brevo. El detalle del deal y la ficha del
+lead muestran el deal de Brevo (etapa, monto, cierre, enlace). Nada escribe en Brevo. Lo leído se guarda
+`BREVO.cache_min` minutos ("Actualizar" lo fuerza). Sin llave, nada cambia.
+
+`node sdr/cli.js brevo` lista los pipelines con sus etapas (para llenar `BREVO.etapas`), las etapas sin
+regla y el cruce completo. Módulo: `sdr/brevo.js`; rutas `/api/brevo/estado`, `/api/brevo/chequeo`,
+`/api/brevo/deal?lead_id=|deal_id=`.
+
 ## Pasar al siguiente lead a mano
 
 Después de registrar un toque (llamada, WhatsApp, correo…) la app se queda en la ficha del lead para

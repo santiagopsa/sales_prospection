@@ -456,6 +456,35 @@ module.exports = {
   CALENDARIO_PREFIJO: 'SDR · ',
 
   // ---------------------------------------------------------------------------
+  // Brevo: el CRM de Luisa, cruzado con los deals del Sandler (solo lectura)
+  // ---------------------------------------------------------------------------
+  // La llave va en Render como BREVO_API_KEY (Brevo → SMTP & API → API keys), nunca aquí. Con la
+  // llave, el Sandler tiene la pestaña "Brevo" (qué deal falta en cada lado, etapas que no cuadran) y
+  // la ficha del lead y el detalle del deal muestran el deal de Brevo. Sin llave, nada cambia.
+  // Ver el efecto: node sdr/cli.js brevo   (lista los pipelines y las etapas de Brevo para llenar `etapas`)
+  BREVO: {
+    // Qué mueve: qué pipeline de Brevo se cruza (por nombre). null = todos.
+    pipeline: null,
+    // Qué mueve: a qué etapa del embudo (sdr/embudo.js: sin_calificar, calificado, propuesta,
+    // interesado, ganado, perdido) equivale cada etapa de Brevo, por nombre (da igual mayúsculas).
+    // Solo con esto se marcan "diferencias"; una etapa de Brevo que no esté aquí se muestra sin
+    // comparar y sale en "etapas sin regla" de la pestaña.
+    etapas: {
+      'Nuevo': 'sin_calificar', 'Nuevo deal': 'sin_calificar', 'Contactado': 'sin_calificar',
+      'Calificado': 'calificado', 'Reunión': 'calificado', 'Demo': 'calificado',
+      'Propuesta': 'propuesta', 'Cotización': 'propuesta', 'Prueba gratis': 'propuesta',
+      'Negociación': 'interesado', 'Interesado': 'interesado',
+      'Ganado': 'ganado', 'Cerrado ganado': 'ganado', 'Won': 'ganado',
+      'Perdido': 'perdido', 'Cerrado perdido': 'perdido', 'Lost': 'perdido',
+    },
+    // Qué mueve: cuántos minutos se guarda lo leído de Brevo antes de volver a pedirlo (la pestaña
+    // tiene "Actualizar" para forzarlo).
+    cache_min: 10,
+    // Enlace al deal en Brevo ({id} se reemplaza).
+    url_deal: 'https://app.brevo.com/crm/deals/{id}',
+  },
+
+  // ---------------------------------------------------------------------------
   // Ritmo del día: bloques de prospección y racha
   // ---------------------------------------------------------------------------
   // Qué mueve: la jornada de la SDR y la cola. El día se parte en bloques (hora de Bogotá) y cada

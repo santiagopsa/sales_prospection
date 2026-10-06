@@ -1001,6 +1001,21 @@
       <div class="suave pequeno" style="margin-top:8px">${organizadores.length ? `Organiza ${organizadores.map(i => esc(i.email)).join(', ')} · ` : ''}${r.enlace_reunion ? `<a href="${esc(r.enlace_reunion)}" target="_blank" rel="noopener">Enlace de la reunión ↗</a> · ` : ''}${r.evento ? `<a href="${esc(r.evento)}" target="_blank" rel="noopener">Ver en Google Calendar ↗</a> · ` : ''}${cuando ? `revisado a las ${cuando}` : ''}</div>
     </div>`;
   }
+  // Lo de Brevo (el CRM de la ejecutiva) para este lead: el deal emparejado por correo o empresa.
+  // Se pide aparte para no frenar la ficha; sin llave en el servidor no aparece nada.
+  async function pintarBrevo(l) {
+    const $p = document.getElementById('brevo-panel');
+    if (!$p) return;
+    try {
+      const r = await api(`brevo/deal?lead_id=${l.id}`);
+      if (!r.activo) return;
+      $p.hidden = false;
+      const b = r.deal;
+      const monto = b && b.monto != null ? ` · ${Number(b.monto).toLocaleString('es-CO')}` : '';
+      $p.innerHTML = b ? `En Brevo: <a href="${esc(b.url)}" target="_blank" rel="noopener"><b>${esc(b.nombre || 'deal')}</b> ↗</a> · etapa <b>${esc(b.etapa || '—')}</b>${monto}${b.cierre ? ` · cierre ${esc(b.cierre)}` : ''}`
+        : 'En Brevo: sin deal con este correo ni esta empresa.';
+    } catch (_) { /* Brevo caído: la ficha sigue igual */ }
+  }
   function enlazarReunion(l) {
     const $b = document.getElementById('reunion-refrescar');
     if (!$b) return;
@@ -1087,6 +1102,7 @@
               </div>`}
           </div>
           <div id="reunion-panel">${pintarReunion(l)}</div>
+          <div id="brevo-panel" class="suave pequeno" style="margin-top:10px" hidden></div>
           <div class="panel" style="margin-top:16px">
             <h2>Datos <button class="btn mini" id="editar" style="float:right" title="Corregir teléfono, correo, contacto…">Editar</button></h2>
             <div id="datos-form" hidden></div>
@@ -1153,6 +1169,7 @@
     };
     $app.querySelectorAll('[data-fusionar]').forEach(b => b.addEventListener('click', () => fusionar(l.misma_empresa.find(x => String(x.id) === b.dataset.fusionar))));
     enlazarReunion(l);
+    pintarBrevo(l);
     const $fo = document.getElementById('fusionar-otro');
     if ($fo) $fo.addEventListener('click', () => {
       const $modal = document.getElementById('modal');

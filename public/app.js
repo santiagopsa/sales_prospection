@@ -199,6 +199,7 @@ function router() {
   if (hash.startsWith('#/deal/')) return renderDealDetail(hash.split('/')[2]);
   if (hash === '#/deals') return renderDeals();
   if (hash.startsWith('#/wishlist')) return renderWishlist(new URLSearchParams(hash.split('?')[1] || ''));
+  if (hash.startsWith('#/brevo')) return renderBrevo(new URLSearchParams(hash.split('?')[1] || ''));
   return renderWizard();
 }
 window.addEventListener('hashchange', router);
@@ -1700,6 +1701,7 @@ async function renderDealDetail(id) {
       Ejecutivo: <strong>${esc(d.executive || row.executive || '—')}</strong> ·
       Guardado: <strong>${new Date(row.created_at).toLocaleString()}</strong>
     </p>
+    <p class="muted" id="brevo-deal" data-deal="${row.id}" hidden></p>
 
     ${(() => {
       // Calificación Sandler: la que cuenta (la del formulario o los chulos del tablero).
@@ -1828,6 +1830,7 @@ async function renderDealDetail(id) {
       renderDealDetail(row.id);
     } catch (e) { alert('No se pudo analizar: ' + e.message); $re.disabled = false; $re.textContent = 'Analizar con las reglas'; }
   });
+  pintarBrevoDeal(row.id);
   const $mover = el.querySelector('[data-mover-demo]');
   if ($mover) $mover.addEventListener('click', async () => {
     const sugerida = empresaDelTranscript(d.transcript) || '';
@@ -2010,6 +2013,56 @@ async function renderWishlist(params = new URLSearchParams((location.hash.split(
     </div>
     <p class="muted chico">Haz clic en una necesidad para ver los pedidos textuales y de qué empresa son. "¿Lo tenemos?" sale de lo que marcó la ejecutiva en cada pedido (mayoría = sí). La agrupación la hace la IA leyendo el contexto de cada pedido; se rehace sola cuando entran pedidos nuevos.</p>`);
   el.querySelectorAll('.wl-fila').forEach(tr => tr.addEventListener('click', () => { const d = el.querySelector(`.wl-detalle[data-d="${tr.dataset.i}"]`); d.hidden = !d.hidden; }));
+}
+
+// ---------- Brevo (el CRM de Luisa) ----------
+// Datos y reglas: /sdr/api/brevo/chequeo (sdr/brevo.js, reglas en BREVO de sdr/config.js; la llave
+// BREVO_API_KEY vive en Render). Solo lectura: aquí no se toca Brevo ni el Sandler, se ve qué no cuadra.
+const BREVO_ETAPA = { sin_calificar: 'Sin calificar', calificado: 'Calificado', propuesta: 'Prueba gratis o cotización', interesado: 'Interesado', ganado: 'Ganado', perdido: 'Perdido' };
+function brevoLinea(b) {
+  if (!b) return '';
+  const monto = b.monto != null && !Number.isNaN(b.monto) ? ` · ${b.monto.toLocaleString('es-CO')}` : '';
+  const cierre = b.cierre ? ` · cierre ${new Date(b.cierre).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}` : '';
+  return `<a href="${esc(b.url)}" target="_blank" rel="noopener"><b>${esc(b.nombre || 'deal')}</b> ↗</a> · etapa <b>${esc(b.etapa || '—')}</b>${monto}${cierre}${b.por ? ` <span class="chico">(emparejado por ${b.por})</span>` : ''}`;
+}
+async function pintarBrevoDeal(dealId) {
+  const $p = document.getElementById('brevo-deal');
+  if (!$p) return;
+  try {
+    const r = await fetch(`/sdr/api/brevo/deal?deal_id=${encodeURIComponent(dealId)}`).then(x => x.json());
+    if (!r.activo) return;
+    $p.hidden = false;
+    $p.innerHTML = r.deal ? `En Brevo: ${brevoLinea(r.deal)}` : `En Brevo: <span class="pill warn">no está</span> <span class="chico">no hay un deal con este correo ni esta empresa · <a href="#/brevo">ver el cruce</a></span>`;
+  } catch (_) { /* Brevo caído o sin llave: la ficha sigue igual */ }
+}
+async function renderBrevo(params = new URLSearchParams((location.hash.split('?')[1] || ''))) {
+  h(`<h1>Brevo</h1><p class="muted">Leyendo los deals de Brevo y del Sandler…</p>`);
+  let c;
+  try {
+    const est = await fetch('/sdr/api/brevo/estado').then(x => x.json());
+    if (!est.activo) { h(`<h1>Brevo</h1><div class="card"><p>Falta la llave de Brevo. En Render → Environment agrega <code>BREVO_API_KEY</code> (Brevo → SMTP &amp; API → API keys, una llave de solo lectura basta) y vuelve a desplegar.</p><p class="muted chico">Con la llave, esta pestaña cruza los deals del Sandler con los del CRM de Brevo: cuáles faltan en cada lado y qué etapas no cuadran. La ficha del lead y el detalle del deal muestran el deal de Brevo.</p></div>`); return; }
+    c = await fetch('/sdr/api/brevo/chequeo' + (params.get('forzar') ? '?forzar=1' : '')).then(async x => { const j = await x.json(); if (!x.ok) throw new Error(j.error || x.status); return j; });
+  } catch (e) { h(`<h1>Brevo</h1><div class="card" style="border-left:4px solid var(--bad)">No se pudo leer Brevo: ${esc(e.message)}</div>`); return; }
+  const r = c.resumen;
+  const sandlerCol = d => `<a href="#/deal/${d.id}"><b>${esc(d.empresa || '#' + d.id)}</b></a><div class="muted chico">${esc(BREVO_ETAPA[d.etapa] || d.etapa)}${d.calificacion ? ' · ' + esc(d.calificacion) : ''}${d.email ? ' · ' + esc(d.email) : ''}${d.lead_id ? ` · <a href="/sdr/#/lead/${d.lead_id}">lead de Angie</a>` : ''}</div>`;
+  const brevoCol = b => `<a href="${esc(b.url)}" target="_blank" rel="noopener"><b>${esc(b.nombre || 'deal')}</b> ↗</a><div class="muted chico">${esc(b.etapa || '—')}${b.etapa_equivalente ? ` (= ${esc(BREVO_ETAPA[b.etapa_equivalente])})` : ''}${b.empresas.length ? ' · ' + b.empresas.map(e => esc(e.nombre)).join(', ') : ''}${b.contactos.length ? ' · ' + b.contactos.map(x => esc(x.email)).join(', ') : ''}${b.monto != null ? ' · ' + b.monto.toLocaleString('es-CO') : ''}${b.cierre ? ' · cierre ' + esc(b.cierre) : ''}</div>`;
+  const conDif = c.pares.filter(p => p.diferencias.length), sinDif = c.pares.filter(p => !p.diferencias.length);
+  const tabla = (filas, cab) => `<table class="wl-tabla"><thead><tr>${cab.map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${filas.join('')}</tbody></table>`;
+  h(`
+    <div class="split"><div><h1>Brevo</h1><p class="muted" style="margin:0">${r.brevo} deals en Brevo · ${r.sandler} en el Sandler · leído ${new Date(c.leido_at).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit' })}</p></div>
+      <a class="btn ghost btn-sm" href="#/brevo?forzar=1" title="Vuelve a leer Brevo ahora (si no, se guarda unos minutos)">↻ Actualizar</a></div>
+    <div class="tb-kpis">
+      <div class="card compact"><div class="muted">Emparejados</div><div class="num">${r.pares}</div><div class="muted chico">por correo o por empresa</div></div>
+      <div class="card compact ${r.con_diferencias ? 'alerta' : ''}"><div class="muted">Con diferencias</div><div class="num">${r.con_diferencias}</div><div class="muted chico">etapa que no cuadra o cerrado en un solo lado</div></div>
+      <div class="card compact ${r.solo_sandler ? 'alerta' : ''}"><div class="muted">Solo en el Sandler</div><div class="num">${r.solo_sandler}</div><div class="muted chico">abiertos aquí, sin deal en Brevo</div></div>
+      <div class="card compact ${r.solo_brevo ? 'alerta' : ''}"><div class="muted">Solo en Brevo</div><div class="num">${r.solo_brevo}</div><div class="muted chico">abiertos allá, sin deal aquí</div></div>
+    </div>
+    ${c.etapas_sin_regla.length ? `<div class="tb-aviso">Etapas de Brevo sin regla (se muestran, no se comparan): <b>${c.etapas_sin_regla.map(esc).join(', ')}</b>. Se mapean en <code>BREVO.etapas</code> de <code>sdr/config.js</code>. Pipelines: ${c.pipelines.map(p => `<b>${esc(p.nombre)}</b> (${p.etapas.map(esc).join(' → ')})`).join(' · ')}</div>` : ''}
+    ${conDif.length ? `<div class="card"><h2>No cuadran <span class="muted chico" style="font-weight:400">${conDif.length}</span></h2>${tabla(conDif.map(p => `<tr><td>${sandlerCol(p.sandler)}</td><td>${brevoCol(p.brevo)}</td><td>${p.diferencias.map(esc).join('<br>')}</td></tr>`), ['Sandler', 'Brevo', 'Diferencia'])}</div>` : ''}
+    ${c.solo_sandler.length ? `<div class="card"><h2>Solo en el Sandler <span class="muted chico" style="font-weight:400">${c.solo_sandler.length} abiertos · falta crearlos en Brevo o cerrarlos aquí</span></h2>${tabla(c.solo_sandler.map(d => `<tr><td>${sandlerCol(d)}</td><td class="muted chico">${d.creado ? 'creado ' + new Date(d.creado).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }) : ''}</td></tr>`), ['Deal', ''])}</div>` : ''}
+    ${c.solo_brevo.length ? `<div class="card"><h2>Solo en Brevo <span class="muted chico" style="font-weight:400">${c.solo_brevo.length} abiertos · no tienen demo en el Sandler</span></h2>${tabla(c.solo_brevo.map(b => `<tr><td>${brevoCol(b)}</td><td class="muted chico">${b.actualizado ? 'movido ' + new Date(b.actualizado).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }) : ''}</td></tr>`), ['Deal', ''])}</div>` : ''}
+    <details class="card" style="margin-top:12px"><summary class="muted" style="cursor:pointer">Cuadran (${sinDif.length})</summary>${sinDif.length ? tabla(sinDif.map(p => `<tr><td>${sandlerCol(p.sandler)}</td><td>${brevoCol(p.brevo)}</td><td class="muted chico">por ${p.por}</td></tr>`), ['Sandler', 'Brevo', '']) : '<p class="muted chico">Ninguno todavía.</p>'}</details>
+    <p class="muted chico">Se emparejan primero por el correo del lead de Angie (el contacto del deal en Brevo) y si no, por el nombre de la empresa (sin S.A.S., tildes ni mayúsculas). Los cerrados en los dos lados no se listan. Esto no escribe en Brevo ni en el Sandler.</p>`);
 }
 
 async function renderWishlistLista(tabs) {
