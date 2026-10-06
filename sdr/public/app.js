@@ -302,7 +302,10 @@
 
   // ---------------------------------------------------------------- cola
   async function vistaCola(params = new URLSearchParams()) {
-    const qU = usuarioActual() ? '?usuario=' + encodeURIComponent(usuarioActual()) : '';
+    // El ritmo (marcaciones, bloque, racha) es de la SDR; la ejecutiva y el admin ven el del equipo
+    // o el de alguien con "Viendo a…" (si no, verían el suyo: cero marcaciones).
+    const visto = usuarioVisto(params);
+    const qU = visto ? '?usuario=' + encodeURIComponent(visto) : '';
     const [c, com] = await Promise.all([api('cola' + qU), api('comision' + qU).catch(() => null)]);
     const i = c.indicadores;
     const hoy = new Date(`${c.fecha}T12:00:00-05:00`).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -341,7 +344,7 @@
     };
     $app.innerHTML = `
       <div class="cabeza">
-        <div><h1>Jornada</h1><div class="suave">${esc(hoy)}${c.usuario ? ` · ritmo de <b>${esc(c.usuario)}</b>` : ''}</div></div>
+        <div><h1>Jornada</h1><div class="suave">${esc(hoy)} · ritmo de <b>${esc(c.usuario || 'equipo SDR')}</b> ${selectorVisto(params, de => '#/cola?' + conDe(params, de))}</div></div>
         <div class="acciones" style="margin:0">
           ${siguiente ? `<a class="btn primario grande" href="#/lead/${siguiente.lead_id}${siguiente.canal === 'llamada' && siguiente.telefono ? '?llamar=1' : ''}">${siguiente.canal === 'llamada' ? '📞 Llamar al siguiente' : 'Siguiente toque'} · ${esc(siguiente.empresa)}</a>` : ''}
           <a class="btn" href="#/marcar">Marcar</a>
