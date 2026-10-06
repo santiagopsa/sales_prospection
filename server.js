@@ -601,7 +601,7 @@ TAREA:
 5. preguntas_faltantes: aplica la REGLA DE ORO en dos pasos. PASO A (mental, no lo imprimas): recorre el transcript y lista qué temas/preguntas SÍ cubrió el ejecutivo (dolor, cuantificación, presupuesto, decisor, proceso, fecha límite, etc.), reconociendo variantes y formas indirectas. PASO B: incluye SOLO lo que de verdad NO se tocó Y es relevante al dolor de este cliente, cada una con "por_que" (por qué importa para ESTE deal). Si el ejecutivo cubrió lo esencial, devuelve array vacío — mejor vacío que inventado. NUNCA incluyas una pregunta cuyo tema ya apareció en el transcript.
 6. momentos_criticos: hasta 3, cada uno con cita textual real.
 
-RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL. Formato exacto:
+RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL (ni cercas de código ni comentarios). Las citas van dentro de strings JSON: si la cita trae comillas dobles, escápalas (\\") o usa comillas «así»; sin saltos de línea sin escapar. Formato exacto:
 
 {
   "contratoPrevio": "cita o resumen si se hizo, vacío si no",
@@ -655,20 +655,32 @@ RESPONDE SOLO CON JSON VÁLIDO, SIN TEXTO ADICIONAL. Formato exacto:
 }`;
 }
 
+const { parsearJSON, textoDe } = require('./json_ia');
+// Tope de salida del análisis. 8000 se quedaba corto en demos largos (las citas por criterio y por acción
+// alargan la respuesta) y el JSON llegaba cortado: "JSON inválido".
+const MAX_TOKENS_ANALISIS = 16000;
+
 // Análisis de una transcripción con Claude (el JSON del prompt). Lanza con status 502 si el JSON no parsea.
+// Si la respuesta no parsea (comillas sin escapar dentro de una cita, coma de más, texto alrededor), se le
+// pide a la IA que repare su propio JSON una vez antes de rendirse; si se cortó por larga, lo dice.
 async function analizarTranscript(transcript, context) {
   const prompt = buildAnalyzePrompt(transcript, context || {});
-  const msg = await anthropic.messages.create({ model: ANALYZE_MODEL, max_tokens: 8000, messages: [{ role: 'user', content: prompt }] });
-  const text = (msg.content && msg.content[0] && msg.content[0].text) || '';
-  // Extraer JSON del texto (Claude puede envolverlo en ```json ... ``` a veces)
-  let jsonText = text.trim();
-  const fenced = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced) jsonText = fenced[1].trim();
-  let parsed;
-  try { parsed = JSON.parse(jsonText); }
-  catch (e) {
-    console.error('[llm] JSON parse fallido:', e.message, '\ntexto:', text.slice(0, 500));
-    throw Object.assign(new Error('Claude devolvió JSON inválido'), { status: 502, raw: text.slice(0, 2000) });
+  const msg = await anthropic.messages.create({ model: ANALYZE_MODEL, max_tokens: MAX_TOKENS_ANALISIS, messages: [{ role: 'user', content: prompt }] });
+  const text = textoDe(msg);
+  let parsed = parsearJSON(text);
+  if (!parsed && msg.stop_reason === 'max_tokens') {
+    console.error('[llm] respuesta cortada por max_tokens; transcript de', transcript.length, 'caracteres');
+    throw Object.assign(new Error('La respuesta de la IA se cortó por larga (la transcripción es muy extensa). Recorta la transcripción a la parte del demo y vuelve a intentar.'), { status: 502, raw: text.slice(-1500) });
+  }
+  if (!parsed) {
+    console.error('[llm] JSON parse fallido (stop_reason=' + msg.stop_reason + '); reparando. texto:', text.slice(0, 800));
+    const fix = await anthropic.messages.create({ model: ANALYZE_MODEL, max_tokens: MAX_TOKENS_ANALISIS, messages: [{ role: 'user', content:
+      'El texto de abajo debía ser UN objeto JSON válido pero no parsea. Devuélvelo corregido: escapa las comillas dobles que haya dentro de los strings, quita comas sobrantes y cualquier texto fuera del objeto. No cambies el contenido. RESPONDE SOLO CON EL JSON.\n\n' + text }] });
+    parsed = parsearJSON(textoDe(fix));
+    if (!parsed) {
+      console.error('[llm] la reparación tampoco parseó. texto:', textoDe(fix).slice(0, 800));
+      throw Object.assign(new Error('La IA devolvió una respuesta que no se pudo leer (JSON inválido), ni al pedirle que la corrigiera. Vuelve a intentar; si se repite, avísale a Santiago.'), { status: 502, raw: text.slice(0, 2000) });
+    }
   }
   parsed._usage = msg.usage;
   // Pedidos del cliente sin cita del cliente no entran: alimentan el wishlist y no pueden ser inventados.

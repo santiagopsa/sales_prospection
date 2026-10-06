@@ -154,3 +154,14 @@ test('mesesReintento: por defecto según la razón, definitivas nunca, valida op
   assert.strictEqual(mesesReintento(cfg, 'sin_presupuesto', 0), null);
   assert.throws(() => mesesReintento(cfg, 'sin_presupuesto', 4), /1, 3, 6/);
 });
+
+test('json_ia: saca el objeto aunque venga con cercas, texto alrededor o varios bloques', () => {
+  const J = require('../../json_ia');
+  assert.deepStrictEqual(J.parsearJSON('{"a":1}'), { a: 1 });
+  assert.deepStrictEqual(J.parsearJSON('Aquí está el análisis:\n```json\n{"a":1}\n```\nEspero que sirva.'), { a: 1 });
+  assert.deepStrictEqual(J.parsearJSON('Claro. {"a":{"b":"x"}} fin'), { a: { b: 'x' } });
+  assert.strictEqual(J.parsearJSON('{"a":"dijo "no" y se fue"}'), null); // comillas sin escapar: no parsea, toca reparar
+  assert.strictEqual(J.parsearJSON('{"a":1'), null); // cortado
+  assert.strictEqual(J.textoDe({ content: [{ type: 'text', text: '{"a"' }, { type: 'text', text: ':1}' }] }), '{"a":1}');
+  assert.strictEqual(J.textoDe({}), '');
+});

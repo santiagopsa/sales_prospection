@@ -749,7 +749,7 @@ async function stepAnalisis() {
     <div class="card" style="text-align:center;padding:60px 20px;">
       <div style="font-size:48px;margin-bottom:20px;">🤖</div>
       <h2 style="margin-bottom:8px;">Extrayendo dolor, presupuesto, decisión, momentos críticos...</h2>
-      <p class="muted" id="analisis-status">Enviando transcript a Claude Sonnet 4.5 · esto puede tardar 20-40 segundos.</p>
+      <p class="muted" id="analisis-status">Enviando la transcripción a la IA · suele tardar 1 a 2 minutos.</p>
       <div class="progress" style="max-width:400px;margin:24px auto 0;"><span id="pbar" style="width:20%;"></span></div>
       <p class="muted" id="analisis-error" style="color:var(--bad);margin-top:20px;display:none;"></p>
     </div>
@@ -797,7 +797,7 @@ async function stepAnalisis() {
     clearInterval(timer); clearInterval(stageTimer);
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      throw new Error(err.error || `HTTP ${r.status}`);
+      throw Object.assign(new Error(err.error || `HTTP ${r.status}`), { raw: err.raw });
     }
     const data = await r.json();
     state.iaExtracted = data;
@@ -820,7 +820,13 @@ async function stepAnalisis() {
     clearInterval(timer); clearInterval(stageTimer);
     state.iaError = e.message;
     const err = document.getElementById('analisis-error');
-    if (err) { err.style.display = 'block'; err.innerHTML = `❌ Error: ${esc(e.message)}<br/><button class="btn ghost" onclick="stepIdx--; renderWizard();" style="margin-top:10px;">← Volver al transcript</button>`; }
+    if (err) {
+      err.style.display = 'block';
+      err.innerHTML = `❌ Error: ${esc(e.message)}<br/>
+        <button class="btn ghost" onclick="stepIdx--; renderWizard();" style="margin-top:10px;">← Volver al transcript</button>
+        <button class="btn ghost" onclick="renderWizard();" style="margin-top:10px;">↻ Intentar de nuevo</button>
+        ${e.raw ? `<details style="margin-top:12px;text-align:left"><summary class="muted" style="cursor:pointer;font-size:12px">Detalle técnico (lo que devolvió la IA)</summary><pre style="white-space:pre-wrap;font-size:11px;max-height:220px;overflow:auto">${esc(String(e.raw).slice(0, 1500))}</pre></details>` : ''}`;
+    }
   }
 }
 
