@@ -165,3 +165,15 @@ test('json_ia: saca el objeto aunque venga con cercas, texto alrededor o varios 
   assert.strictEqual(J.textoDe({ content: [{ type: 'text', text: '{"a"' }, { type: 'text', text: ':1}' }] }), '{"a":1}');
   assert.strictEqual(J.textoDe({}), '');
 });
+
+test('transcripción cortada por Meet: no se analiza, se avisa', () => {
+  const T = require('../../transcripcion');
+  const corta = 'Oct 7, 2026\nEncuentro Laboratorios Briller - PeakU - Transcript\n00:00:52\n\nAngie Oliveros: Hola, Santiago. again.\nSantiago Gonzalez: Um, No\n\nTranscription ended after 00:01:05\n\nThis editable transcript was computer generated and might contain errors. People can also change the text after it was created.';
+  const e = T.evaluar(corta);
+  assert.deepStrictEqual([e.palabras, e.duracion_s, e.cortada, e.suficiente], [5, 65, true, false]);
+  assert.match(e.motivo, /se cortó a los 1 min 5 s/);
+  const larga = 'Luisa Guerrero: ' + 'cuéntame cómo es el proceso hoy '.repeat(80) + '\n00:12:30\nCliente: ' + 'tenemos cuarenta vacantes y se nos demoran dos meses '.repeat(40) + '\nTranscription ended after 00:41:10';
+  const l = T.evaluar(larga);
+  assert.deepStrictEqual([l.palabras >= 400, l.cortada, l.suficiente, l.motivo], [true, false, true, null]);
+  assert.strictEqual(T.evaluar('x '.repeat(50), { minimoPalabras: 10 }).suficiente, true);
+});

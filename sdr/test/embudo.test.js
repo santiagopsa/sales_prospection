@@ -40,6 +40,13 @@ test('embudo de la ejecutiva', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, as
   assert.strictEqual(en(angie), 'sin_calificar');
   assert.strictEqual(t.columnas.sin_calificar.find(x => x.deal_id === angie).contacto, 'Rosa');
 
+  // Perder un deal sin calificar lo deja "No califica" (la reunión no queda por calificar); al reabrirlo
+  // se conserva esa calificación hasta que la ejecutiva marque chulos.
+  await Em.mover(db, base, { dealId: nuevo, etapa: 'perdido', motivo: 'Lead sin valor (no calificaba)', usuario: 'Luisa', ahora });
+  let perd = (await db.query(`SELECT * FROM public.deals WHERE id = $1`, [nuevo])).rows[0];
+  assert.deepStrictEqual([perd.outcome, perd.calificacion_sandler, perd.data.calificacionManual.items.dolor], ['lost', 'No califica', false]);
+  await Em.mover(db, base, { dealId: nuevo, etapa: 'sin_calificar', usuario: 'Luisa', ahora });
+  await db.query(`UPDATE public.deals SET calificacion_sandler = NULL, data = data - 'calificacionManual' WHERE id = $1`, [nuevo]);
   // No se puede pasar a calificado ni avanzar sin las variables.
   await assert.rejects(Em.mover(db, base, { dealId: nuevo, etapa: 'calificado', usuario: 'Luisa', ahora }), /marca primero las variables/);
   await assert.rejects(Em.mover(db, base, { dealId: nuevo, etapa: 'propuesta', tipo: 'prueba', usuario: 'Luisa', ahora }), /no está calificado/);
@@ -77,7 +84,7 @@ test('embudo de la ejecutiva', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, as
   await Em.mover(db, base, { dealId: nuevo, etapa: 'interesado', usuario: 'Luisa', ahora });
   fila = (await db.query(`SELECT * FROM public.deals WHERE id = $1`, [nuevo])).rows[0];
   assert.deepStrictEqual([fila.outcome, fila.closed_at, fila.etapa_embudo], ['open', null, 'interesado']);
-  assert.deepStrictEqual(fila.data.embudoHistorial.map(h => h.a), ['calificado', 'propuesta', 'interesado', 'ganado', 'interesado']);
+  assert.deepStrictEqual(fila.data.embudoHistorial.map(h => h.a), ['perdido', 'sin_calificar', 'calificado', 'propuesta', 'interesado', 'ganado', 'interesado']);
   assert.strictEqual(fila.data.calificacionManual.items.fecha, true);
   // Un deal cotizado sin etapa guardada se deduce en "propuesta".
   const cotizado = await deal('Cotizado SA', { cal: 'Completa' });

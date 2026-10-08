@@ -506,6 +506,22 @@ de Brevo en `data.brevo`, con el que el cruce siguiente los empareja por id. Rut
 regla y el cruce completo. Módulo: `sdr/brevo.js`; rutas `/api/brevo/estado`, `/api/brevo/chequeo`,
 `/api/brevo/deal?lead_id=|deal_id=`.
 
+## Transcripciones cortadas
+Google Meet a veces deja de transcribir al minuto ("Transcription ended after 00:01:05" / "La transcripción
+finalizó después de…") y lo que llega es el encabezado, dos frases y el pie. Con eso la IA marca los cuatro
+criterios como "no cumple" y el demo parece malo sin serlo. El asistente cuenta las palabras de conversación
+(sin encabezado, horas ni pie) y la duración transcrita: si está cortada o trae menos de
+`SANDLER.transcripcion_minima_palabras` (sdr/config.js), no deja analizar y dice qué pasó; el servidor
+revisa lo mismo (`transcripcion.js`). El Historial avisa cuáles de las guardadas parecen cortadas
+(`GET /api/transcripciones/auditoria`) y el detalle del deal tiene "Volver a cargar la transcripción": el
+asistente arranca en el paso de la transcripción con la ficha del deal y al guardar reemplaza el demo.
+
+## Una reunión que no califica
+En el tablero, cada reunión realizada tiene el botón **No califica**: la deja registrada como "No califica"
+sin marcar chulos (para la comisión cuenta como no calificada, no como pendiente). Y perder un deal en el
+embudo sin haberlo calificado hace lo mismo solo: queda "No califica" y la reunión sale de "por calificar".
+Si el deal ya tenía calificación (Parcial, Completa), perderlo no la cambia.
+
 ## Pasar al siguiente lead a mano
 
 Después de registrar un toque (llamada, WhatsApp, correo…) la app se queda en la ficha del lead para

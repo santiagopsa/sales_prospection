@@ -456,6 +456,17 @@ module.exports = {
   CALENDARIO_PREFIJO: 'SDR · ',
 
   // ---------------------------------------------------------------------------
+  // Sandler Coach (el asistente de demos de la ejecutiva)
+  // ---------------------------------------------------------------------------
+  SANDLER: {
+    // Qué mueve: cuántas palabras de conversación (sin encabezado, horas ni pie de Meet) necesita una
+    // transcripción para analizarla. Meet a veces deja de transcribir al minuto y llega casi vacía: la
+    // IA marcaría todo como "no cumple". Un demo de 30 min trae varios miles. Ver el efecto: pegar en
+    // el asistente una transcripción corta (muestra el aviso en vez de analizar).
+    transcripcion_minima_palabras: 400,
+  },
+
+  // ---------------------------------------------------------------------------
   // Brevo: el CRM de Luisa, cruzado con los deals del Sandler (solo lectura)
   // ---------------------------------------------------------------------------
   // La llave va en Render como BREVO_API_KEY (Brevo → SMTP & API → API keys), nunca aquí. Con la

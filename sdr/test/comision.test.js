@@ -43,9 +43,10 @@ test('comisión del mes contra la base', { skip: !url && 'sin SDR_TEST_DATABASE_
     ['No vino', null, 'Angie', null, true],
     ['Octubre', '2026-10-02T15:00:00Z', 'Angie', 'Completa'],
     ['De Luisa', '2026-09-11T15:00:00Z', 'Luisa', 'Completa'],
+    ['Perdida sin calificar', '2026-09-16T15:00:00Z', 'Angie', null, false, 'lost'],
   ];
-  for (const [empresa, reunion, quien, cal, noShow] of casos) {
-    const deal = (await db.query(`INSERT INTO public.deals (executive, company, calificacion_sandler) VALUES ('Luisa', $1, $2) RETURNING id`, [empresa, cal])).rows[0].id;
+  for (const [empresa, reunion, quien, cal, noShow, outcome] of casos) {
+    const deal = (await db.query(`INSERT INTO public.deals (executive, company, calificacion_sandler, outcome) VALUES ('Luisa', $1, $2, $3) RETURNING id`, [empresa, cal, outcome || 'open'])).rows[0].id;
     const l = (await db.query(`INSERT INTO sdr.leads (empresa, etapa, reunion_at, deal_id) VALUES ($1, 'reunion_agendada', $2, $3) RETURNING id`, [empresa, reunion, deal])).rows[0].id;
     await db.query(`INSERT INTO sdr.touches (lead_id, canal, resultado, usuario, created_at) VALUES ($1, 'llamada', 'reunion_agendada', $2, '2026-09-05T15:00:00Z')`, [l, quien]);
     if (noShow) await db.query(`INSERT INTO sdr.touches (lead_id, canal, resultado, usuario, created_at) VALUES ($1, 'ejecutiva', 'no_show', 'Luisa', '2026-09-08T15:00:00Z')`, [l]);
@@ -53,14 +54,15 @@ test('comisión del mes contra la base', { skip: !url && 'sin SDR_TEST_DATABASE_
   const r = await C.resumenMes(db, base, { mes: '2026-09', usuario: 'Angie', ahora });
   const estado = e => r.reuniones.find(x => x.empresa === e).estado;
   assert.strictEqual(r.usuario, 'Angie');
-  assert.deepStrictEqual(r.reuniones.map(x => x.empresa).sort(), ['Completa 2', 'Completa SA', 'Futura', 'No vino', 'Parcial SA', 'Pasada sin calificar']);
+  assert.deepStrictEqual(r.reuniones.map(x => x.empresa).sort(), ['Completa 2', 'Completa SA', 'Futura', 'No vino', 'Parcial SA', 'Pasada sin calificar', 'Perdida sin calificar']);
+  assert.strictEqual(estado('Perdida sin calificar'), 'no_califica');   // perdida en el embudo: no queda por calificar
   assert.strictEqual(estado('Completa SA'), 'calificada');
   assert.strictEqual(estado('Completa 2'), 'calificada');       // sin importar mayúsculas
   assert.strictEqual(estado('Parcial SA'), 'no_califica');      // califica_con = ['Completa']
   assert.strictEqual(estado('Pasada sin calificar'), 'por_calificar');
   assert.strictEqual(estado('Futura'), 'programada');
   assert.strictEqual(estado('No vino'), 'no_asistio');           // sin fecha: cuenta por el día en que se agendó
-  assert.deepStrictEqual(r.conteo, { reuniones: 6, calificadas: 2, no_califica: 1, no_asistio: 1, canceladas: 0, programadas: 1, por_calificar: 1 });
+  assert.deepStrictEqual(r.conteo, { reuniones: 7, calificadas: 2, no_califica: 2, no_asistio: 1, canceladas: 0, programadas: 1, por_calificar: 1 });
   assert.strictEqual(r.comision.total, 46);
   assert.strictEqual(r.potencial.total, 92);                    // + la futura y la pendiente
   // Con Parcial también: 3 calificadas.
@@ -72,7 +74,7 @@ test('comisión del mes contra la base', { skip: !url && 'sin SDR_TEST_DATABASE_
   // Quien no es SDR ve al equipo SDR (Angie), no lo de Luisa.
   const equipo = await C.resumenMes(db, base, { mes: '2026-09', usuario: 'Santiago', ahora });
   assert.strictEqual(equipo.usuario, null);
-  assert.strictEqual(equipo.conteo.reuniones, 6);
+  assert.strictEqual(equipo.conteo.reuniones, 7);
   // Octubre
   assert.strictEqual((await C.resumenMes(db, base, { mes: '2026-10', usuario: 'Angie', ahora })).conteo.calificadas, 1);
   // Sin la tabla del Sandler: nada calificado, no revienta.

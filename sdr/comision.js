@@ -56,7 +56,7 @@ function limitesMes(mes) {
 //   no_asistio   la ejecutiva marcó no-show
 //   cancelada    el prospecto la canceló (Calendly)
 //   programada   la reunión todavía no ha pasado
-//   por_calificar ya pasó y no hay calificación en el Sandler
+//   por_calificar ya pasó y no hay calificación en el Sandler (una perdida en el embudo cuenta como no_califica)
 async function resumenMes(db, config, { mes, usuario = null, ahora = new Date() } = {}) {
   const cfg = config.COMISION || {};
   const lim = limitesMes(mes);
@@ -102,6 +102,7 @@ async function resumenMes(db, config, { mes, usuario = null, ahora = new Date() 
     else if (x.no_show) estado = 'no_asistio';
     else if (x.cancelada) estado = 'cancelada';
     else if (cal) estado = 'no_califica';                        // la ejecutiva ya llenó el demo y no llegó
+    else if (deal && deal.outcome === 'lost') estado = 'no_califica';   // perdida en el embudo sin calificar: no califica
     else if (x.reunion_ms && x.reunion_ms > ahora.getTime()) estado = 'programada';
     else estado = 'por_calificar';
     return { ...x, calificacion: cal, ejecutiva: deal ? deal.executive : null, estado };

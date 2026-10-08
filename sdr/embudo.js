@@ -191,6 +191,9 @@ async function mover(db, config, { dealId, etapa, tipo, motivo, productos, usuar
     set('outcome', 'open'); set('outcome_reason', null); set('closed_at', null);   // se reabre
   }
   if (sets.length) await db.query(`UPDATE public.deals SET ${sets.join(', ')} WHERE id = $1`, params);
+  // Perder un deal que nunca se calificó es calificarlo: "No califica" (sin chulos), para que la reunión
+  // no quede "por calificar" en el tablero ni en la comisión. Si ya tenía calificación, se respeta.
+  if (etapa === 'perdido' && !d.calificacion_sandler) await E.guardarEnDeal(db, dealId, { items: {}, usuario, ahora });
   await ponerEtapa(db, dealId, d, etapa, usuario, ahora, etapa === 'propuesta' ? { tipo } : motivo ? { motivo: String(motivo).trim(), ...(prods.length ? { productos: prods } : {}) } : {});
   return { deal_id: dealId, etapa, productos: prods };
 }

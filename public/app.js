@@ -721,9 +721,13 @@ function stepTranscript() {
     const t = input.value || '';
     const chars = t.length;
     const words = t.trim().split(/\s+/).filter(Boolean).length;
-    const enough = chars >= 500;
-    counter.innerHTML = `${chars.toLocaleString()} caracteres · ${words.toLocaleString()} palabras · ${
-      enough ? '<span class="pill good">Suficiente para analizar</span>' : '<span class="pill warn">Muy corto (mín 500 chars) — sigue pegando</span>'
+    // Palabras de conversación de verdad (sin encabezado, horas ni pie de Meet) y si Meet cortó la transcripción.
+    const ev = evaluarTranscripcion(t);
+    const enough = ev.suficiente;
+    counter.innerHTML = `${chars.toLocaleString()} caracteres · ${words.toLocaleString()} palabras (${ev.palabras.toLocaleString()} de conversación) · ${
+      enough ? '<span class="pill good">Suficiente para analizar</span>'
+      : ev.cortada ? `<span class="pill bad">Meet cortó la transcripción a los ${Math.floor(ev.duracion_s / 60)} min</span> <span class="muted chico">pega la completa desde la grabación de Meet (o la de Gemini / Otter); con esto la IA marcaría todo "no cumple"</span>`
+      : `<span class="pill warn">Muy corto (mín ${REGLAS.transcripcion_minima_palabras} palabras de conversación) — sigue pegando</span>`
     }`;
     btn.disabled = !enough;
     btn.style.opacity = enough ? '1' : '.5';
@@ -739,6 +743,23 @@ function stepTranscript() {
     state.transcript = input.value;
     stepIdx++; saveDraft(); renderWizard();
   });
+}
+
+// Mismo criterio que transcripcion.js en el servidor (umbral en sdr/config.js → SANDLER).
+let REGLAS = { transcripcion_minima_palabras: 400 };
+fetch('/api/reglas').then(r => r.json()).then(j => { REGLAS = { ...REGLAS, ...j }; }).catch(() => {});
+function evaluarTranscripcion(texto) {
+  const PIE = /^(this editable transcript|people can also change the text|transcription ended after|transcript$|.*-\s*transcript$|esta transcripci[oó]n editable|los usuarios tambi[eé]n pueden|la transcripci[oó]n finaliz[oó] despu[eé]s de|transcripci[oó]n$|.*-\s*transcripci[oó]n$)/i;
+  let palabras = 0;
+  for (const l0 of String(texto || '').split('\n')) {
+    const l = l0.trim();
+    if (!l || /^\d{1,2}:\d{2}(:\d{2})?$/.test(l) || PIE.test(l) || /^[A-Z][a-z]{2}\s\d{1,2},\s\d{4}$/.test(l)) continue;
+    palabras += l.replace(/^[^:]{2,60}:\s*/, '').split(/\s+/).filter(w => /[a-záéíóúñ0-9]/i.test(w)).length;
+  }
+  const m = /(?:transcription ended after|transcripci[oó]n finaliz[oó] despu[eé]s de)\s+(\d{1,2}):(\d{2}):(\d{2})/i.exec(String(texto || ''));
+  let duracion_s = m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : null;
+  if (duracion_s == null) for (const l of String(texto || '').split('\n')) { const t = /^(\d{1,2}):(\d{2}):(\d{2})$/.exec(l.trim()); if (t) duracion_s = Number(t[1]) * 3600 + Number(t[2]) * 60 + Number(t[3]); }
+  return { palabras, duracion_s, cortada: duracion_s != null && duracion_s < 600, suficiente: palabras >= REGLAS.transcripcion_minima_palabras };
 }
 
 // ---------- 3 · Análisis IA ----------
@@ -1610,9 +1631,13 @@ async function renderDeals() {
   const pctSinValor = lost.length ? Math.round(sinValor.length / lost.length * 100) : null;
   const cierreRate = closed.length ? Math.round(r.filter(x => x.outcome === 'won').length / closed.length * 100) : null;
 
+  const aud = await fetch('/api/transcripciones/auditoria').then(x => x.ok ? x.json() : null).catch(() => null);
+  const avisoTranscripciones = aud && aud.sospechosas.length ? `<div class="tb-aviso"><b>${aud.sospechosas.length} ${aud.sospechosas.length === 1 ? 'transcripción parece cortada o incompleta' : 'transcripciones parecen cortadas o incompletas'}</b> (Meet dejó de transcribir o trae menos de ${aud.minimo_palabras} palabras de conversación): su análisis no vale, la IA marcó "no cumple" por falta de texto. Pega la transcripción completa desde la grabación de Meet y vuelve a analizar.
+      <ul class="list-clean" style="margin:8px 0 0">${aud.sospechosas.map(t => `<li><a href="#/deal/${t.id}"><b>${esc(t.company || '#' + t.id)}</b></a> <span class="muted chico">· ${t.duracion_min != null ? t.duracion_min + ' min transcritos · ' : ''}${t.palabras} palabras de conversación${t.calificacion ? ' · ' + esc(t.calificacion) : ''}</span></li>`).join('')}</ul></div>` : '';
   h(`
     <h1>Historial de deals</h1>
     <p class="muted">Haz clic en una fila para ver el detalle completo y el reporte de la IA.</p>
+    ${avisoTranscripciones}
 
     <div class="score-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
       <div class="card compact score-card"><div class="muted">Total deals</div><div class="num">${r.length}</div></div>
@@ -1702,6 +1727,7 @@ async function renderDealDetail(id) {
       Guardado: <strong>${new Date(row.created_at).toLocaleString()}</strong>
     </p>
     <p class="muted" id="brevo-deal" data-deal="${row.id}" hidden></p>
+    ${(() => { if (!d.transcript || !String(d.transcript).trim()) return ''; const ev = evaluarTranscripcion(d.transcript); return ev.suficiente ? '' : `<div class="tb-aviso"><b>La transcripción de este demo está ${ev.cortada ? `cortada (Meet dejó de transcribir a los ${Math.floor(ev.duracion_s / 60)} min)` : 'incompleta'}</b>: ${ev.palabras} palabras de conversación. La calificación y las acciones de abajo salieron de ese texto, no del demo real. Consigue la completa en la grabación de Meet y cárgala aquí: el asistente arranca en el paso de la transcripción con la ficha de este deal y, al guardar, reemplaza el demo de este mismo deal. <button class="btn btn-sm" data-recargar-transcripcion="${row.id}" style="margin-top:8px">Volver a cargar la transcripción</button></div>`; })()}
 
     ${(() => {
       // Calificación Sandler: la que cuenta (la del formulario o los chulos del tablero).
@@ -1884,19 +1910,24 @@ async function renderDealDetail(id) {
     reasonSel.style.display = ''; reasonTxt.style.display = ''; saveBtn.style.display = '';
     const $pr = el.querySelector('[data-productos]'); if ($pr) $pr.style.display = mode === 'won' ? '' : 'none';
   }
-  const tomarBtn = el.querySelector('[data-tomar]');
-  if (tomarBtn) tomarBtn.addEventListener('click', () => {
+  // Tomar el deal del SDR (sin demo) o volver a cargar la transcripción de un deal (la que tenía estaba
+  // cortada): el asistente arranca con la ficha de este deal y al guardar actualiza este mismo deal.
+  const arrancarAsistente = ({ paso, limpiarTranscript }) => {
     const borrador = loadDraft();
     const hayOtro = borrador && (borrador.company || borrador.transcript) && Number(borrador.sdrDealId) !== row.id;
-    if (hayOtro && !confirm(`Tienes un borrador en curso (${borrador.company || 'sin empresa'}). ¿Lo reemplazo con este deal del SDR?`)) return;
+    if (hayOtro && !confirm(`Tienes un borrador en curso (${borrador.company || 'sin empresa'}). ¿Lo reemplazo con este deal?`)) return;
     const base = newDraft();
     state = { ...base, ...(d || {}), sdrDealId: row.id };
     if (!state.company) state.company = row.company || '';
-    if (!state.canalAdquisicion) state.canalAdquisicion = 'sdr_interno';
+    if (!state.canalAdquisicion) state.canalAdquisicion = row.canal_adquisicion || 'sdr_interno';
     if (!state.freelancerNombre) state.freelancerNombre = row.freelancer_nombre || 'Angie (SDR)';
-    state.transcript = state.transcript || ''; state.iaExtracted = null; state.iaError = null;
-    stepIdx = 0; saveDraft(); location.hash = '#/';
-  });
+    state.transcript = limpiarTranscript ? '' : (state.transcript || ''); state.iaExtracted = null; state.iaError = null;
+    stepIdx = paso; saveDraft(); location.hash = '#/';
+  };
+  const tomarBtn = el.querySelector('[data-tomar]');
+  if (tomarBtn) tomarBtn.addEventListener('click', () => arrancarAsistente({ paso: 0, limpiarTranscript: false }));
+  const recargarBtn = el.querySelector('[data-recargar-transcripcion]');
+  if (recargarBtn) recargarBtn.addEventListener('click', () => arrancarAsistente({ paso: STEPS.findIndex(x => x.key === 'transcript'), limpiarTranscript: true }));
   if (saveBtn) saveBtn.addEventListener('click', async () => {
     const mode = el.querySelector('#outcome-panel').getAttribute('data-mode');
     const motivo = [reasonSel.value, reasonTxt.value.trim()].filter(Boolean).join(' — ');
@@ -2259,6 +2290,7 @@ function tbFila(x, criterios) {
       ${x.etapa === 'reunion_agendada' && x.estado !== 'cancelada' ? `<button class="btn secondary btn-sm" data-acc="reunion_realizada">✓ Realizada</button><button class="btn secondary btn-sm" data-acc="no_show">No asistió</button>` : ''}
       ${x.deal_id ? `<a class="btn secondary btn-sm" href="#/deal/${x.deal_id}" title="Deal #${x.deal_id}: ficha de Angie, demo completo y cierre">Deal →</a>` : ''}
       <a class="btn ghost btn-sm" href="/sdr/#/lead/${x.lead_id}" target="_blank" rel="noopener" title="Historial de toques de Angie">SDR ↗</a>
+      ${x.puede_calificar && !x.calificacion ? `<button class="btn ghost btn-sm" data-acc="no_califica" title="La reunión se hizo y el prospecto no califica (ningún criterio): queda registrada como No califica, sin chulos">No califica</button>` : ''}
       ${x.manual ? `<button class="btn ghost btn-sm" data-acc="limpiar" title="Quita los chulos marcados a mano">Quitar</button>` : ''}
     </div>
   </div>`;
@@ -2365,8 +2397,9 @@ async function renderTablero(params, { conservar = false } = {}) {
       $b.disabled = true;
       try {
         if (acc === 'limpiar') await tbApi(`leads/${id}/calificacion`, { method: 'POST', body: { limpiar: true, usuario: r.ejecutiva } });
+        else if (acc === 'no_califica') await tbApi(`leads/${id}/calificacion`, { method: 'POST', body: { items: {}, usuario: r.ejecutiva } });
         else await tbApi(`leads/${id}/ejecutiva`, { method: 'POST', body: { accion: acc, usuario: r.ejecutiva } });
-        tbAvisar(acc === 'reunion_realizada' ? 'Reunión realizada: ya puedes marcar los chulos.' : acc === 'no_show' ? 'Marcada como no asistió.' : 'Chulos quitados.');
+        tbAvisar(acc === 'reunion_realizada' ? 'Reunión realizada: ya puedes marcar los chulos.' : acc === 'no_show' ? 'Marcada como no asistió.' : acc === 'no_califica' ? 'Registrada como No califica.' : 'Chulos quitados.');
         await recargar();
       } catch (e) { tbAvisar(e.message, 'error'); $b.disabled = false; }
     }));

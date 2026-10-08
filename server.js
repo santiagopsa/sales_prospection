@@ -310,6 +310,24 @@ app.post('/api/deals/:id/demo/mover', async (req, res) => {
   }
 });
 
+// Auditoría de transcripciones: cuáles de las guardadas parecen cortadas (Meet dejó de transcribir) o
+// demasiado cortas para que el análisis valga. Para revisar si se pegaron transcripciones incompletas.
+app.get('/api/transcripciones/auditoria', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'sin base de datos' });
+    const T = require('./transcripcion');
+    const min = (require('./sdr/config').SANDLER || {}).transcripcion_minima_palabras || 400;
+    const q = await pool.query(`SELECT id, company, executive, created_at, calificacion_sandler, outcome, data->>'transcript' AS transcript FROM deals ORDER BY id DESC`);
+    const filas = q.rows.filter(r => r.transcript && String(r.transcript).trim()).map(r => {
+      const ev = T.evaluar(r.transcript, { minimoPalabras: min });
+      return { id: r.id, company: r.company, executive: r.executive, created_at: r.created_at, calificacion: r.calificacion_sandler, outcome: r.outcome,
+        caracteres: String(r.transcript).length, palabras: ev.palabras, duracion_min: ev.duracion_s != null ? Math.round(ev.duracion_s / 60) : null, cortada: ev.cortada, suficiente: ev.suficiente };
+    });
+    const sospechosas = filas.filter(f => f.cortada || !f.suficiente);
+    res.json({ total: filas.length, sin_transcripcion: q.rows.length - filas.length, sospechosas, minimo_palabras: min, todas: filas });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/deals', async (req, res) => {
   try {
     if (pool) {
@@ -708,6 +726,12 @@ app.post('/api/deals/:id/ideal/quitar', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// Reglas que el asistente necesita antes de analizar (de sdr/config.js).
+app.get('/api/reglas', (req, res) => {
+  const cfg = require('./sdr/config');
+  res.json({ transcripcion_minima_palabras: (cfg.SANDLER || {}).transcripcion_minima_palabras || 400 });
+});
+
 app.post('/api/analyze', async (req, res) => {
   try {
     if (!anthropic) return res.status(500).json({ error: 'ANTHROPIC_API_KEY no configurada' });
@@ -715,6 +739,9 @@ app.post('/api/analyze', async (req, res) => {
     if (!transcript || transcript.length < 100) {
       return res.status(400).json({ error: 'transcript vacío o muy corto (mín 100 chars)' });
     }
+    // Una transcripción cortada (Meet dejó de transcribir) no se analiza: la IA marcaría todo "no cumple".
+    const ev = require('./transcripcion').evaluar(transcript, { minimoPalabras: (require('./sdr/config').SANDLER || {}).transcripcion_minima_palabras || 400 });
+    if (!ev.suficiente) return res.status(400).json({ error: ev.motivo, transcripcion: ev });
     res.json(await analizarTranscript(transcript, context));
   } catch (e) {
     console.error('[llm] error:', e.message);
@@ -734,6 +761,8 @@ app.post('/api/deals/:id/reanalizar', async (req, res) => {
     if (!row) return res.status(404).json({ ok: false, error: 'not found' });
     const d = { ...(row.data || {}) };
     if (!has(d.transcript) || String(d.transcript).length < 100) return res.status(400).json({ ok: false, error: 'Este deal no tiene transcripción para analizar' });
+    const ev = require('./transcripcion').evaluar(d.transcript, { minimoPalabras: (require('./sdr/config').SANDLER || {}).transcripcion_minima_palabras || 400 });
+    if (!ev.suficiente) return res.status(400).json({ ok: false, error: ev.motivo });
     const ia = await analizarTranscript(d.transcript, d);
     d.iaExtracted = ia;
     const CAMPOS_IA = ['contratoPrevio', 'vinculo', 'dolor', 'dolorCuantificar', 'dolorHistoria', 'dolorImpacto', 'consecuenciasEmocionales', 'medicion', 'integraciones',
