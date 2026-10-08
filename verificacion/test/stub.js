@@ -23,7 +23,39 @@ const FORMATO_ACTA = 'v4-2026-09'; // igual que en app.js
 const OPS = require('../ops');
 // Sin semilla por defecto: las pruebas cargan la de Airtable con POST /api/__ops_semilla cuando la quieren.
 const OPS_STORE = OPS.crearOps({ semilla: process.env.OPS_SEMILLA === '1' });
-const db = { companies:[], vacancies:[], requirements:[], sessions:[], ratings:[], seq:1 };
+const db = { companies:[], vacancies:[], requirements:[], sessions:[], ratings:[], feedback:[], seq:1 };
+const FB = require('../feedback');
+function fbListar(vid = null){
+  return db.feedback.filter(f=>!vid || f.vacancy_id===vid).map(f=>{
+    const s = db.sessions.find(x=>x.id===f.session_id) || {}, v = db.vacancies.find(x=>x.id===f.vacancy_id) || {};
+    return {...f, candidate:s.candidate||null, evaluator:s.evaluator||null, vacancy_title:v.title||null, company_name:v.company_name||null};
+  }).sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
+}
+function rechazosDe(v){
+  const reqs = db.requirements.filter(q=>q.vacancy_id===v.id).sort((a,b)=>a.ord-b.ord);
+  const pos = new Map(reqs.map((q,i)=>[q.id, i+1]));
+  return FB.rechazosVacante(v, fbListar(v.id).filter(f=>f.analisis_estado==='lista'))
+    .map(x=>({...x, requisito_indice: x.requirement_id ? pos.get(x.requirement_id) || null : null}));
+}
+function fbAnalizarStub(f){
+  const t = f.texto;
+  if(t.includes('__FALLA__') && !f.__reintento){ f.__reintento = true; Object.assign(f,{analisis_estado:'error', analisis_error:'Claude no está disponible en este momento. Vuelve a intentarlo en un minuto.'}); return; }
+  const reqs = db.requirements.filter(q=>q.vacancy_id===f.vacancy_id).sort((a,b)=>a.ord-b.ord);
+  const d = /salario/i.test(t) ? {motivo:'salario', req:null, cita:'Lo que pidió de salario estaba fuera del rango.', resumen:'Pidió un salario por encima del rango.', pregunta:'', propuesta:null}
+    : /BW/.test(t) ? {motivo:'requisito', req:null, cita:'Ninguno manejaba SAP BW, y para ellos es clave.', resumen:'Le faltó SAP BW, que no estaba en la vacante.', pregunta:'¿Qué reporte armaste tú en SAP BW y para quién?',
+        propuesta:{tipo:'requisito', texto:'Reportes en SAP BW', criterio:'Narra un reporte propio en BW: qué datos, para quién y qué decidieron con él.', pregunta_escena:'Cuéntame del último reporte que armaste tú en SAP BW.', criterio_escena:'Nombra el reporte, la fuente de datos y quién lo usaba.'}}
+    : /actitud/i.test(t) ? {motivo:'conducta', req:null, cita:'Tenía mala actitud cuando le preguntaron por errores.', resumen:'Se puso a la defensiva al hablar de errores.', pregunta:'Cuéntame de la última vez que te equivocaste en un go-live: ¿qué pasó y qué hiciste?',
+        propuesta:{tipo:'rasgo', rasgo:'Reconoce sus errores', por_que:'El cliente rechazó a alguien que se puso a la defensiva.', pregunta:'Cuéntame de un error tuyo en un proyecto: ¿qué pasó?', se_ve_asi:'Nombra el error y lo que cambió.', no_se_ve_asi:'Culpa a otros.'}}
+    : {motivo:'requisito', req:reqs[0], cita:'No conocía bien las hojas de ruta, se enredó con lo básico.', resumen:'Se enredó con las hojas de ruta.', pregunta:'¿Cómo armaste la última hoja de ruta, paso a paso?',
+        propuesta:{tipo:'endurecer', criterio:((reqs[0]&&reqs[0].criterio)||'') + ' Debe narrar cómo armó las hojas de ruta.', detalle:{detalle:'¿Con qué transacción se crea una hoja de ruta?', respuesta_esperada:'CA01'}, senal:''}};
+  if(d.propuesta && d.propuesta.tipo==='endurecer' && d.req) d.propuesta.requirement_id = d.req.id;
+  const r = f.session_id && d.req ? db.ratings.find(x=>x.session_id===f.session_id && x.requirement_id===d.req.id) : null;
+  const n = FB.normalizarFeedback({motivo:d.motivo, requirement_id:d.req?d.req.id:null, cita:d.cita, resumen:d.resumen, pregunta:d.pregunta, propuesta:d.propuesta},
+    {requisitos:reqs, con_sesion:!!f.session_id, nivel: r ? r.level : null});
+  const {registrado_por, ...resto} = n;
+  Object.assign(f, resto, {analisis_estado:'lista', analisis_error:null});
+}
+
 // Cuántos requisitos tiene y cuántos cumplió (nivel 4-5): lo que el tablero pinta sin abrir el acta.
 const conResultado = s => { const rs = db.ratings.filter(r=>r.session_id===s.id);
   return {...s, req_total: rs.length, req_cumple: rs.filter(r=>r.level>=4).length}; };
@@ -155,7 +187,7 @@ const server = http.createServer(async (req, res) => {
       context:clean(vac.contexto), suggested_mode:clean(b.modalidad_sugerida), status:'activa',
       ingles_requerido: !!(b.ingles && b.ingles.requerido), ingles_nivel: clean(b.ingles && b.ingles.nivel),
       ingles_uso: clean(b.ingles && b.ingles.uso), ingles_cita: clean(b.ingles && b.ingles.evidencia_cita),
-      perfil: Array.isArray(b.perfil) ? b.perfil : [],
+      perfil: Array.isArray(b.perfil) ? b.perfil : [], ai_raw: b.aiRaw || null,
       created_at:new Date().toISOString()};
     db.vacancies.push(v);
     reqs.forEach((r,i)=>db.requirements.push({id:nid(), vacancy_id:v.id, ord:i, text:clean(r.requisito),
@@ -179,8 +211,11 @@ const server = http.createServer(async (req, res) => {
   if(p === '/api/tablero' && m==='GET'){
     const ev = new URL(req.url, 'http://x').searchParams.get('evaluador') || '';
     const filas = db.sessions.map(conResultado);
+    const fb = fbListar();
     return json(res,200, {...estadisticas(filas, {evaluador: ev}),
-      pulso: pulsoVacantes(db.vacancies.map(v=>({...v, status: v.status || 'activa'})), filas)});
+      pulso: pulsoVacantes(db.vacancies.map(v=>({...v, status: v.status || 'activa'})), filas),
+      ajustes: fb.filter(f=>f.propuesta_estado==='pendiente' || f.analisis_estado==='error').map(({texto, ...f})=>({...f, texto_corto: clean(texto).slice(0,280)})),
+      feedback_procesando: fb.filter(f=>f.analisis_estado==='procesando').length});
   }
 
   if(p === '/api/indicadores' && m==='GET'){
@@ -189,7 +224,7 @@ const server = http.createServer(async (req, res) => {
     const base = indicadoresSemana(filasI, db.vacancies, {evaluador: u.get('evaluador') || '', fecha: u.get('fecha') || null});
     const opsInd = OPS.indicadoresOps(await OPS_STORE.listar('procesos'), await OPS_STORE.listar('saas'), filasI,
       {evaluador: u.get('evaluador') || '', fecha: u.get('fecha') || null});
-    return json(res,200, {...base, ops: opsInd});
+    return json(res,200, {...base, ops: opsInd, feedback: FB.indicadoresFeedback(fbListar(), filasI, {evaluador: u.get('evaluador') || ''})});
   }
 
   const mc = p.match(/^\/api\/sessions\/(\d+)\/cliente$/);
@@ -227,6 +262,67 @@ const server = http.createServer(async (req, res) => {
     s.repregunta = nuevo; s.updated_at = ahora;
     return json(res,200,{ok:true, repregunta:nuevo});
   }
+
+  // Lo que dice el cliente: mismas reglas que el servidor (feedback.js) y un "Claude" que lee
+  // palabras clave. salario → no es calidad; "BW" → requisito oculto; "actitud" → conducta;
+  // __FALLA__ → el análisis falla; lo demás apunta al primer requisito.
+  if(p === '/api/feedback' && m==='POST'){
+    const b = await body(req);
+    const texto = clean(b.texto);
+    if(texto.length < 10) return json(res,400,{error:'Pega lo que dijo el cliente.'});
+    const v = db.vacancies.find(x=>x.id===Number(b.vacancy_id));
+    if(!v) return json(res,404,{error:'not found'});
+    const sid = Number(b.session_id) || null;
+    if(sid){ const s = db.sessions.find(x=>x.id===sid); if(!s) return json(res,404,{error:'not found'}); if(s.vacancy_id!==v.id) return json(res,400,{error:'Ese candidato no es de esta vacante.'}); }
+    const f = {id:nid(), vacancy_id:v.id, session_id:sid, texto, registrado_por: clean(b.registrado_por)||null,
+               analisis_estado:'procesando', created_at:new Date().toISOString()};
+    db.feedback.push(f);
+    json(res,202,{ok:true, id:f.id, analisis_estado:'procesando'});
+    setTimeout(()=>fbAnalizarStub(f), texto.includes('__LENTO__') ? 4000 : 700);
+    return;
+  }
+  if(p === '/api/feedback' && m==='GET'){
+    const vid = Number(new URL(req.url,'http://x').searchParams.get('vacancy_id')) || null;
+    return json(res,200, fbListar(vid));
+  }
+  const mfb = p.match(/^\/api\/feedback\/(\d+)(?:\/(propuesta|reanalizar))?$/);
+  if(mfb){
+    const f = db.feedback.find(x=>x.id===+mfb[1]);
+    if(!f) return json(res,404,{error:'not found'});
+    if(m==='DELETE' && !mfb[2]){ db.feedback = db.feedback.filter(x=>x!==f); return json(res,200,{ok:true}); }
+    if(mfb[2]==='reanalizar' && m==='POST'){
+      if(f.propuesta_estado==='aceptada') return json(res,409,{error:'Su ajuste ya se aplicó a la vacante: no se vuelve a analizar.'});
+      f.analisis_estado='procesando'; f.analisis_error=null;
+      json(res,202,{ok:true, analisis_estado:'procesando'});
+      setTimeout(()=>fbAnalizarStub(f, true), 700);
+      return;
+    }
+    if(mfb[2]==='propuesta' && m==='POST'){
+      const b = await body(req);
+      if(!['aceptar','descartar'].includes(b.accion)) return json(res,400,{error:'accion: aceptar o descartar'});
+      if(f.propuesta_estado!=='pendiente') return json(res,409,{error:'Ese ajuste ya se resolvió.'});
+      const reqs = db.requirements.filter(q=>q.vacancy_id===f.vacancy_id).sort((a,b2)=>a.ord-b2.ord);
+      let pp = f.propuesta;
+      if(b.accion==='aceptar'){
+        pp = FB.normalizarPropuesta(b.propuesta ? {...f.propuesta, ...b.propuesta, tipo:f.propuesta.tipo} : f.propuesta, {lectura:f.lectura, requisitos:reqs});
+        if(!pp) return json(res,400,{error:'El ajuste quedó incompleto o el requisito ya no existe en la vacante.'});
+        if(pp.tipo==='requisito' && reqs.length >= MAX_REQ) return json(res,409,{error:`La vacante ya tiene ${MAX_REQ} requisitos excluyentes. Edítala para cambiar uno por este.`, motivo:'tope'});
+        if(pp.tipo==='endurecer'){
+          const q = reqs.find(x=>x.id===pp.requirement_id);
+          if(pp.criterio) q.criterio = pp.criterio;
+          if(pp.detalle) q.detalles = [...(q.detalles||[]), pp.detalle];
+          if(pp.senal) q.senales = [...(q.senales||[]), pp.senal];
+        } else if(pp.tipo==='requisito'){
+          db.requirements.push({id:nid(), vacancy_id:f.vacancy_id, ord:reqs.length, text:pp.texto, criterio:pp.criterio, detalles:[], senales:[], q_escena:pp.pregunta_escena, c_escena:pp.criterio_escena});
+        } else if(pp.tipo==='rasgo'){
+          const v = db.vacancies.find(x=>x.id===f.vacancy_id); const {tipo, ...r} = pp; v.perfil = [...(v.perfil||[]), r];
+        }
+      }
+      Object.assign(f, {propuesta:pp, propuesta_estado: b.accion==='aceptar' ? 'aceptada' : 'descartada', propuesta_at:new Date().toISOString()});
+      return json(res,200,{ok:true, propuesta:pp, propuesta_estado:f.propuesta_estado});
+    }
+  }
+
   // Descartar / recuperar: mismas reglas que el servidor.
   const md = p.match(/^\/api\/sessions\/(\d+)\/(descartar|recuperar)$/);
   if(md && m==='POST'){
@@ -265,7 +361,8 @@ const server = http.createServer(async (req, res) => {
       if(typeof x.vacante === 'number') x.vacancy_id = vids[x.vacante];
       const id = nid();
       db.sessions.push({id, report_code:'PKV-2026-'+String(100000+id), kind:'sondeo', mode:'B', status:'draft', ...x, vacancy_id: x.vacancy_id || null});
-      (x.ratings||[]).forEach((lvl,i)=>db.ratings.push({id:nid(), session_id:id, req_text:'R'+(i+1), ord:i, level:lvl}));
+      const rqs = db.requirements.filter(q=>q.vacancy_id===x.vacancy_id).sort((a,b2)=>a.ord-b2.ord);
+      (x.ratings||[]).forEach((lvl,i)=>db.ratings.push({id:nid(), session_id:id, req_text:(rqs[i]&&rqs[i].text)||'R'+(i+1), requirement_id:rqs[i]&&rqs[i].id, ord:i, level:lvl}));
     }
     return json(res,200,{ok:true, n:(b.sesiones||[]).length, vacantes:vids});
   }
@@ -278,7 +375,8 @@ const server = http.createServer(async (req, res) => {
     const candidatos = ses.slice().reverse().map(s=>({...conResultado(s), vacancy_title:v.title, company_name:v.company_name, estado_tablero: estadoTablero(s)}));
     return json(res,200,{...v, session_count:ses.length, issued_count:ses.filter(s=>s.status==='issued').length,
       requirements: db.requirements.filter(q=>q.vacancy_id===v.id).sort((a,b)=>a.ord-b.ord),
-      candidatos, pulso: pulsoVacante({...v, status: v.status || 'activa'}, candidatos)});
+      candidatos, pulso: pulsoVacante({...v, status: v.status || 'activa'}, candidatos),
+      feedback: fbListar(v.id), rechazos: rechazosDe(v)});
   }
 
   // Editar la vacante: mismos campos y mismas reglas que el servidor real.
@@ -342,7 +440,7 @@ const server = http.createServer(async (req, res) => {
       experiencia:s.experiencia||null,
       transcript_status:s.transcript_status||null, transcript_error:s.transcript_error||null,
       tiene_captura:!!shot, identidad:estadoIdentidad(ctx),
-      documento:tipoDocumento(ctx), ratings:db.ratings.filter(r=>r.session_id===s.id)});
+      documento:tipoDocumento(ctx), ratings:db.ratings.filter(r=>r.session_id===s.id), rechazos: v ? rechazosDe(v) : []});
   }
 
   if(p === '/api/sessions' && m==='GET'){

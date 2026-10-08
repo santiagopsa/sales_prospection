@@ -9,7 +9,7 @@
 // Ninguna de las otras pruebas lo veía: el stub no llama a Claude, así que el flujo pasaba
 // en verde de punta a punta con el prompt vacío por dentro.
 const assert = require('assert');
-const { buildIntakePrompt, buildCvPrompt, buildTranslatePrompt, buildTranscriptPrompt } = require('../prompts');
+const { buildIntakePrompt, buildCvPrompt, buildTranslatePrompt, buildTranscriptPrompt, buildFeedbackPrompt } = require('../prompts');
 
 let n = 0;
 const t = (nombre, fn) => { fn(); n++; console.log('  ✓', nombre); };
@@ -150,6 +150,23 @@ t('en la repregunta lleva lo de la primera llamada y dice qué se puede cambiar'
   assert.ok(/ESTO ES UNA REPREGUNTA/.test(p), 'no avisa que es repregunta');
   assert.ok(/\[1\] SE REPREGUNTA/.test(p) && /\[2\] NO se repregunta/.test(p), 'no marca qué se repregunta');
   assert.ok(p.includes('¿Qué hiciste tú cuando falló?') && p.includes('yo llevé el rollout'), 'no lleva lo de la primera llamada');
+});
+
+t('el feedback del cliente lleva el mensaje, los requisitos y lo que dijo la verificación', () => {
+  const p = buildFeedbackPrompt('No siguió: no conocía las hojas de ruta.', { cargo: 'SAP PP', empresa: 'Alpina', candidato: 'Carla',
+    requisitos: [{ text: 'Rollouts', criterio: 'Narra un rollout' }], niveles: [{ indice: 1, nivel: 5, demostro: 'Lideró Alpina' }],
+    motivos: require('../feedback').MOTIVOS_FEEDBACK });
+  assert.ok(p.includes('no conocía las hojas de ruta'), 'no lleva el mensaje');
+  assert.ok(/LO QUE DIJO LA VERIFICACIÓN DE ESTE CANDIDATO: nivel 5/.test(p), 'no lleva el nivel');
+  assert.ok(p.includes('"endurecer"') && p.includes('"requisito"') && p.includes('"rasgo"'), 'no describe los ajustes');
+  assert.ok(/No inventes/.test(p));
+});
+
+t('lo que el cliente rechazó entra al análisis solo para indagar, nunca para bajar el nivel', () => {
+  const p = buildTranscriptPrompt('t', { requisitos: [{ text: 'SAP PP' }], rechazos: [{ motivo_txt: 'Un requisito técnico', requisito_indice: 1, resumen: 'Flojo en hojas de ruta' }] });
+  assert.ok(/LO QUE EL CLIENTE YA RECHAZÓ/.test(p) && p.includes('Flojo en hojas de ruta') && p.includes('(requisito 1)'));
+  assert.ok(/NUNCA bajes un nivel por esto/.test(p));
+  assert.ok(!/LO QUE EL CLIENTE YA RECHAZÓ/.test(buildTranscriptPrompt('t', { requisitos: [{ text: 'x' }] })));
 });
 
 console.log(`\n${n} pruebas · los prompts no pierden su entrada`);

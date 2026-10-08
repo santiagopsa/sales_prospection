@@ -537,8 +537,8 @@ const R = require('./rules');
 // fecha esa información no existía o está incompleta, y medirla daría números falsos. Lo que sí
 // se llevaba en Airtable (procesos, cierres, tier, metas de SaaS) conserva su historia.
 const MEDICION_DESDE = process.env.OPS_MEDICION_DESDE || '2026-09-28';
-const ENTREVISTADO = ['Lo entrevistó', 'Lo contrató'];
-const CON_RESPUESTA = ['Lo entrevistó', 'Lo contrató', 'No lo entrevistó'];
+const ENTREVISTADO = ['Lo entrevistó', 'No avanzó', 'Lo contrató'];
+const CON_RESPUESTA = ['Lo entrevistó', 'No avanzó', 'Lo contrató', 'No lo entrevistó'];
 const lunesDeF = f => masDias(f, -((diaSemana(f) + 6) % 7));
 const medianaN = xs => { if (!xs.length) return null; const a = xs.slice().sort((x, y) => x - y), m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
 const tasaN = (num, den) => ({ num, den, pct: den ? Math.round(100 * num / den) : null });

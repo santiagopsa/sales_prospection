@@ -10,6 +10,7 @@ const T = {
   requirements: `${SCHEMA}.requirements`,
   sessions:     `${SCHEMA}.sessions`,
   ratings:      `${SCHEMA}.ratings`,
+  feedback:     `${SCHEMA}.feedback`,
 };
 
 async function initSchema(pool) {
@@ -211,6 +212,36 @@ async function initSchema(pool) {
     `CREATE INDEX IF NOT EXISTS idx_v_sess_vacancy ON ${T.sessions}(vacancy_id)`,
     `CREATE INDEX IF NOT EXISTS idx_v_rat_session ON ${T.ratings}(session_id)`,
   ];
+  // Lo que dice el cliente cuando un candidato no avanza (feedback.js). Una fila por cada vez
+  // que se pega: sobre un candidato (session_id) o sobre la vacante en general. `texto` es lo
+  // que Wei pega tal cual (el mensaje o lo que recuerda de la llamada); de ahí se analiza
+  // en segundo plano y se llena el resto.
+  alters.push(`
+    CREATE TABLE IF NOT EXISTS ${T.feedback} (
+      id SERIAL PRIMARY KEY,
+      vacancy_id INT REFERENCES ${T.vacancies}(id) ON DELETE CASCADE,
+      session_id INT REFERENCES ${T.sessions}(id) ON DELETE SET NULL,
+      requirement_id INT REFERENCES ${T.requirements}(id) ON DELETE SET NULL,
+      requisito_texto TEXT,
+      texto TEXT,
+      analisis_estado TEXT,
+      analisis_error TEXT,
+      analisis_at TIMESTAMPTZ,
+      motivo TEXT,
+      fuente TEXT,
+      cita TEXT,
+      resumen TEXT,
+      pregunta TEXT,
+      nivel_wei INT,
+      lectura TEXT,
+      propuesta JSONB,
+      propuesta_estado TEXT,
+      propuesta_at TIMESTAMPTZ,
+      registrado_por TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_v_fb_vacancy ON ${T.feedback}(vacancy_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_v_fb_session ON ${T.feedback}(session_id)`);
   for (const q of alters) {
     try { await pool.query(q); } catch (e) { console.error('[verificacion] migración:', e.message); }
   }

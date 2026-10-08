@@ -154,6 +154,9 @@ PG_PRUEBA="host=/tmp/pgt port=5499 user=postgres" node verificacion/test/rutas_p
 PG_PRUEBA="host=/tmp/pgt port=5499 user=postgres" node verificacion/test/ops_pg.test.js  # el SQL de operaciones contra un Postgres local (se salta sin PG_PRUEBA)
 PG_PRUEBA="host=/tmp/pgt port=5499 user=postgres" node verificacion/test/repregunta_pg.test.js  # la repregunta con las rutas reales y un Claude falso
 python3 verificacion/test/e2e_repregunta.py  # falta indagar → programar → tablero → combinar → cancelar
+node verificacion/test/feedback.test.js      # lo que dice el cliente: lectura contra el nivel, ajustes permitidos, guía, acierto
+PG_PRUEBA="host=/tmp/pgt port=5499 user=postgres" node verificacion/test/feedback_pg.test.js  # pegar y seguir, análisis en segundo plano, aplicar ajustes, reintentar
+python3 verificacion/test/e2e_feedback.py    # "No avanzó" → pegar → ajuste arriba en el tablero → aplicar → vuelve a la guía
 python3 verificacion/test/e2e_nombre.py    # el lápiz junto al nombre, en sesión y sobre el acta
 python3 verificacion/test/e2e_empleo.py    # se verifica el último empleo declarado y no otro
 python3 verificacion/test/e2e_tablero.py   # el pulso, la cola, la meta, cerrar/reabrir, candidatos por vacante y el buscador
@@ -534,6 +537,25 @@ La pestaña **Indicadores** tiene tres secciones (se recuerda la última): **Hea
 Un candidato que no va a seguir (no se presentó, no cumple lo básico, desistió, el cliente lo descartó antes del informe, registro duplicado…) se **descarta** para que no se quede en *Para hacer ahora* ni cuente como *en proceso* en el pulso de la vacante. Se descarta desde la cola, desde la lista de verificaciones, desde la pantalla de la vacante o, en plena sesión, con **Descartar candidato** en la barra (guarda lo que haya y vuelve al tablero). Siempre pide el motivo, de una lista cerrada, y admite una nota.
 
 El descarte es una marca encima (`descartado_at`, `descarte_motivo`, `descarte_nota`): no toca el estado de fondo, así que **Recuperar** lo devuelve exactamente a donde estaba. Los descartados quedan en el filtro *Descartadas* (la lista *Todas* ya no los trae), plegados al final de la lista de la vacante, y abrir uno pregunta si se recupera. Un informe emitido no se descarta: ya es un resultado. En los indicadores, la entrevista de un descartado sí cuenta como entrevista, pero no entra en la tasa *entrevistas que ya tienen informe*. Rutas: `POST /api/sessions/:id/descartar` (`{motivo, nota}`) y `POST /api/sessions/:id/recuperar`.
+
+## Lo que dice el cliente cuando un candidato no avanza
+
+Es la única medición externa de si la verificación acierta, y se perdía por dos lados: lo que el cliente contaba en el levantamiento sobre candidatos que había rechazado se mostraba una vez y no volvía a aparecer, y en cada informe solo se anotaba si lo entrevistó, no por qué no avanzó.
+
+**Para Wei es un solo paso.** En "¿Qué dijo el cliente?" está la opción **No avanzó**. Al elegirla se abre un cuadro para pegar lo que dijo el cliente tal cual: el mensaje de WhatsApp o del correo, o lo que le dijo en una llamada. Guarda y sigue; también puede saltarlo. Desde la vacante se pega igual, sobre un candidato o sobre la vacante en general ("ninguno sabía BW"), y al descartar con "El cliente lo descartó antes del informe" se ofrece lo mismo. Si un paso se pone complejo, termina sin hacerse: por eso no hay formulario.
+
+**Lo demás corre solo** (`feedback.js`, `prompts.js · buildFeedbackPrompt`). El texto se guarda tal cual —es el registro de lo que dijo el cliente— y Claude lo lee en segundo plano. Saca el motivo, el requisito al que apunta (o que no apunta a ninguno), la cita, una pregunta para los siguientes candidatos y, si aplica, un ajuste a la vacante. Después lo cruza con el nivel que dio la verificación, y de ahí sale la **lectura**, que es lo que más vale:
+
+- **Dijimos que cumplía**: la verificación le dio 4-5 en ese requisito y el cliente dijo que no. El criterio está flojo. El ajuste propuesto lo endurece: reescribe "qué debe poder narrar" y agrega un detalle verificable.
+- **Ya lo advertíamos**: le había dado 3 o menos. No falló la verificación; se envió un parcial.
+- **No estaba en la vacante**: lo que el cliente pidió no está en los requisitos. El ajuste lo agrega como requisito, o como rasgo de conducta si es de encaje.
+- **Salario o disponibilidad**: no es calidad. No se propone nada; se pregunta antes de enviar.
+
+**Los ajustes salen arriba en el tablero**, en "Lo que dijo el cliente", con dos botones: **Aplicar a la vacante** o **Descartar**. Nada cambia solo. Aplicar cambia la vacante de ahí en adelante; las actas emitidas no cambian porque están congeladas. Si la vacante ya tiene 3 requisitos, no deja agregar otro: hay que editarla para cambiar uno. Si el análisis falla, el texto no se pierde y ahí mismo hay un botón para reintentar.
+
+**Vuelve a la guía.** Lo que el cliente rechazó en una vacante, empezando por lo que contó en el levantamiento, aparece en la apertura de las siguientes entrevistas. En cada requisito aparece lo que apunta a ese requisito, con la pregunta sugerida. El análisis de la transcripción lo recibe también, pero solo para marcar "falta indagar" sobre ese punto, **nunca para bajar un nivel**: si no, el cliente estaría calificando a un candidato que no oyó.
+
+**El indicador** está en Indicadores, sección Headhunting, en "Cuando el cliente dice que no". El **acierto de la verificación** es el porcentaje de entrevistados por el cliente que no se cayó por algo que la verificación dio por cumplido. A su lado aparecen las lecturas, los motivos más frecuentes y las empresas con más rechazos. "No avanzó" cuenta como entrevistado en la calidad de Headhunting.
 
 ## Operaciones: Procesos completos, SaaS y Evaluaciones (antes, Airtable)
 

@@ -10,12 +10,13 @@
 // No toca deals ni wishlist: sus tablas viven en el schema "verificacion".
 const express = require('express');
 const path = require('path');
-const { buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt, leerTraduccion } = require('./prompts');
+const { buildFeedbackPrompt, buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt, leerTraduccion } = require('./prompts');
 const REPREGUNTA_MIN_CHARS = 150;
 const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero, normalizarRepregunta, combinarRepregunta, pulsoVacante, pulsoVacantes, indicadoresSemana, MOTIVOS_DESCARTE, RESULTADOS_CLIENTE } = require('./rules');
 const didit = require('./didit');
 const { T, SCHEMA, initSchema } = require('./schema');
 const OPS = require('./ops');
+const FB = require('./feedback');
 const { crearPedirJson } = require('./llm');
 const A = require('./archivos');
 
@@ -28,7 +29,7 @@ const A = require('./archivos');
 const FORMATO_ACTA = 'v4-2026-09';
 
 // Fallback en memoria para correr sin Postgres (pruebas locales). Se pierde al reiniciar.
-const mem = { companies: [], vacancies: [], requirements: [], sessions: [], ratings: [], seq: 1 };
+const mem = { companies: [], vacancies: [], requirements: [], sessions: [], ratings: [], feedback: [], seq: 1 };
 const nextId = () => mem.seq++;
 
 // El pool es del host (Sandler) y no tiene tope de espera: si todas las conexiones están
@@ -209,7 +210,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
   const BUILD = (() => {
     try {
       const h = require('crypto').createHash('sha1');
-      for (const f of ['app.js', 'llm.js', 'json_llm.js', 'rules.js', 'prompts.js', 'schema.js', 'didit.js', 'archivos.js', 'ops.js']) {
+      for (const f of ['app.js', 'llm.js', 'json_llm.js', 'rules.js', 'prompts.js', 'schema.js', 'didit.js', 'archivos.js', 'ops.js', 'feedback.js']) {
         try { h.update(require('fs').readFileSync(path.join(__dirname, f))); } catch (e) {}
       }
       h.update(VER);
@@ -456,7 +457,9 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
           FROM ${T.sessions} s WHERE s.vacancy_id=$1
           ORDER BY COALESCE(s.issued_at, s.updated_at, s.created_at) DESC LIMIT 500`, [id]);
         const candidatos = cs.rows.map(s => ({ ...s, transcript_status: estadoTranscripcion(s).estado, estado_tablero: estadoTablero(s) }));
-        return res.json({ ...v.rows[0], requirements: q.rows, candidatos, pulso: pulsoVacante(v.rows[0], candidatos) });
+        const fb = await fbListar({ vacancy_id: id });
+        return res.json({ ...v.rows[0], requirements: q.rows, candidatos, pulso: pulsoVacante(v.rows[0], candidatos),
+                          feedback: fb, rechazos: rechazosDe(v.rows[0], q.rows, fb) });
       }
       const v = mem.vacancies.find(x => x.id === id);
       if (!v) return res.status(404).json({ error: 'not found' });
@@ -469,7 +472,9 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
       res.json({ ...v, session_count: sesiones.length,
                  issued_count: sesiones.filter(s => s.status === 'issued').length,
                  requirements: mem.requirements.filter(q => q.vacancy_id === id).sort((a, b) => a.ord - b.ord),
-                 candidatos, pulso: pulsoVacante(v, candidatos) });
+                 candidatos, pulso: pulsoVacante(v, candidatos),
+                 feedback: await fbListar({ vacancy_id: id }),
+                 rechazos: rechazosDe(v, mem.requirements.filter(q => q.vacancy_id === id).sort((a, b) => a.ord - b.ord), await fbListar({ vacancy_id: id })) });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
@@ -747,11 +752,11 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
           : 'La transcripción está vacía o es demasiado corta. Una entrevista de 30 minutos deja bastante más texto que esto — revisa que hayas pegado la transcripción completa.' });
       }
 
-      let cargo = '', candidato = '', modo = 'B', excluyentes = [], perfil = [], previo = null, rep = null;
+      let cargo = '', candidato = '', modo = 'B', excluyentes = [], perfil = [], previo = null, rep = null, rechazos = [];
       if (pool) {
         const q = await pool.query(`
           SELECT s.candidate, s.mode, s.experiencia, s.trayectoria, s.transcript_analisis, s.repregunta,
-                 v.id AS vid, v.title, v.perfil,
+                 v.id AS vid, v.title, v.perfil, v.ai_raw, v.created_at AS v_created_at,
                  v.ingles_requerido, v.ingles_nivel, v.ingles_uso
           FROM ${T.sessions} s LEFT JOIN ${T.vacancies} v ON v.id = s.vacancy_id
           WHERE s.id = $1`, [id]);
@@ -765,6 +770,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
             `SELECT id, text, criterio, detalles, senales, q_escena, q_friccion, q_cruce, c_escena, c_friccion, c_cruce FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`,
             [q.rows[0].vid]);
           excluyentes = rq.rows;
+          rechazos = rechazosDe({ ai_raw: q.rows[0].ai_raw, created_at: q.rows[0].v_created_at }, excluyentes, await fbListar({ vacancy_id: q.rows[0].vid }));
         }
       } else {
         const s = mem.sessions.find(x => x.id === id);
@@ -775,6 +781,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         excluyentes = mem.requirements.filter(q => q.vacancy_id === (v && v.id)).sort((a, b) => a.ord - b.ord);
         empleo = empleo || empleoDe(s.experiencia) || empleoDe((s.trayectoria || [])[0]);
         previo = s.transcript_analisis || null; rep = s.repregunta || null;
+        if (v) rechazos = rechazosDe(v, excluyentes, await fbListar({ vacancy_id: v.id }));
       }
       // Una repregunta solo tiene sentido sobre una primera llamada ya analizada, y con la
       // lista de qué se repregunta: es lo que le dice al análisis qué puede cambiar.
@@ -810,7 +817,7 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
         try {
           const out = await pedirJson(
             buildTranscriptPrompt(textoTrans, { requisitos: excluyentes, candidato, cargo, modo, perfil, empleo,
-                                               previo: esRepregunta ? previo : null,
+                                               previo: esRepregunta ? previo : null, rechazos,
                                                repreguntados: esRepregunta ? indicesRep : null }),
             { etiqueta: esRepregunta ? 'repregunta' : 'transcripcion', maxTokens: 10000 });
           if (out.error) error = out;
@@ -1685,7 +1692,258 @@ ${!code ? `
       const evaluador = clean(req.query && req.query.evaluador);
       const { filas, vacs } = await filasTablero();
       // El pulso de las vacantes es del equipo: no se filtra por evaluador.
-      res.json({ ...estadisticas(filas, { evaluador }), pulso: pulsoVacantes(vacs, filas) });
+      // Los ajustes que propuso el feedback del cliente van en la vista principal: un clic para
+      // aplicarlos a la vacante o descartarlos. Si el análisis falló, ahí mismo se reintenta.
+      const fb = await fbListar();
+      const ajustes = fb.filter(f => f.propuesta_estado === 'pendiente' || f.analisis_estado === 'error')
+        .map(({ texto, ...f }) => ({ ...f, texto_corto: clean(texto).slice(0, 280) }));
+      res.json({ ...estadisticas(filas, { evaluador }), pulso: pulsoVacantes(vacs, filas), ajustes,
+                 feedback_procesando: fb.filter(f => f.analisis_estado === 'procesando').length });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // LO QUE DICE EL CLIENTE CUANDO UN CANDIDATO NO AVANZA (feedback.js)
+  //
+  // Para Wei es un solo paso: pega lo que dijo el cliente (el mensaje o lo que recuerda de la
+  // llamada) y sigue. Lo demás corre solo: Claude lo lee en segundo plano, saca el motivo, el
+  // requisito al que apunta, la cita y una pregunta para los siguientes candidatos, y lo cruza
+  // con el nivel que había dado la verificación. Si propone un ajuste a la vacante, aparece en
+  // el tablero y solo se aplica cuando alguien lo acepta. Nada cambia solo.
+  // ---------------------------------------------------------------------------------------
+  // Lo que el cliente ya rechazó en la vacante, para la guía y para el análisis: solo lo ya
+  // analizado (lo que está procesando no tiene todavía motivo), con el número del requisito.
+  function rechazosDe(v, requisitos, fb) {
+    const pos = new Map((requisitos || []).map((q, i) => [Number(q.id), i + 1]));
+    return FB.rechazosVacante(v, (fb || []).filter(f => f.analisis_estado === 'lista'))
+      .map(x => ({ ...x, requisito_indice: x.requirement_id ? pos.get(Number(x.requirement_id)) || null : null }));
+  }
+  async function fbListar({ vacancy_id = null, session_id = null } = {}) {
+    if (pool) {
+      const cond = [], args = [];
+      if (vacancy_id) { args.push(vacancy_id); cond.push(`f.vacancy_id=$${args.length}`); }
+      if (session_id) { args.push(session_id); cond.push(`f.session_id=$${args.length}`); }
+      const q = await pool.query(`
+        SELECT f.*, s.candidate, s.evaluator, v.title AS vacancy_title, c.name AS company_name
+        FROM ${T.feedback} f
+        LEFT JOIN ${T.sessions} s ON s.id=f.session_id
+        LEFT JOIN ${T.vacancies} v ON v.id=f.vacancy_id
+        LEFT JOIN ${T.companies} c ON c.id=v.company_id
+        ${cond.length ? 'WHERE ' + cond.join(' AND ') : ''}
+        ORDER BY f.created_at DESC LIMIT 2000`, args);
+      return q.rows.map(f => ({ ...f, analisis_estado: fbEstado(f) }));
+    }
+    return mem.feedback
+      .filter(f => (!vacancy_id || f.vacancy_id === vacancy_id) && (!session_id || f.session_id === session_id))
+      .map(f => {
+        const s = mem.sessions.find(x => x.id === f.session_id) || {};
+        const v = mem.vacancies.find(x => x.id === f.vacancy_id) || {};
+        return { ...f, analisis_estado: fbEstado(f), candidate: s.candidate || null, evaluator: s.evaluator || null, vacancy_title: v.title || null, company_name: v.company_name || null };
+      }).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  }
+
+  // La vacante, sus requisitos y —si es sobre un candidato— lo que la verificación dijo de él.
+  async function fbContexto(vacancy_id, session_id) {
+    let v, requisitos, sesion = null, ratings = [];
+    if (pool) {
+      const qv = await pool.query(`SELECT v.*, c.name AS company_name FROM ${T.vacancies} v LEFT JOIN ${T.companies} c ON c.id=v.company_id WHERE v.id=$1`, [vacancy_id]);
+      if (!qv.rows.length) return null;
+      v = qv.rows[0];
+      requisitos = (await pool.query(`SELECT id, text, criterio, detalles, senales FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`, [vacancy_id])).rows;
+      if (session_id) {
+        const qs = await pool.query(`SELECT id, vacancy_id, candidate, status FROM ${T.sessions} WHERE id=$1`, [session_id]);
+        sesion = qs.rows[0] || null;
+        if (sesion) ratings = (await pool.query(`SELECT requirement_id, level, analisis FROM ${T.ratings} WHERE session_id=$1`, [session_id])).rows;
+      }
+    } else {
+      v = mem.vacancies.find(x => x.id === vacancy_id);
+      if (!v) return null;
+      requisitos = mem.requirements.filter(q => q.vacancy_id === vacancy_id).sort((a, b) => a.ord - b.ord);
+      if (session_id) {
+        sesion = mem.sessions.find(x => x.id === session_id) || null;
+        ratings = mem.ratings.filter(x => x.session_id === session_id);
+      }
+    }
+    if (sesion && Number(sesion.vacancy_id) !== Number(vacancy_id)) return { error: 'Ese candidato no es de esta vacante.' };
+    const nivelDe = rid => { const r = ratings.find(x => Number(x.requirement_id) === Number(rid)); return r ? Number(r.level) || null : null; };
+    const niveles = sesion ? requisitos.map((q, i) => {
+      const r = ratings.find(x => Number(x.requirement_id) === Number(q.id));
+      return { indice: i + 1, requirement_id: q.id, nivel: r ? Number(r.level) || null : null, demostro: r ? clean(r.analisis) : '' };
+    }) : [];
+    return { v, requisitos, sesion, niveles, nivelDe };
+  }
+
+  r.get('/api/feedback', async (req, res) => {
+    try {
+      const vid = Number((req.query || {}).vacancy_id) || null;
+      res.json(await fbListar({ vacancy_id: vid }));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Wei pega y se va: el texto se guarda tal cual —es el registro de lo que dijo el cliente— y
+  // el análisis corre en segundo plano. Si falla, el texto no se pierde y se puede reintentar.
+  const FB_STALE_MS = 6 * 60 * 1000;
+  const fbEstado = f => (f.analisis_estado === 'procesando' && f.created_at
+    && Date.now() - new Date(f.analisis_at || f.created_at).getTime() > FB_STALE_MS) ? 'error' : f.analisis_estado;
+
+  async function fbGuardarAnalisis(id, campos) {
+    if (pool) {
+      const ks = Object.keys(campos);
+      const sets = ks.map((k, i) => `${k}=$${i + 2}${k === 'propuesta' ? '::jsonb' : ''}`).join(', ');
+      await pool.query(`UPDATE ${T.feedback} SET ${sets} WHERE id=$1`,
+        [id, ...ks.map(k => (k === 'propuesta' && campos[k] != null ? JSON.stringify(campos[k]) : campos[k]))]);
+    } else {
+      const f = mem.feedback.find(x => x.id === id);
+      if (f) Object.assign(f, campos);
+    }
+  }
+
+  async function fbAnalizar(id) {
+    try {
+      const f = pool ? (await pool.query(`SELECT * FROM ${T.feedback} WHERE id=$1`, [id])).rows[0] : mem.feedback.find(x => x.id === id);
+      if (!f) return;
+      const ctx = await fbContexto(Number(f.vacancy_id), Number(f.session_id) || null);
+      if (!ctx || ctx.error) { await fbGuardarAnalisis(id, { analisis_estado: 'error', analisis_error: (ctx && ctx.error) || 'La vacante ya no existe.' }); return; }
+      const out = await pedirJson(buildFeedbackPrompt(f.texto, {
+        cargo: ctx.v.title, empresa: ctx.v.company_name, candidato: ctx.sesion && ctx.sesion.candidate,
+        requisitos: ctx.requisitos, perfil: Array.isArray(ctx.v.perfil) ? ctx.v.perfil : [], niveles: ctx.niveles,
+        motivos: FB.MOTIVOS_FEEDBACK,
+      }), { etiqueta: 'feedback', maxTokens: 2500 });
+      if (out.error) { await fbGuardarAnalisis(id, { analisis_estado: 'error', analisis_error: out.error }); return; }
+      const d = out.datos || {};
+      const idx = Number(d.requisito_indice);
+      const req0 = idx >= 1 && idx <= ctx.requisitos.length ? ctx.requisitos[idx - 1] : null;
+      const prop = d.propuesta && typeof d.propuesta === 'object'
+        ? { ...d.propuesta, requirement_id: req0 ? req0.id : d.propuesta.requirement_id } : null;
+      const n = FB.normalizarFeedback({
+        motivo: FB.CLAVES_MOTIVO.includes(d.motivo) ? d.motivo : 'otro', requirement_id: req0 ? req0.id : null,
+        cita: d.cita || String(f.texto).slice(0, 600), resumen: d.resumen, pregunta: d.pregunta, propuesta: prop,
+      }, { requisitos: ctx.requisitos, con_sesion: !!ctx.sesion, nivel: req0 && ctx.sesion ? ctx.nivelDe(req0.id) : null });
+      if (n.error) { await fbGuardarAnalisis(id, { analisis_estado: 'error', analisis_error: 'Claude no devolvió algo que se pueda usar. Vuelve a intentarlo.' }); return; }
+      await fbGuardarAnalisis(id, {
+        motivo: n.motivo, requirement_id: n.requirement_id, requisito_texto: n.requisito_texto, cita: n.cita || null,
+        resumen: n.resumen || null, pregunta: n.pregunta || null, nivel_wei: n.nivel_wei, lectura: n.lectura,
+        propuesta: n.propuesta, propuesta_estado: n.propuesta_estado, analisis_estado: 'lista', analisis_error: null,
+      });
+    } catch (e) {
+      console.error('[verificacion/feedback·analizar]', e.message);
+      try { await fbGuardarAnalisis(id, { analisis_estado: 'error', analisis_error: 'No se pudo analizar. El detalle quedó en el registro del servidor.' }); } catch (e2) {}
+    }
+  }
+
+  r.post('/api/feedback', async (req, res) => {
+    try {
+      const b = req.body || {};
+      const texto = clean(b.texto);
+      if (texto.length < 10) return res.status(400).json({ error: 'Pega lo que dijo el cliente.' });
+      if (texto.length > 12000) return res.status(400).json({ error: 'Es demasiado texto: pega solo la parte en que el cliente explica por qué no avanzó.' });
+      const vid = Number(b.vacancy_id), sid = Number(b.session_id) || null;
+      const ctx = await fbContexto(vid, sid);
+      if (!ctx) return res.status(404).json({ error: 'not found' });
+      if (ctx.error) return res.status(400).json({ error: ctx.error });
+      if (sid && !ctx.sesion) return res.status(404).json({ error: 'not found' });
+      const quien = clean(b.registrado_por).slice(0, 80) || null;
+      let id;
+      if (pool) {
+        const q = await pool.query(`INSERT INTO ${T.feedback} (vacancy_id, session_id, texto, registrado_por, analisis_estado, analisis_at)
+                                    VALUES ($1,$2,$3,$4,'procesando',NOW()) RETURNING id`, [vid, sid, texto, quien]);
+        id = q.rows[0].id;
+      } else {
+        id = nextId();
+        mem.feedback.push({ id, vacancy_id: vid, session_id: sid, texto, registrado_por: quien, analisis_estado: 'procesando',
+                            analisis_at: new Date().toISOString(), created_at: new Date().toISOString() });
+      }
+      res.status(202).json({ ok: true, id, analisis_estado: 'procesando' });
+      fbAnalizar(id);
+    } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
+  });
+
+  r.post('/api/feedback/:id/reanalizar', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const f = pool ? (await pool.query(`SELECT * FROM ${T.feedback} WHERE id=$1`, [id])).rows[0] : mem.feedback.find(x => x.id === id);
+      if (!f) return res.status(404).json({ error: 'not found' });
+      if (f.propuesta_estado === 'aceptada') return res.status(409).json({ error: 'Su ajuste ya se aplicó a la vacante: no se vuelve a analizar.' });
+      await fbGuardarAnalisis(id, { analisis_estado: 'procesando', analisis_error: null, analisis_at: new Date().toISOString() });
+      res.status(202).json({ ok: true, analisis_estado: 'procesando' });
+      fbAnalizar(id);
+    } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
+  });
+
+  // Aceptar o descartar el ajuste propuesto. Al aceptar se puede mandar la propuesta editada.
+  r.post('/api/feedback/:id/propuesta', async (req, res) => {
+    try {
+      const id = Number(req.params.id), b = req.body || {};
+      const accion = b.accion === 'aceptar' ? 'aceptar' : b.accion === 'descartar' ? 'descartar' : null;
+      if (!accion) return res.status(400).json({ error: 'accion: aceptar o descartar' });
+      const f = pool ? (await pool.query(`SELECT * FROM ${T.feedback} WHERE id=$1`, [id])).rows[0] : mem.feedback.find(x => x.id === id);
+      if (!f) return res.status(404).json({ error: 'not found' });
+      if (f.propuesta_estado !== 'pendiente') return res.status(409).json({ error: 'Ese ajuste ya se resolvió.' });
+      const ctx = await fbContexto(Number(f.vacancy_id), null);
+      if (!ctx) return res.status(404).json({ error: 'La vacante ya no existe.' });
+      let p = f.propuesta;
+      if (accion === 'aceptar') {
+        p = FB.normalizarPropuesta(b.propuesta && typeof b.propuesta === 'object' ? { ...f.propuesta, ...b.propuesta, tipo: f.propuesta.tipo } : f.propuesta,
+                                   { lectura: f.lectura, requisitos: ctx.requisitos });
+        if (!p) return res.status(400).json({ error: 'El ajuste quedó incompleto o el requisito ya no existe en la vacante.' });
+        if (p.tipo === 'requisito' && ctx.requisitos.length >= MAX_REQ) {
+          return res.status(409).json({ error: `La vacante ya tiene ${MAX_REQ} requisitos excluyentes. Edítala para cambiar uno por este.`, motivo: 'tope' });
+        }
+        await aplicarPropuesta(Number(f.vacancy_id), p, ctx);
+      }
+      const estado = accion === 'aceptar' ? 'aceptada' : 'descartada';
+      if (pool) {
+        await pool.query(`UPDATE ${T.feedback} SET propuesta=$2::jsonb, propuesta_estado=$3, propuesta_at=NOW() WHERE id=$1`, [id, JSON.stringify(p), estado]);
+      } else Object.assign(f, { propuesta: p, propuesta_estado: estado, propuesta_at: new Date().toISOString() });
+      res.json({ ok: true, propuesta: p, propuesta_estado: estado });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Lo mismo que hace la pantalla de editar vacante, pero de un solo cambio. Lo emitido no se
+  // toca: cada acta está congelada en su snapshot.
+  async function aplicarPropuesta(vid, p, ctx) {
+    if (p.tipo === 'endurecer') {
+      const det = p.detalle ? [p.detalle] : [], sen = p.senal ? [p.senal] : [];
+      if (pool) {
+        await pool.query(`UPDATE ${T.requirements} SET criterio=COALESCE(NULLIF($2,''), criterio),
+                            detalles=COALESCE(detalles,'[]'::jsonb) || $3::jsonb, senales=COALESCE(senales,'[]'::jsonb) || $4::jsonb
+                          WHERE id=$1 AND vacancy_id=$5`, [p.requirement_id, p.criterio || '', JSON.stringify(det), JSON.stringify(sen), vid]);
+      } else {
+        const q = mem.requirements.find(x => x.id === p.requirement_id && x.vacancy_id === vid);
+        if (q) { if (p.criterio) q.criterio = p.criterio; q.detalles = [...(q.detalles || []), ...det]; q.senales = [...(q.senales || []), ...sen]; }
+      }
+    } else if (p.tipo === 'requisito') {
+      if (pool) {
+        await pool.query(`INSERT INTO ${T.requirements} (vacancy_id, ord, text, kind, criterio, detalles, q_escena, senales, c_escena)
+                          VALUES ($1, (SELECT COALESCE(MAX(ord),-1)+1 FROM ${T.requirements} WHERE vacancy_id=$1), $2, 'excluyente', $3, '[]'::jsonb, $4, '[]'::jsonb, $5)`,
+                         [vid, p.texto, p.criterio || null, p.pregunta_escena || null, p.criterio_escena || null]);
+      } else {
+        mem.requirements.push({ id: nextId(), vacancy_id: vid, ord: ctx.requisitos.length, text: p.texto, kind: 'excluyente', criterio: p.criterio,
+                                detalles: [], senales: [], q_escena: p.pregunta_escena, c_escena: p.criterio_escena });
+      }
+    } else if (p.tipo === 'rasgo') {
+      const { tipo, ...rasgo } = p;
+      if (pool) {
+        await pool.query(`UPDATE ${T.vacancies} SET perfil=COALESCE(perfil,'[]'::jsonb) || $2::jsonb, updated_at=NOW() WHERE id=$1`, [vid, JSON.stringify([rasgo])]);
+      } else {
+        const v = mem.vacancies.find(x => x.id === vid);
+        v.perfil = [...(v.perfil || []), rasgo];
+      }
+    }
+  }
+
+  r.delete('/api/feedback/:id', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (pool) {
+        const q = await pool.query(`DELETE FROM ${T.feedback} WHERE id=$1 RETURNING id`, [id]);
+        if (!q.rows.length) return res.status(404).json({ error: 'not found' });
+      } else {
+        const i = mem.feedback.findIndex(x => x.id === id);
+        if (i < 0) return res.status(404).json({ error: 'not found' });
+        mem.feedback.splice(i, 1);
+      }
+      res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
@@ -1700,7 +1958,8 @@ ${!code ? `
       await opsListo;
       const opsInd = OPS.indicadoresOps(await ops.listar('procesos'), await ops.listar('saas'), filas,
         { evaluador: clean(q.evaluador), fecha: clean(q.fecha) || null });
-      res.json({ ...base, ops: opsInd });
+      const fbInd = FB.indicadoresFeedback(await fbListar(), filas, { evaluador: clean(q.evaluador) });
+      res.json({ ...base, ops: opsInd, feedback: fbInd });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
@@ -1720,8 +1979,14 @@ ${!code ? `
         const ctx = { kind: row.kind, faceVerdict: row.face_verdict, diditStatus: row.didit_status, idNote: row.id_note };
         const { shot, ...sinImagen } = row;   // la imagen no viaja en el JSON
         const tr = estadoTranscripcion(row);
+        let rechazos = [];
+        if (row.vacancy_id) {
+          const qv = await pool.query(`SELECT id, ai_raw, created_at FROM ${T.vacancies} WHERE id=$1`, [row.vacancy_id]);
+          const qr = await pool.query(`SELECT id FROM ${T.requirements} WHERE vacancy_id=$1 ORDER BY ord, id`, [row.vacancy_id]);
+          if (qv.rows.length) rechazos = rechazosDe(qv.rows[0], qr.rows, await fbListar({ vacancy_id: row.vacancy_id }));
+        }
         return res.json({ ...sinImagen, tiene_captura: !!shot, identidad: estadoIdentidad(ctx),
-                          documento: tipoDocumento(ctx), ratings: q.rows,
+                          documento: tipoDocumento(ctx), ratings: q.rows, rechazos,
                           transcript_status: tr.estado, transcript_error: tr.error });
       }
       const s = mem.sessions.find(x => x.id === id);
@@ -1729,6 +1994,7 @@ ${!code ? `
       const v = mem.vacancies.find(x => x.id === s.vacancy_id);
       const tr = estadoTranscripcion(s);
       res.json({ ...s, vacancy_title: v && v.title, company_name: v && v.company_name,
+                 rechazos: v ? rechazosDe(v, mem.requirements.filter(q => q.vacancy_id === v.id).sort((a, b) => a.ord - b.ord), await fbListar({ vacancy_id: v.id })) : [],
                  ratings: mem.ratings.filter(x => x.session_id === id),
                  transcript_status: tr.estado, transcript_error: tr.error });
     } catch (e) { res.status(500).json({ error: e.message }); }

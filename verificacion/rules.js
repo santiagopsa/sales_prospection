@@ -369,7 +369,8 @@ function estadisticas(sesiones, { evaluador = '', ahora = Date.now(), semanas = 
 // Qué pasó con el candidato después de enviarle el informe al cliente. Es lo que mide la
 // calidad del headhunting: de los enviados, cuántos quiso entrevistar el cliente y cuántos
 // contrató. Sin marcar = no sabemos. No es parte del informe firmado.
-const RESULTADOS_CLIENTE = ['Lo entrevistó', 'Lo contrató', 'No lo entrevistó', 'No sabemos', 'No se le envió'];
+// 'No avanzó' = lo entrevistó y no siguió: es cuando se pega lo que dijo el cliente (feedback.js).
+const RESULTADOS_CLIENTE = ['Lo entrevistó', 'No avanzó', 'Lo contrató', 'No lo entrevistó', 'No sabemos', 'No se le envió'];
 const DIAS_SEGUIMIENTO = 3;
 
 // Por qué se descarta un candidato que no va a seguir en la verificación. Se descarta para que

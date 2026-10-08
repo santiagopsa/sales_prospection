@@ -790,13 +790,13 @@ async function loadTablero(){
     sel.innerHTML = `<option value="">Todo el equipo</option>` + evs.map(e => `<option value="${esc(e.nombre)}">${esc(e.nombre)} · ${e.n}</option>`).join('');
     if(ev && evs.some(e => e.clave === claveEval(ev))) sel.value = evs.find(e => e.clave === claveEval(ev)).nombre;
     else if(ev){ lsSet(LS_EVAL, ''); sel.value = ''; if(st && st.filtro){ TB.st = await api('/api/tablero').catch(() => st); } }
-    pintarPulso(); pintarIndicadores(); pintarCola(); pintarVacantes(); pintarVerificaciones();
+    pintarAjustes(); pintarPulso(); pintarIndicadores(); pintarCola(); pintarVacantes(); pintarVerificaciones();
 
     // Mientras haya un análisis en curso, el tablero se refresca solo: es la forma de que el
     // reclutador vea "lista para calificar" sin recargar. Cuando no hay nada procesando, no
     // se pregunta más — un tablero que consulta cada cinco segundos sin motivo es ruido.
     clearTimeout(TABLERO_TIMER);
-    if(ss.some(s => estadoDe(s) === 'analizando')){
+    if(ss.some(s => estadoDe(s) === 'analizando') || (st && st.feedback_procesando)){
       TABLERO_TIMER = setTimeout(() => { if($('#vTablero').classList.contains('on')) loadTablero(); }, 6000);
     }
   }catch(e){
@@ -1052,11 +1052,38 @@ function cuerpoHeadhunting(o, meta){
       <p class="hint">${cl.tier['Sin tier'] ? `<b>${cl.tier['Sin tier']} procesos abiertos no tienen tier</b>: sin él no se sabe cuánto esfuerzo merecen. ` : ''}Pérdidas externas evitables en 90 días: <b>${cl.externas_evitables}</b>${cl.sin_causa ? ` · cerrados sin causa anotada: <b>${cl.sin_causa}</b>` : ''}.</p>
     </div>
 
+    ${cardFeedbackInd(IND.d.feedback)}
+
     <div class="card">
       <div class="cardhd"><h2>Últimas 8 semanas</h2><span class="cs">clic en una semana para verla</span></div>
       ${tendenciaHtml(h.tendencia, [{k: 'enviados', l: 'Enviados'}, {k: 'entrevistas', l: 'Entrevistas'}, {k: 'contrataciones', l: 'Contrataciones'}, {k: 'nuevos', l: 'Procesos nuevos'}, {k: 'promesa', l: 'Primer candidato ≤ 2 días', pct: true}])}
     </div>
     <p class="hint fuentes">Cómo se mide: enviados = informes emitidos en la consola (salvo los marcados "No se le envió"); entrevista y contratación = lo que se anota en cada informe; efectividad y recurrencia = Procesos. Referencias: Bullhorn (KPIs de staffing), Recruiterflow (conversión en búsquedas contingentes), SHRM (calidad de contratación).</p>`;
+}
+// Cuando el cliente dice que no: el acierto de la verificación (de lo entrevistado, cuánto NO se
+// cayó por algo que dimos por cumplido), las lecturas y los motivos (feedback.js).
+function cardFeedbackInd(f){
+  if(!f) return '';
+  const L = f.lecturas || {};
+  const lect = Object.keys(FB_LECTURA).filter(k => L[k]).map(k => `<span class="tag ${FB_LECTURA[k].tag}">${L[k]} · ${FB_LECTURA[k].tx}</span>`).join(' ');
+  return `<div class="card">
+    <div class="cardhd"><h2>Cuando el cliente dice que no</h2><span class="cs">últimos ${f.dias} días</span></div>
+    <div class="itasas">
+      <div class="itasa"><b class="${f.acierto.pct == null ? '' : f.acierto.pct >= 85 ? 'ok' : f.acierto.pct < 70 ? 'no' : 'par'}">${f.acierto.pct == null ? '—' : f.acierto.pct + '%'}</b>
+        <span>Acierto de la verificación</span><small>${f.acierto.den ? `${f.acierto.num} de ${f.acierto.den} entrevistados no se cayeron por algo que dimos por cumplido` : 'sin entrevistados con respuesta todavía'}</small></div>
+      <div class="itasa"><b>${f.no_avanzaron}</b><span>Entrevistados que no avanzaron</span><small>${f.sin_feedback ? `${f.sin_feedback} sin lo que dijo el cliente` : 'todos con lo que dijo el cliente'}</small></div>
+      <div class="itasa"><b>${f.propuestas_pendientes}</b><span>Ajustes por decidir</span><small>${f.ajustes_aceptados} aplicados a vacantes en ${f.dias} días</small></div>
+    </div>
+    ${lect ? `<p class="hint" style="margin-top:12px">${lect}</p>` : ''}
+    ${f.motivos.length ? `<div class="tabla-env"><table class="itabla">
+      <thead><tr><th>Motivo</th><th class="num">Veces</th></tr></thead>
+      <tbody>${f.motivos.map(m => `<tr><td>${esc(m.l)}</td><td class="num">${m.n}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${f.empresas.length ? `<div class="tabla-env" style="margin-top:10px"><table class="itabla">
+      <thead><tr><th>Empresa</th><th class="num">Rechazos</th><th class="num">Dijimos que cumplía</th><th class="num">No estaba en la vacante</th><th>Motivo principal</th></tr></thead>
+      <tbody>${f.empresas.map(e => `<tr><td><b>${esc(e.empresa)}</b></td><td class="num">${e.n}</td><td class="num">${e.desacuerdo}</td><td class="num">${e.oculto}</td><td>${esc(e.motivo_principal)}</td></tr>`).join('')}</tbody></table></div>`
+      : `<p class="hint">Cuando un candidato no avanza, marca “No avanzó” y pega lo que dijo el cliente: de ahí sale esto.</p>`}
+    <p class="hint">“Dijimos que cumplía” es el error que más cuesta: el informe dio el requisito por cumplido y el cliente dijo que no. Cada uno trae un ajuste a la vacante en el tablero.</p>
+  </div>`;
 }
 function cuerpoSaaS(o){
   const q = o.saas, c = q.calidad, cl = q.cliente, v = q.velocidad, w = q.semana, p = q.previa;
@@ -1501,6 +1528,7 @@ async function verSesion(id){
       esperando: s.status === 'esperando',
       transEstado: s.transcript_status || null, transError: s.transcript_error || null,
       rep: s.repregunta || null,
+      rechazos: s.rechazos || [],
       fin: s.status === 'issued', soloLectura: true,
     };
     if(s.status === 'issued'){ verActa(); }
@@ -1592,6 +1620,162 @@ function verBorrador(s){
     toast('Sesión retomada');
   });
   go('vActa');
+}
+
+
+/* ===================== lo que dice el cliente =====================
+   Para Wei es un solo paso: pegar lo que dijo el cliente (el mensaje tal cual, o lo que le
+   dijo en la llamada) y seguir. El servidor lo analiza en segundo plano (feedback.js): saca el
+   motivo, a qué requisito apunta y lo cruza con el nivel que dio la verificación. Si propone
+   un ajuste a la vacante, aparece arriba en el tablero con dos botones: aplicar o descartar. */
+const FB_LECTURA = {
+  desacuerdo:    {tag:'r',   tx:'DIJIMOS QUE CUMPLÍA',     d:'La verificación lo dio por cumplido y el cliente dijo que no: hay que endurecer el criterio.'},
+  advertido:     {tag:'n',   tx:'YA LO ADVERTÍAMOS',       d:'El informe ya lo ponía por debajo de cumple: no falló la verificación, se envió un parcial.'},
+  sin_medir:     {tag:'n',   tx:'SIN MEDIR',               d:'Ese requisito no quedó medido en la verificación.'},
+  oculto:        {tag:'a',   tx:'NO ESTABA EN LA VACANTE', d:'Lo que el cliente pidió no está en los requisitos: conviene agregarlo.'},
+  no_calidad:    {tag:'n',   tx:'SALARIO O DISPONIBILIDAD', d:'No es de calidad: se pregunta antes de enviar.'},
+  cambio_perfil: {tag:'a',   tx:'CAMBIÓ EL PERFIL',        d:'El cliente cambió lo que busca: la vacante tiene que reflejarlo.'},
+  general:       {tag:'acc', tx:'SOBRE LA VACANTE',        d:'Feedback sobre un requisito, sin un candidato con qué comparar.'},
+};
+const FB_MOTIVO = {requisito:'Un requisito técnico', seniority:'Seniority o alcance', comunicacion:'Comunicación o inglés',
+  conducta:'Conducta o encaje', salario:'Salario o expectativas', disponibilidad:'Disponibilidad o ubicación',
+  cambio_perfil:'El cliente cambió el perfil', otro:'Otro'};
+
+function pegarFeedback({vacancy_id, session_id = null, candidato = '', candidatos = null} = {}){
+  return new Promise(ok => {
+    const box = $('#fbModal'), ta = $('#fbInput'), sel = $('#fbCand'), si = $('#fbSi');
+    $('#fbTitulo').textContent = candidato ? `Por qué no avanzó ${candidato.split(' ')[0]}` : 'Lo que dijo el cliente';
+    ta.value = '';
+    const conSel = !session_id && Array.isArray(candidatos) && candidatos.length;
+    sel.style.display = conSel ? 'block' : 'none';
+    if(conSel) sel.innerHTML = `<option value="">Sobre la vacante en general</option>` +
+      candidatos.map(c => `<option value="${c.id}">${esc(c.candidate)}</option>`).join('');
+    const revisar = () => { si.disabled = ta.value.trim().length < 10; };
+    ta.oninput = revisar; revisar();
+    const cerrar = v => { box.classList.remove('on'); si.onclick = $('#fbNo').onclick = ta.oninput = null; ok(v); };
+    $('#fbNo').onclick = () => cerrar(false);
+    si.onclick = async () => {
+      si.disabled = true;
+      try{
+        await api('/api/feedback', {method:'POST', body:{vacancy_id, session_id: session_id || (conSel && Number(sel.value)) || null,
+                                                         texto: ta.value.trim(), registrado_por: evalActual() || ''}});
+        toast('Guardado. Claude lo analiza; si hay que ajustar la vacante, aparece arriba en el tablero.');
+        cerrar(true);
+      }catch(e){ toast('No se guardó: ' + e.message); si.disabled = false; }
+    };
+    box.classList.add('on');
+    (conSel ? sel : ta).focus();
+  });
+}
+
+// El ajuste, dicho en una frase y con lo que cambia exactamente.
+function ajusteHtml(p, f){
+  if(!p) return '';
+  if(p.tipo === 'endurecer') return `<div class="fbaj"><div class="fbajt">Endurecer el requisito «${esc(f.requisito_texto || '')}»</div>
+    ${p.criterio ? `<div class="fbajc"><span>Qué debe poder narrar</span>${esc(p.criterio)}</div>` : ''}
+    ${p.detalle ? `<div class="fbajc"><span>Detalle verificable nuevo</span>${esc(p.detalle.detalle)} → <b>${esc(p.detalle.respuesta_esperada || '')}</b></div>` : ''}
+    ${p.senal ? `<div class="fbajc"><span>Señal nueva</span>${esc(p.senal)}</div>` : ''}</div>`;
+  if(p.tipo === 'requisito') return `<div class="fbaj"><div class="fbajt">Agregar el requisito «${esc(p.texto)}»</div>
+    ${p.criterio ? `<div class="fbajc"><span>Qué debe poder narrar</span>${esc(p.criterio)}</div>` : ''}
+    ${p.pregunta_escena ? `<div class="fbajc"><span>La pregunta</span>“${esc(p.pregunta_escena)}”</div>` : ''}</div>`;
+  if(p.tipo === 'rasgo') return `<div class="fbaj"><div class="fbajt">Agregar a la conducta: «${esc(p.rasgo)}»</div>
+    ${p.pregunta ? `<div class="fbajc"><span>La pregunta</span>“${esc(p.pregunta)}”</div>` : ''}</div>`;
+  return '';
+}
+
+// Una fila de feedback: en el tablero (con la vacante) o dentro de la vacante (sin repetirla).
+function filaFeedback(f, {conVacante = true} = {}){
+  const quien = f.candidate ? esc(f.candidate) : 'Sobre la vacante';
+  const donde = conVacante ? `<b>${esc(f.vacancy_title || 'Vacante')}</b>${f.company_name ? ' · ' + esc(f.company_name) : ''} · ${quien}` : `<b>${quien}</b>`;
+  const cuando = f.created_at ? haceCuanto(f.created_at) : '';
+  if(f.analisis_estado === 'procesando') return `<div class="fbrow" data-fb="${f.id}">
+    <div class="fbhd"><span class="tag acc">⏳ ANALIZANDO</span><span class="fbq">${donde}</span><span class="cwhen">${esc(cuando)}</span></div>
+    ${f.texto_corto || f.texto ? `<p class="fbcita">“${esc((f.texto_corto || f.texto).slice(0, 280))}”</p>` : ''}</div>`;
+  if(f.analisis_estado === 'error') return `<div class="fbrow" data-fb="${f.id}">
+    <div class="fbhd"><span class="tag r">NO SE PUDO ANALIZAR</span><span class="fbq">${donde}</span><span class="cwhen">${esc(cuando)}</span></div>
+    <p class="fbcita">“${esc((f.texto_corto || f.texto || '').slice(0, 280))}”</p>
+    <p class="hint" style="margin:4px 0 0">${esc(f.analisis_error || 'Vuelve a intentarlo.')} Lo que pegaste está guardado.</p>
+    <div class="fbbtns"><button class="pri" data-fbre="${f.id}" type="button">Reintentar</button><button data-fbdel="${f.id}" type="button">Borrar</button></div></div>`;
+  const L = FB_LECTURA[f.lectura] || {tag:'n', tx:'', d:''};
+  const pend = f.propuesta_estado === 'pendiente';
+  return `<div class="fbrow" data-fb="${f.id}">
+    <div class="fbhd"><span class="tag ${L.tag}">${L.tx}</span><span class="fbq">${donde}</span><span class="cwhen">${esc(cuando)}</span></div>
+    <p class="fbcita">“${esc(f.cita || f.resumen || '')}”</p>
+    <p class="fbmeta">${esc(FB_MOTIVO[f.motivo] || '')}${f.requisito_texto ? ' · ' + esc(f.requisito_texto) : ''}${f.nivel_wei ? ` · la verificación le dio <b>${f.nivel_wei}</b>` : ''} — ${esc(L.d)}</p>
+    ${f.pregunta ? `<p class="fbmeta">A los siguientes se les pregunta: “${esc(f.pregunta)}”</p>` : ''}
+    ${pend ? ajusteHtml(f.propuesta, f) + `<div class="fbbtns">
+        <button class="pri" data-fbok="${f.id}" type="button">Aplicar a la vacante</button>
+        <button data-fbno="${f.id}" type="button">Descartar</button>
+        ${conVacante && f.vacancy_id ? `<button class="linkbtn" data-fbvac="${f.vacancy_id}" type="button">Ver la vacante</button>` : ''}</div>`
+      : f.propuesta_estado === 'aceptada' ? `<p class="fbmeta ok">✓ Ajuste aplicado a la vacante.</p>`
+      : f.propuesta_estado === 'descartada' ? `<p class="fbmeta">Ajuste descartado.</p>` : ''}
+  </div>`;
+}
+
+// Un solo manejador para los botones de feedback, esté donde esté la lista.
+function engancharFeedback(el, alTerminar){
+  if(!el || el.dataset.fbOn) return;
+  el.dataset.fbOn = '1';
+  el.addEventListener('click', async e => {
+    const b = e.target.closest('[data-fbok],[data-fbno],[data-fbre],[data-fbdel],[data-fbvac]');
+    if(!b) return;
+    if(b.dataset.fbvac){ verVacante(+b.dataset.fbvac); return; }
+    b.disabled = true;
+    try{
+      if(b.dataset.fbok){
+        await api(`/api/feedback/${b.dataset.fbok}/propuesta`, {method:'POST', body:{accion:'aceptar'}});
+        toast('Aplicado: rige para los siguientes candidatos de la vacante.');
+      } else if(b.dataset.fbno){
+        await api(`/api/feedback/${b.dataset.fbno}/propuesta`, {method:'POST', body:{accion:'descartar'}});
+        toast('Ajuste descartado.');
+      } else if(b.dataset.fbre){
+        await api(`/api/feedback/${b.dataset.fbre}/reanalizar`, {method:'POST', body:{}});
+        toast('Analizando de nuevo…');
+      } else if(b.dataset.fbdel){
+        if(!await preguntar('¿Borrar este feedback?', 'Se pierde lo que se pegó.', 'Borrar', 'Cancelar')){ b.disabled = false; return; }
+        await api(`/api/feedback/${b.dataset.fbdel}`, {method:'DELETE'});
+        toast('Borrado.');
+      }
+      alTerminar();
+    }catch(err){ toast(err.message); b.disabled = false; }
+  });
+}
+
+function pintarAjustes(){
+  const st = TB.st || {}, xs = st.ajustes || [];
+  const card = $('#ajustesCard');
+  if(!card) return;
+  card.hidden = !xs.length;
+  if(!xs.length) return;
+  const pend = xs.filter(x => x.propuesta_estado === 'pendiente').length;
+  $('#ajustesCount').textContent = [pend && `${pend} por decidir`, xs.length - pend && `${xs.length - pend} sin analizar`].filter(Boolean).join(' · ');
+  $('#ajustesList').innerHTML = xs.slice(0, 8).map(f => filaFeedback(f)).join('') +
+    (xs.length > 8 ? `<p class="hint">Y ${xs.length - 8} más: están en cada vacante.</p>` : '');
+  engancharFeedback($('#ajustesList'), loadTablero);
+}
+
+// En la vacante: lo del levantamiento, todo lo que ha dicho el cliente y el botón para pegar.
+function tarjetaFeedbackVacante(v){
+  const fb = v.feedback || [];
+  const prev = (v.rechazos || []).find(x => x.origen === 'levantamiento');
+  return `<div class="card" id="vacFeedback">
+    <div class="cardhd"><h2>Lo que dice el cliente</h2>
+      <button class="tbtn" id="btnPegarFb" type="button">Pegar lo que dijo el cliente</button></div>
+    ${prev ? `<div class="fbrow"><div class="fbhd"><span class="tag n">EN EL LEVANTAMIENTO</span></div><p class="fbcita">“${esc(prev.cita)}”</p></div>` : ''}
+    ${fb.length ? fb.map(f => filaFeedback(f, {conVacante:false})).join('')
+      : `<p class="hint" style="margin:0">Cuando el cliente diga por qué no avanzó un candidato, pégalo aquí tal cual. Lo que rechace vuelve a la guía de los siguientes candidatos.</p>`}
+  </div>`;
+}
+
+// Lo que el cliente ya rechazó, en la guía de la entrevista: en la apertura, todo; en cada
+// requisito, lo que apunta a ese requisito.
+function rechazosGuia(lista, titulo){
+  if(!lista || !lista.length) return '';
+  return `<div class="rechbox"><div class="dt">${titulo}</div>
+    ${lista.slice(0, 5).map(x => `<div class="rech"><span class="rechm">${esc(x.motivo_txt || '')}</span>
+      <span class="rechc">“${esc(x.resumen || x.cita || '')}”</span>
+      ${x.pregunta ? `<span class="rechp">Pregúntalo: “${esc(x.pregunta)}”</span>` : ''}</div>`).join('')}
+  </div>`;
 }
 
 /* ===================== levantamiento ===================== */
@@ -1969,6 +2153,7 @@ function candidatosVacante(v){
   </div>`;
 }
 
+let VAC_TIMER = null;
 async function verVacante(id){
   overlay(true, 'Abriendo la vacante…', '');
   try{
@@ -1988,6 +2173,8 @@ async function verVacante(id){
       </div>
 
       ${candidatosVacante(v)}
+
+      ${tarjetaFeedbackVacante(v)}
 
       <div class="card">
         <div class="cardhd">
@@ -2046,6 +2233,15 @@ async function verVacante(id){
       if((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-abrir]')){ e.preventDefault(); verSesion(+e.target.dataset.abrir); }
     });
     $('#btnNuevaSesion').addEventListener('click', () => setupSesion(v));
+    $('#btnPegarFb').addEventListener('click', async () => {
+      const cands = (v.candidatos || []).filter(c => !descartada(c));
+      if(await pegarFeedback({vacancy_id: v.id, candidatos: cands})) verVacante(v.id);
+    });
+    engancharFeedback($('#vacFeedback'), () => verVacante(v.id));
+    // Si hay algo analizándose, la vacante se refresca sola hasta que termine.
+    clearTimeout(VAC_TIMER);
+    if((v.feedback || []).some(f => f.analisis_estado === 'procesando'))
+      VAC_TIMER = setTimeout(() => { if($('#vVacante').classList.contains('on') && VAC && VAC.id === v.id) verVacante(v.id); }, 3000);
     const arriba = $('#btnVerificarArriba');
     if(arriba) arriba.addEventListener('click', () => setupSesion(v));
     $('#btnEditarVac').addEventListener('click', () => editarVacante(v));
@@ -2489,6 +2685,7 @@ function setupSesion(v){
         cli: v.company_name || '', eval: $('#sEval').value.trim(), mode, kind,
         mail: $('#sMail').value.trim(), ident: null,
         reqs: (v.requirements||[]).map(r => ({rid:r.id, n:r.text, lvl:0, ev:'', r})),
+        rechazos: v.rechazos || [],
         // Dos listas distintas: lo que el CARGO pide (viene de la vacante, no cambia) y lo
         // que la SESIÓN observó (lo llena la transcripción y lo confirma el evaluador).
         pf: (v.perfil || []).map(x => ({...x})),
@@ -2658,8 +2855,8 @@ function preguntar(titulo, texto, si = 'Guardar y salir', no = 'Seguir aquí', c
 /* Qué pasó con el candidato en el cliente, después de enviarle el informe. Es lo que mide la
    calidad del headhunting (de los enviados, cuántos entrevistó y cuántos contrató). Se anota
    con una lista en la fila; sin marcar = no sabemos. No toca el informe firmado. */
-const RESULTADOS_CLIENTE = ['Lo entrevistó', 'Lo contrató', 'No lo entrevistó', 'No sabemos', 'No se le envió'];
-const CLASE_RESULTADO = {'Lo entrevistó': 'ok', 'Lo contrató': 'ok', 'No lo entrevistó': 'no', 'No sabemos': 'ns', 'No se le envió': 'ns'};
+const RESULTADOS_CLIENTE = ['Lo entrevistó', 'No avanzó', 'Lo contrató', 'No lo entrevistó', 'No sabemos', 'No se le envió'];
+const CLASE_RESULTADO = {'Lo entrevistó': 'ok', 'No avanzó': 'no', 'Lo contrató': 'ok', 'No lo entrevistó': 'no', 'No sabemos': 'ns', 'No se le envió': 'ns'};
 function selectCliente(s){
   const v = s.cliente_resultado || '';
   return `<select class="clires ${CLASE_RESULTADO[v] || 'vacio'}" data-cliente="${s.id}" title="Qué pasó con este candidato en el cliente" aria-label="Qué pasó con ${esc(s.candidate)} en el cliente">
@@ -2677,6 +2874,14 @@ async function guardarResultadoCliente(el){
     el.className = `clires ${CLASE_RESULTADO[v] || 'vacio'}`;
     toast(v ? `Anotado: ${v}.` : 'Quedó sin marcar.');
     if($('#vTablero').classList.contains('on')) pintarCola();
+    // "No avanzó": lo único que se le pide a Wei es pegar lo que dijo el cliente. Puede saltarlo.
+    if(v === 'No avanzó'){
+      const s = [...TB.ss, ...((VAC && VAC.candidatos) || [])].find(x => x.id === id);
+      const vid = (s && s.vacancy_id) || (VAC && VAC.id);
+      if(vid && await pegarFeedback({vacancy_id: vid, session_id: id, candidato: (s && s.candidate) || ''})){
+        if($('#vVacante').classList.contains('on') && VAC) verVacante(VAC.id); else if($('#vTablero').classList.contains('on')) loadTablero();
+      }
+    }
   }catch(e){ toast('No se guardó: ' + e.message); }
 }
 
@@ -2702,6 +2907,10 @@ async function descartarSesion(id, nombre){
     const s = TB.ss.find(x => x.id === id);
     if(s) Object.assign(s, {descartado_at: out.descartado_at, descarte_motivo: out.descarte_motivo, estado_tablero: 'descartado'});
     toast(`Descartado: ${nombre || 'candidato'}. Lo encuentras en “Descartadas”.`);
+    // Si lo descartó el cliente, lo que dijo vale igual que después de un informe.
+    const vid = (s && s.vacancy_id) || (VAC && (VAC.candidatos || []).some(x => x.id === id) && VAC.id);
+    if(r.opcion === 'El cliente lo descartó antes del informe' && vid)
+      await pegarFeedback({vacancy_id: vid, session_id: id, candidato: nombre || ''});
     return true;
   }catch(e){ toast('No se pudo descartar: ' + e.message); return false; }
 }
@@ -2805,6 +3014,8 @@ function render(){
         se guarda de todos modos, para que si avanza a finalista se pueda verificar su identidad
         contra esta cara <b>sin repetir la entrevista</b>.</p>`}
 
+        ${rechazosGuia(S.rechazos, 'Lo que el cliente ya rechazó en esta vacante — tenlo presente')}
+
         <p class="hint"><b>Si algo se sale de lo normal</b> — se niega a encender la cámara, el video se congela cada vez que responde — no confrontes. Regístralo en las señales y sigue.</p>
         <div class="nav"><button class="pri" data-next type="button">Continuar</button></div>
       </div>`;
@@ -2855,6 +3066,7 @@ function render(){
           </div>
         </details>
 
+        ${rechazosGuia((S.rechazos || []).filter(x => x.requisito_indice === f.i + 1), 'El cliente rechazó a alguien por esto')}
         ${cvDeRequisito(r.n)}
         ${dets.length ? `<div class="detbox"><div class="dt">Detalles verificables — compara contra lo que responde</div>
           <div class="dets">${dets.map(d => `<div class="det"><span class="dq">${esc(d.detalle||'')}</span><span class="da">${esc(d.respuesta_esperada||'')}</span></div>`).join('')}</div></div>` : ''}
