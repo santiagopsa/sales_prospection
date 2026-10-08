@@ -174,7 +174,8 @@ async function leadParaMarcar(db, config, { telefono, empresa, contacto, leadId,
     }
   }
   const extra = base && base.extra ? Object.fromEntries(Object.entries(base.extra).filter(([k]) => EXTRA_EMPRESA.includes(k))) : null;
-  const plan = planificar(config, tiempo.fechaBogota(ahora));
+  // Secuencia corta de marcación directa (SECUENCIA_MARCACION_DIRECTA); si no está, la normal.
+  const plan = planificar({ ...config, SECUENCIA_POR_DEFECTO: config.SECUENCIA_MARCACION_DIRECTA || config.SECUENCIA_POR_DEFECTO }, tiempo.fechaBogota(ahora));
   const r = await db.query(
     `WITH nuevo AS (
        INSERT INTO ${T.leads} (empresa, contacto, telefono, telefono_original, fuente, ciudad, extra)

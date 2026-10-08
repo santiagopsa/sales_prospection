@@ -117,7 +117,10 @@ test('integración con Postgres', { skip: !url && 'sin SDR_TEST_DATABASE_URL' },
     assert.strictEqual(n.existente, false);
     const l = (await db.query('SELECT empresa, fuente, telefono FROM sdr.leads WHERE id=$1', [n.lead_id])).rows[0];
     assert.deepStrictEqual(l, { empresa: 'Sin empresa', fuente: 'marcacion directa', telefono: '+573112223344' });
-    assert.strictEqual((await db.query('SELECT COUNT(*)::int AS c FROM sdr.tasks WHERE lead_id=$1', [n.lead_id])).rows[0].c, config.SECUENCIA_POR_DEFECTO.length);
+    // Secuencia corta de marcación directa: dos llamadas, un WhatsApp y un correo (no la de 9 pasos).
+    const tareas = (await db.query('SELECT canal FROM sdr.tasks WHERE lead_id=$1 ORDER BY paso', [n.lead_id])).rows.map(x => x.canal);
+    assert.deepStrictEqual(tareas, config.SECUENCIA_MARCACION_DIRECTA.map(p => p.canal));
+    assert.deepStrictEqual(tareas, ['llamada', 'whatsapp', 'llamada', 'correo']);
     const e = await L.leadParaMarcar(db, config, { telefono: '+57 300 123 4567' });
     assert.strictEqual(e.existente, true);
     assert.strictEqual(e.empresa, 'ACME');

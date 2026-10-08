@@ -2,7 +2,7 @@
 // Comandos de operación de SDR Coach. Todos aceptan --set RUTA=valor para probar un hueco de
 // config.js sin editarlo ni desplegar.
 //
-//   node sdr/cli.js secuencia [--desde 2026-09-21]            fechas de las tareas de un lead nuevo
+//   node sdr/cli.js secuencia [--desde 2026-09-21] [--marcacion]  fechas de las tareas de un lead nuevo (--marcacion: el que Angie agrega desde Marcar)
 //   node sdr/cli.js cola                                        orden de la cola de hoy con el desglose del puntaje
 //   node sdr/cli.js proyeccion                                  plan de la silla vs real, mes a mes (reglas PROYECCION)
 //   node sdr/cli.js embudo                                      deals por etapa del embudo de la ejecutiva (reglas EMBUDO)
@@ -87,8 +87,9 @@ async function main() {
     const tiempo = require('./tiempo');
     const desde = args.desde || tiempo.fechaBogota();
     const dias = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
-    console.log(`\nLead cargado el ${desde} (${dias[tiempo.diaSemana(desde)]}):`);
-    for (const p of planificar(config, desde)) {
+    const cfg = args.marcacion ? { ...config, SECUENCIA_POR_DEFECTO: config.SECUENCIA_MARCACION_DIRECTA || config.SECUENCIA_POR_DEFECTO } : config;
+    console.log(`\nLead ${args.marcacion ? 'agregado desde Marcar' : 'cargado'} el ${desde} (${dias[tiempo.diaSemana(desde)]}):`);
+    for (const p of planificar(cfg, desde)) {
       console.log(`  ${pad(p.paso, 3)} ${pad(CANAL_LABEL[p.canal], 9)} ${p.fecha} ${dias[tiempo.diaSemana(p.fecha)]}  día ${tiempo.diasEntre(tiempo.instante(desde, 12), tiempo.instante(p.fecha, 12))}`);
     }
     return;

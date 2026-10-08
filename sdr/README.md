@@ -336,6 +336,10 @@ S.A.S.), con sus contactos y en qué etapa va cada uno:
 - Sin elegir: si la empresa escrita coincide con una existente se conecta igual (y si el contacto tiene el mismo
   nombre, se le agrega el número); si no existe, se crea. Una empresa en lista negra no se deja crear.
 
+Un contacto creado desde Marcar entra con la secuencia corta `SECUENCIA_MARCACION_DIRECTA` (dos llamadas, un
+WhatsApp y un correo; el paso 1 es la llamada que Angie hace ahí mismo), no con la de 9 pasos de las cargas:
+es alguien que ella ya tenía en la mira, después solo seguimiento. `node sdr/cli.js secuencia --marcacion`.
+
 ## Buscador y respuestas por otros canales
 En la barra hay un buscador (atajo: tecla `/`): empresa, contacto, cargo, correo o teléfono, sin acentos ni
 mayúsculas ("exito" encuentra "Grupo Éxito"; "313 470" encuentra +57 313 470 5454, también en el segundo

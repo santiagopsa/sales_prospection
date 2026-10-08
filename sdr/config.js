@@ -32,6 +32,18 @@ module.exports = {
     { canal: 'correo',   dias: 0 },
   ],
 
+  // Qué mueve: la secuencia de un contacto que Angie agrega a mano desde "Marcar" (fuente
+  // "marcacion directa"). Corta a propósito: es alguien que ella ya tiene en la mira y llama en el
+  // momento; después solo seguimiento. El paso 1 es la llamada que hace ahí mismo. Pedido de
+  // Santiago (oct-2026): dos llamadas, un WhatsApp y un correo. null = usar SECUENCIA_POR_DEFECTO.
+  // Ver el efecto: node sdr/cli.js secuencia --marcacion
+  SECUENCIA_MARCACION_DIRECTA: [
+    { canal: 'llamada',  dias: 0 },
+    { canal: 'whatsapp', dias: 0 },
+    { canal: 'llamada',  dias: 2 },
+    { canal: 'correo',   dias: 0 },
+  ],
+
   // Qué mueve: si sábados y domingos cuentan como días de la secuencia. Con true, un toque
   // que caería en fin de semana pasa al lunes. Los festivos colombianos NO se saltan.
   // Ver el efecto: node sdr/cli.js secuencia --set SALTAR_FINES_DE_SEMANA=false
