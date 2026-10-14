@@ -1724,7 +1724,8 @@ async function renderDealDetail(id) {
     </div>
     <p class="muted">
       Ejecutivo: <strong>${esc(d.executive || row.executive || '—')}</strong> ·
-      Guardado: <strong>${new Date(row.created_at).toLocaleString()}</strong>
+      Guardado: <strong>${new Date(row.created_at).toLocaleString()}</strong> ·
+      Canal: <select id="deal-canal" class="pk-select" style="font-size:13px" title="Por dónde llegó este deal; separa el cierre orgánico del de prospección"><option value="">— sin canal —</option>${CANALES.map(c => `<option value="${c.key}" ${(row.canal_adquisicion || d.canalAdquisicion) === c.key ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</select>
     </p>
     <p class="muted" id="brevo-deal" data-deal="${row.id}" hidden></p>
     ${(() => { if (!d.transcript || !String(d.transcript).trim()) return ''; const ev = evaluarTranscripcion(d.transcript); return ev.suficiente ? '' : `<div class="tb-aviso"><b>La transcripción de este demo está ${ev.cortada ? `cortada (Meet dejó de transcribir a los ${Math.floor(ev.duracion_s / 60)} min)` : 'incompleta'}</b>: ${ev.palabras} palabras de conversación. La calificación y las acciones de abajo salieron de ese texto, no del demo real. Consigue la completa en la grabación de Meet y cárgala aquí: el asistente arranca en el paso de la transcripción con la ficha de este deal y, al guardar, reemplaza el demo de este mismo deal. <button class="btn btn-sm" data-recargar-transcripcion="${row.id}" style="margin-top:8px">Volver a cargar la transcripción</button></div>`; })()}
@@ -1857,6 +1858,14 @@ async function renderDealDetail(id) {
     } catch (e) { alert('No se pudo analizar: ' + e.message); $re.disabled = false; $re.textContent = 'Analizar con las reglas'; }
   });
   pintarBrevoDeal(row.id);
+  const $canal = el.querySelector('#deal-canal');
+  if ($canal) $canal.addEventListener('change', async () => {
+    try {
+      const r = await fetch(`/api/deals/${row.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ canal_adquisicion: $canal.value || null }) });
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.status);
+      tbAvisar('Canal guardado.');
+    } catch (e) { alert('No se pudo guardar el canal: ' + e.message); }
+  });
   const $mover = el.querySelector('[data-mover-demo]');
   if ($mover) $mover.addEventListener('click', async () => {
     const sugerida = empresaDelTranscript(d.transcript) || '';

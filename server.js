@@ -361,7 +361,10 @@ app.get('/api/deals', async (req, res) => {
 app.patch('/api/deals/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const { outcome, outcome_reason, quoted_at, productos } = req.body || {};
+    const { outcome, outcome_reason, quoted_at, productos, canal_adquisicion } = req.body || {};
+    // Canal de adquisición editable después (los deals viejos no lo tienen): separa cierre orgánico vs prospección.
+    const CANALES = ['freelancer', 'sdr_interno', 'inbound', 'referido', 'evento', 'outbound', 'otro'];
+    if (canal_adquisicion !== undefined && canal_adquisicion !== null && !CANALES.includes(canal_adquisicion)) return res.status(400).json({ ok: false, error: 'Canal desconocido' });
     // Ganado exige la línea (o líneas) que se vendieron: SaaS, Headhunting, EOR, Evaluaciones.
     const PRODUCTOS = (require('./sdr/config').EMBUDO || {}).productos || ['SaaS', 'Headhunting', 'EOR', 'Evaluaciones'];
     const prods = Array.isArray(productos) ? productos.filter(x => PRODUCTOS.includes(x)) : null;
@@ -369,6 +372,10 @@ app.patch('/api/deals/:id', async (req, res) => {
     if (pool) {
       const parts = [], vals = [];
       if (outcome) { vals.push(outcome); parts.push(`outcome=$${vals.length}`); }
+      if (canal_adquisicion !== undefined) {
+        vals.push(canal_adquisicion); parts.push(`canal_adquisicion=$${vals.length}`);
+        vals.push(JSON.stringify(canal_adquisicion)); parts.push(`data = jsonb_set(COALESCE(data, '{}'::jsonb), '{canalAdquisicion}', $${vals.length}::jsonb)`);
+      }
       if (prods && prods.length) { try { await pool.query(`ALTER TABLE deals ADD COLUMN IF NOT EXISTS productos TEXT`); } catch (_) { /* ya está */ } vals.push(prods.join(', ')); parts.push(`productos=$${vals.length}`); }
       if (outcome_reason !== undefined) { vals.push(outcome_reason); parts.push(`outcome_reason=$${vals.length}`); }
       if (quoted_at !== undefined) { vals.push(quoted_at); parts.push(`quoted_at=$${vals.length}`); }
