@@ -24,7 +24,7 @@ function rutas({ db, config, anthropic = null }) {
       etapas: ETAPAS.map(e => ({ id: e, label: ETAPA_LABEL[e] })),
       etapasAngie: D.ETAPAS_DE_ANGIE,
       canales: CANALES.map(c => ({ id: c, label: CANAL_LABEL[c] })),
-      metas: { marcaciones: config.META_MARCACIONES_DIA, conversaciones: config.META_CONVERSACIONES_DIA },
+      metas: { marcaciones: config.META_MARCACIONES_DIA, conversaciones: config.META_CONVERSACIONES_DIA, marcacionesHasta: require('./resultados').corteMeta(config) },
       resultados: D.RESULTADOS_LLAMADA.map(r => ({ id: r, label: D.RESULTADO_LABEL[r] })),
       resultadoLabel: D.RESULTADO_LABEL,
       respuestasOtroCanal: D.RESPUESTAS_OTRO_CANAL,

@@ -165,6 +165,14 @@ los de una exportación de **Apollo** tal cual: `First Name` + `Last Name` → c
 país, LinkedIn, sitio web, keywords y tecnologías quedan en la ficha del lead. Los números que Excel guarda como
 `3.016572696E9` se leen bien.
 
+## Meta de marcaciones con hora de corte
+`META_MARCACIONES_HASTA` (hora de Bogotá y fecha desde la que aplica): a la meta del día (y a la racha y a la
+semana) solo suman las llamadas hechas antes de esa hora; las de después se registran igual (historial,
+secuencia, conversaciones y reuniones cuentan normal), solo no suben el contador. La pantalla lo dice en el
+mismo cuadro ("marcaciones antes de las 3 pm · hoy llevas N después de esa hora: se registran, pero no suman")
+para que no parezca un error. Los días anteriores a la fecha se cuentan como antes. Viene del análisis del
+14-oct: la tarde se estaba usando para completar la meta con llamadas que contestan la mitad.
+
 ## Jornada: la cola por bloques del día
 La cola (`#/cola`) es el plan del día, partido en los bloques de `JORNADA.bloques` (hora de Bogotá):
 **Llamadas nuevas** 9–12 (llamadas de la secuencia a leads que todavía no conversan; meta 60 marcaciones),

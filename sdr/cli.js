@@ -181,8 +181,10 @@ async function main() {
       const r = await resumenSemana(db, config, { fecha: args.fecha, usuario: args.usuario || null });
       console.log(`\nSemana del ${r.lunes} al ${r.domingo}\n`);
       console.log(`  ${pad('fecha', 12)}${pad('marc', 6)}${pad('conv', 6)}${pad('reun', 6)}${pad('wa', 5)}${pad('mail', 6)}${pad('in', 4)}cumplida`);
-      for (const d of r.dias) console.log(`  ${pad(d.fecha, 12)}${pad(d.marcaciones, 6)}${pad(d.conversaciones, 6)}${pad(d.reuniones, 6)}${pad(d.whatsapp, 5)}${pad(d.correo, 6)}${pad(d.linkedin, 4)}${d.habil ? (d.cumplida ? 'sí' : (d.fecha <= r.hoy ? 'no' : '')) : '—'}`);
-      console.log(`\n  Totales: ${r.totales.marcaciones} marcaciones (meta ${r.metas.marcaciones}) · ${r.totales.conversaciones} conversaciones (meta ${r.metas.conversaciones}) · ${r.totales.reuniones} reuniones`);
+      for (const d of r.dias) console.log(`  ${pad(d.fecha, 12)}${pad(d.marcaciones + (d.marcaciones_tarde ? `+${d.marcaciones_tarde}` : ''), 6)}${pad(d.conversaciones, 6)}${pad(d.reuniones, 6)}${pad(d.whatsapp, 5)}${pad(d.correo, 6)}${pad(d.linkedin, 4)}${d.habil ? (d.cumplida ? 'sí' : (d.fecha <= r.hoy ? 'no' : '')) : '—'}`);
+      const corte = require('./resultados').corteMeta(config);
+      if (corte) console.log(`\n  Meta de marcaciones: cuentan las de antes de las ${corte.hora}${corte.desde ? ` desde el ${corte.desde}` : ''}; "+N" son las de después (no suman).`);
+      console.log(`\n  Totales: ${r.totales.marcaciones} marcaciones (meta ${r.metas.marcaciones})${r.totales.marcaciones_tarde ? ` + ${r.totales.marcaciones_tarde} después del corte` : ''} · ${r.totales.conversaciones} conversaciones (meta ${r.metas.conversaciones}) · ${r.totales.reuniones} reuniones`);
       console.log(`  Días cumplidos: ${r.metas.diasCumplidos} de ${r.metas.diasHabilesTranscurridos} · racha: ${r.racha.dias} día(s)`);
       const x = r.ratios;
       console.log(`  Tasas (${x.desde} → ${x.hasta})${r.mostrarRatios ? '' : ' [ocultas en la app: MOSTRAR_RATIOS=false]'}: contacto ${x.tasaContacto ?? '—'}% · conv→reunión ${x.conversacionAReunion ?? '—'}% · reunión realizada ${x.reunionRealizada ?? '—'}% · realizada→calificado ${x.realizadaACalificado ?? '—'}%`);

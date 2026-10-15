@@ -118,5 +118,21 @@ test('ritmo: bloques, racha y semana', { skip: !url && 'sin SDR_TEST_DATABASE_UR
     assert.strictEqual(anterior.totales.marcaciones, 4);
   });
 
+  await t.test('meta con hora de corte: las llamadas de la tarde se registran pero no suman (solo desde la fecha)', async () => {
+    const R = require('../resultados');
+    await toque('2026-09-21', 16, 'llamada', 'no_contesto');   // lunes, 4 pm
+    await toque('2026-09-17', 16, 'llamada', 'no_contesto');   // jueves anterior, 4 pm
+    const corte = { ...config, META_MARCACIONES_HASTA: { hora: '15:00', desde: '2026-09-21' } };
+    const dias = await ritmo.actividadPorDia(db, '2026-09-17', '2026-09-22', corte);
+    const lun = dias.find(d => d.fecha === '2026-09-21'), jue = dias.find(d => d.fecha === '2026-09-17');
+    assert.deepStrictEqual([lun.marcaciones, lun.marcaciones_total, lun.marcaciones_tarde, lun.corte], [4, 5, 1, '15:00']);
+    assert.deepStrictEqual([jue.marcaciones, jue.marcaciones_total, jue.marcaciones_tarde, jue.corte], [4, 4, 0, null]);   // antes de la fecha: cuentan todas
+    const hoy = await R.actividadDelDia(db, '2026-09-21', corte);
+    assert.deepStrictEqual([hoy.marcaciones, hoy.marcaciones_tarde, hoy.corte], [4, 1, '15:00']);
+    // Sin corte: cuentan todas.
+    assert.strictEqual((await R.actividadDelDia(db, '2026-09-21', { ...config, META_MARCACIONES_HASTA: null })).marcaciones, 5);
+    assert.strictEqual(R.corteMeta({ META_MARCACIONES_HASTA: { hora: '3pm' } }), null);
+  });
+
   db.end();
 });

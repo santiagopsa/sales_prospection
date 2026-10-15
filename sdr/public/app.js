@@ -13,6 +13,8 @@
     return m ? `${m[1]} ${m[2]} ${m[3]}` : t;
   };
   const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+  // '15:00' → '3 pm', '09:30' → '9:30 am'.
+  const hora12 = hhmm => { const [h, m] = String(hhmm || '').split(':').map(Number); if (Number.isNaN(h)) return hhmm || ''; return `${h % 12 || 12}${m ? ':' + String(m).padStart(2, '0') : ''} ${h >= 12 ? 'pm' : 'am'}`; };
 
   // Quién está usando la app: etiqueta elegida en la barra, sin credenciales. Va en cada POST.
   const USUARIO_KEY = 'sdr_usuario';
@@ -312,6 +314,11 @@
     const b = c.bloque && c.bloque.enCurso;
     const barra = (valor, meta) => `<div class="meta"><i style="width:${Math.min(100, Math.round(valor / Math.max(meta, 1) * 100))}%"></i></div>`;
     const J = c.jornada || { bloques: [], actual: null };
+    // Meta con hora de corte (META_MARCACIONES_HASTA): se dice en el mismo cuadro, para que una llamada de la
+    // tarde que no sube el contador no parezca un error.
+    const horaCorte = i.metaHasta ? hora12(i.metaHasta) : null;
+    const notaCorte = horaCorte ? `<div class="suave" style="font-size:12px;margin-top:4px">Para la meta cuentan las marcaciones <b>antes de las ${horaCorte}</b>${i.marcacionesTarde ? ` · hoy llevas <b>${i.marcacionesTarde}</b> después de esa hora: se registran, pero no suman a la meta` : ''}. La tarde es para seguimientos, WhatsApp y correo.</div>` : '';
+    const etiquetaMarc = horaCorte ? `marcaciones antes de las ${horaCorte}` : 'marcaciones';
     // Qué bloque se abre: el que corre ahora; fuera de horario, el que sigue (o el primero).
     const abierto = params.get('bloque') || J.actual || J.siguiente || (J.bloques[0] && J.bloques[0].id);
     const tareasDe = bq => c.tareas.filter(t => t.bloque === bq.que && !t.tocado_hoy);
@@ -358,13 +365,13 @@
             <div class="ritmo-titulo"><b>${esc(b.nombre)}</b> <span class="suave">${b.inicio}–${b.fin} · quedan ${b.minutosRestantes} min</span></div>
             ${b.metaMarcaciones ? `<div class="ritmo-num"><b>${b.marcaciones}</b><span class="suave"> / ${b.metaMarcaciones} marcaciones en este bloque</span></div>${barra(b.marcaciones, b.metaMarcaciones)}`
               : `<div class="ritmo-num"><b>${b.marcaciones}</b><span class="suave"> ${b.marcaciones === 1 ? 'llamada' : 'llamadas'} en este bloque · ${b.conversaciones} ${b.conversaciones === 1 ? 'conversación' : 'conversaciones'}</span></div>`}
-            <div class="suave" style="font-size:12px;margin-top:6px">Hoy: ${i.marcaciones} / ${i.metaMarcaciones} marcaciones · ${i.conversaciones} / ${i.metaConversaciones} conversaciones${i.metaReuniones != null ? ` · ${i.reuniones || 0} / ${i.metaReuniones} reuniones` : ''}</div>`
+            <div class="suave" style="font-size:12px;margin-top:6px">Hoy: ${i.marcaciones} / ${i.metaMarcaciones} ${etiquetaMarc} · ${i.conversaciones} / ${i.metaConversaciones} conversaciones${i.metaReuniones != null ? ` · ${i.reuniones || 0} / ${i.metaReuniones} reuniones` : ''}</div>${notaCorte}`
           : `
             <div class="ritmo-titulo"><b>Hoy</b> <span class="suave">${c.bloque && c.bloque.siguiente ? `próximo bloque: ${esc(c.bloque.siguiente.nombre)} a las ${c.bloque.siguiente.inicio}` : 'fuera de los bloques del día'}</span></div>
             <div class="ritmo-doble">
-              <div><div class="ritmo-num"><b>${i.marcaciones}</b><span class="suave"> / ${i.metaMarcaciones} marcaciones</span></div>${barra(i.marcaciones, i.metaMarcaciones)}</div>
+              <div><div class="ritmo-num"><b>${i.marcaciones}</b><span class="suave"> / ${i.metaMarcaciones} ${etiquetaMarc}</span></div>${barra(i.marcaciones, i.metaMarcaciones)}</div>
               <div><div class="ritmo-num"><b>${i.conversaciones}</b><span class="suave"> / ${i.metaConversaciones} conversaciones</span></div>${barra(i.conversaciones, i.metaConversaciones)}</div>
-            </div>
+            </div>${notaCorte}
             ${i.metaReuniones != null ? `<div class="suave" style="font-size:12px;margin-top:6px"><b style="color:var(--texto)">${i.reuniones || 0}</b> / ${i.metaReuniones} reuniones agendadas hoy · con ${i.metaReuniones} el día queda cumplido así no llegues a las marcaciones</div>` : ''}`}
         </div>
         <div class="ritmo-lado">
@@ -1862,7 +1869,7 @@
         <div class="racha ${w.racha.hoyCumple ? 'hoy' : ''}"><b>${w.racha.dias}</b><span>${w.racha.dias === 1 ? 'día seguido' : 'días seguidos'} cumpliendo la meta</span></div>
       </div>
       <div class="kpis">
-        <div class="kpi"><b>${w.totales.marcaciones}<span class="suave" style="font-size:14px"> / ${w.metas.marcaciones}</span></b><span>Marcaciones</span><div class="meta"><i style="width:${pct(w.totales.marcaciones, w.metas.marcaciones)}%"></i></div></div>
+        <div class="kpi" title="${w.totales.marcaciones_tarde ? `Más ${w.totales.marcaciones_tarde} después de la hora de corte, que no suman a la meta` : ''}"><b>${w.totales.marcaciones}<span class="suave" style="font-size:14px"> / ${w.metas.marcaciones}</span></b><span>Marcaciones${(meta.metas || {}).marcacionesHasta ? ` <span class="suave">antes de las ${hora12(meta.metas.marcacionesHasta.hora)}</span>` : ''}</span><div class="meta"><i style="width:${pct(w.totales.marcaciones, w.metas.marcaciones)}%"></i></div>${w.totales.marcaciones_tarde ? `<small>+${w.totales.marcaciones_tarde} después de la hora de corte (no suman)</small>` : ''}</div>
         <div class="kpi"><b>${w.totales.conversaciones}<span class="suave" style="font-size:14px"> / ${w.metas.conversaciones}</span></b><span>Conversaciones</span><div class="meta"><i style="width:${pct(w.totales.conversaciones, w.metas.conversaciones)}%"></i></div></div>
         <div class="kpi"><b>${w.totales.reuniones}</b><span>Reuniones agendadas</span>${w.metas.reunionesDia != null ? `<small>${w.metas.reunionesDia} en un día = meta cumplida</small>` : ''}</div>
         <div class="kpi"><b>${w.metas.diasCumplidos}<span class="suave" style="font-size:14px"> / ${w.metas.diasHabilesTranscurridos}</span></b><span>Días con meta cumplida</span></div>
@@ -1870,7 +1877,7 @@
       <div class="panel tabla-env">
         <table><thead><tr><th>Día</th><th class="num">Marcaciones</th><th class="num">Conversaciones</th><th class="num">Reuniones</th><th class="num">WhatsApp</th><th class="num">Correo</th><th class="num">LinkedIn</th><th>Meta</th></tr></thead>
         <tbody>${w.dias.map(d => `<tr class="${d.fecha === w.hoy ? 'hoy' : ''} ${d.habil ? '' : 'suave'}">
-          <td><a href="#/historial/${d.fecha}${visto ? '?de=' + encodeURIComponent(visto) : (params.get('de') != null ? '?de=' : '')}" title="Ver qué se hizo ese día">${dia(d.fecha)}</a></td><td class="num">${d.marcaciones}</td><td class="num">${d.conversaciones}</td><td class="num">${d.reuniones}</td><td class="num">${d.whatsapp}</td><td class="num">${d.correo}</td><td class="num">${d.linkedin}</td>
+          <td><a href="#/historial/${d.fecha}${visto ? '?de=' + encodeURIComponent(visto) : (params.get('de') != null ? '?de=' : '')}" title="Ver qué se hizo ese día">${dia(d.fecha)}</a></td><td class="num" title="${d.marcaciones_tarde ? `+${d.marcaciones_tarde} después de las ${d.corte} (no suman a la meta)` : ''}">${d.marcaciones}${d.marcaciones_tarde ? `<span class="suave" style="font-size:11px"> +${d.marcaciones_tarde}</span>` : ''}</td><td class="num">${d.conversaciones}</td><td class="num">${d.reuniones}</td><td class="num">${d.whatsapp}</td><td class="num">${d.correo}</td><td class="num">${d.linkedin}</td>
           <td>${!d.habil ? '' : d.cumplida ? `<span class="chip whatsapp" title="${d.cumplida_por === 'reuniones' ? `${d.reuniones} reuniones agendadas (meta: ${w.metas.reunionesDia})` : 'por ' + d.cumplida_por}">cumplida${d.cumplida_por === 'reuniones' ? ` · ${d.reuniones} reuniones` : ''}</span>` : (d.fecha < w.hoy ? '<span class="chip vencida">no</span>' : (d.fecha === w.hoy ? '<span class="chip hoy">en curso</span>' : ''))}</td>
         </tr>`).join('')}</tbody></table>
       </div>

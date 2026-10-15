@@ -470,17 +470,38 @@ async function crearDeal(c, lead, detalle, reunionAt) {
 // Marcaciones y conversaciones de un día (Bogotá).
 // Actividad del día de UN usuario (el elegido en la barra). Cada quien ve su propio histórico.
 // Sin usuario: cuenta a los de rol sdr (y toques sin etiqueta, de antes).
+// Condición SQL de "marcación que suma a la meta" (META_MARCACIONES_HASTA): llamada hecha antes de la
+// hora de corte (Bogotá) en los días desde que aplica; en los días anteriores, cualquier llamada.
+// Los valores van validados e incrustados (hora HH:MM, fecha YYYY-MM-DD) para no mover los $n.
+function corteMeta(config) {
+  const c = config.META_MARCACIONES_HASTA;
+  if (!c || !/^\d{2}:\d{2}$/.test(String(c.hora || ''))) return null;
+  const desde = /^\d{4}-\d{2}-\d{2}$/.test(String(c.desde || '')) ? c.desde : null;
+  return { hora: c.hora, desde };
+}
+function sqlMarcacionMeta(config, col = 'created_at') {
+  const c = corteMeta(config);
+  if (!c) return `canal = 'llamada'`;
+  const local = `(${col} AT TIME ZONE 'America/Bogota')`;
+  const antesDeCorte = `${local}::time < '${c.hora}'::time`;
+  return c.desde ? `canal = 'llamada' AND (${local}::date < '${c.desde}'::date OR ${antesDeCorte})` : `canal = 'llamada' AND ${antesDeCorte}`;
+}
+// ¿El corte aplica en esta fecha? (para que la pantalla lo diga solo cuando toca)
+function corteAplica(config, fecha) { const c = corteMeta(config); return !!c && (!c.desde || fecha >= c.desde); }
+
 async function actividadDelDia(db, fecha, config = {}, usuario = null) {
   const desde = tiempo.instante(fecha, 0).toISOString();
   const hasta = tiempo.instante(tiempo.sumarDias(fecha, 1), 0).toISOString();
   const r = await db.query(
-    `SELECT COUNT(*) FILTER (WHERE canal = 'llamada')::int AS marcaciones,
+    `SELECT COUNT(*) FILTER (WHERE ${sqlMarcacionMeta(config)})::int AS marcaciones,
+            COUNT(*) FILTER (WHERE canal = 'llamada')::int AS marcaciones_total,
             COUNT(*) FILTER (WHERE resultado IN (SELECT jsonb_array_elements_text($3::jsonb)))::int AS conversaciones,
             COUNT(*) FILTER (WHERE resultado = 'reunion_agendada')::int AS reuniones,
             COUNT(*)::int AS toques
      FROM ${T.touches} WHERE created_at >= $1 AND created_at < $2 ${filtroUsuario(config, 4, usuario)}`,
     [desde, hasta, JSON.stringify(D.RESULTADOS_CON_CONVERSACION), paramUsuario(config, usuario)]);
-  return r.rows[0];
+  const x = r.rows[0];
+  return { ...x, marcaciones_tarde: x.marcaciones_total - x.marcaciones, corte: corteAplica(config, fecha) ? corteMeta(config).hora : null };
 }
 
 // Fragmento SQL para filtrar toques por quién los hizo. `n` es la posición del parámetro que
@@ -518,4 +539,4 @@ async function agregarAListaNegra(db, config, { telefono, email, empresa, domini
   });
 }
 
-module.exports = { registrarToque, registrarEjecutiva, crearDeal, cambiarEtapa, leerLead, reagendarReunion, agregarAListaNegra, sacarDeCola, mesesReintento, actividadDelDia, siguienteEtapa, enTransaccion, usuarioValido, usuariosSdr, filtroUsuario, paramUsuario, aplicarTopeLlamadas, aplicarTopeLlamadasATodos, llamadasSinConversacion };
+module.exports = { corteMeta, sqlMarcacionMeta, corteAplica, registrarToque, registrarEjecutiva, crearDeal, cambiarEtapa, leerLead, reagendarReunion, agregarAListaNegra, sacarDeCola, mesesReintento, actividadDelDia, siguienteEtapa, enTransaccion, usuarioValido, usuariosSdr, filtroUsuario, paramUsuario, aplicarTopeLlamadas, aplicarTopeLlamadasATodos, llamadasSinConversacion };

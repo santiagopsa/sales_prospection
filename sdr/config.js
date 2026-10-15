@@ -153,6 +153,13 @@ module.exports = {
   // Marcación = toque por canal llamada registrado hoy (cualquier resultado).
   // Conversación = resultado "conversación" o "reunión agendada".
   META_MARCACIONES_DIA: 60,
+  // Qué mueve: hasta qué hora (Bogotá) suman las marcaciones a la meta del día, y desde qué fecha
+  // aplica (los días anteriores se cuentan como antes). Las llamadas de después se registran igual
+  // (historial, secuencia, conversaciones y reuniones cuentan normal), solo no suman a la meta ni a la
+  // racha: la tarde es para seguimientos y otros canales (antes de las 3 pm contestan el doble que
+  // después de las 4). La pantalla lo dice en el mismo cuadro para que no parezca un error.
+  // null = cuentan todas. Ver el efecto: node sdr/cli.js semana
+  META_MARCACIONES_HASTA: { hora: '15:00', desde: '2026-10-16' },
   META_CONVERSACIONES_DIA: 8,
   // Qué mueve: un día con esta cantidad de reuniones agendadas (o más) queda como "meta cumplida"
   // aunque no haya llegado a las marcaciones: lo que importa al final son las reuniones. Se ve en

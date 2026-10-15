@@ -128,6 +128,9 @@ async function consultarCola(db, config, { ahora = new Date(), usuario = null } 
       deHoy: tareas.filter(t => !t.vencida).length,
       huerfanos,
       marcaciones: act.marcaciones,
+      marcacionesTarde: act.marcaciones_tarde || 0,
+      // Hora de corte de la meta (META_MARCACIONES_HASTA) si aplica hoy; null si cuentan todas.
+      metaHasta: act.corte || null,
       conversaciones: act.conversaciones,
       reuniones: act.reuniones,
       toques: act.toques,

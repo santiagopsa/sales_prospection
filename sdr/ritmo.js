@@ -2,7 +2,7 @@
 const { T } = require('./schema');
 const D = require('./dominio');
 const tiempo = require('./tiempo');
-const { filtroUsuario, paramUsuario } = require('./resultados');
+const { filtroUsuario, paramUsuario, sqlMarcacionMeta, corteMeta, corteAplica } = require('./resultados');
 
 const minutos = hhmm => { const [h, m] = String(hhmm).split(':').map(Number); return h * 60 + (m || 0); };
 const conv = JSON.stringify(D.RESULTADOS_CON_CONVERSACION);
@@ -11,7 +11,8 @@ const conv = JSON.stringify(D.RESULTADOS_CON_CONVERSACION);
 async function actividadPorDia(db, desde, hasta, config = {}, usuario = null) {
   const r = await db.query(
     `SELECT to_char(created_at AT TIME ZONE 'America/Bogota', 'YYYY-MM-DD') AS fecha,
-            COUNT(*) FILTER (WHERE canal = 'llamada')::int AS marcaciones,
+            COUNT(*) FILTER (WHERE ${sqlMarcacionMeta(config)})::int AS marcaciones,
+            COUNT(*) FILTER (WHERE canal = 'llamada')::int AS marcaciones_total,
             COUNT(*) FILTER (WHERE resultado IN (SELECT jsonb_array_elements_text($3::jsonb)))::int AS conversaciones,
             COUNT(*) FILTER (WHERE resultado = 'reunion_agendada')::int AS reuniones,
             COUNT(*) FILTER (WHERE canal = 'whatsapp')::int AS whatsapp,
@@ -25,7 +26,9 @@ async function actividadPorDia(db, desde, hasta, config = {}, usuario = null) {
   const porFecha = Object.fromEntries(r.rows.map(x => [x.fecha, x]));
   const dias = [];
   for (let f = desde; f <= hasta; f = tiempo.sumarDias(f, 1)) {
-    dias.push({ fecha: f, marcaciones: 0, conversaciones: 0, reuniones: 0, whatsapp: 0, correo: 0, linkedin: 0, toques: 0, ...(porFecha[f] || {}) });
+    const d = { fecha: f, marcaciones: 0, marcaciones_total: 0, conversaciones: 0, reuniones: 0, whatsapp: 0, correo: 0, linkedin: 0, toques: 0, ...(porFecha[f] || {}) };
+    d.marcaciones_tarde = d.marcaciones_total - d.marcaciones; d.corte = corteAplica(config, f) ? corteMeta(config).hora : null;
+    dias.push(d);
   }
   return dias;
 }
@@ -127,7 +130,7 @@ async function resumenSemana(db, config, { fecha, usuario = null, ahora = new Da
   const dias = await actividadPorDia(db, lunes, domingo, config, usuario);
   const habiles = dias.filter(d => !tiempo.esFinDeSemana(d.fecha) && d.fecha <= hoy);
   const suma = k => dias.reduce((s, d) => s + d[k], 0);
-  const totales = { marcaciones: suma('marcaciones'), conversaciones: suma('conversaciones'), reuniones: suma('reuniones'), whatsapp: suma('whatsapp'), correo: suma('correo'), linkedin: suma('linkedin'), toques: suma('toques') };
+  const totales = { marcaciones: suma('marcaciones'), marcaciones_tarde: suma('marcaciones_tarde'), conversaciones: suma('conversaciones'), reuniones: suma('reuniones'), whatsapp: suma('whatsapp'), correo: suma('correo'), linkedin: suma('linkedin'), toques: suma('toques') };
   return {
     lunes, domingo, hoy,
     dias: dias.map(d => ({ ...d, habil: !tiempo.esFinDeSemana(d.fecha), cumplida: diaCumplido(config, d), cumplida_por: motivoCumplido(config, d) })),
