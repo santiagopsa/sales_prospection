@@ -204,6 +204,7 @@ module.exports = {
     buzon: null,
     gatekeeper: 'contactado',
     conversacion: 'conversacion',
+    pide_info: 'conversacion',
     reunion_agendada: 'reunion_agendada',
     descartado: 'descartado',
     // toques por otros canales
@@ -217,6 +218,31 @@ module.exports = {
   // después de hablar con alguien, el ritmo lo pone la conversación, no la lista.
   // Ver el efecto: node sdr/cli.js resultado conversacion --etapa contactado
   TRAS_CONVERSACION: { canal: 'llamada', dias: 3 },
+
+  // Qué mueve: qué pasa cuando el prospecto dice "mándame la información" (resultado pide_info).
+  // Casi siempre es la forma educada de colgar, así que se trata como objeción, no como interés:
+  // Angie acepta, devuelve una pregunta, y antes de mandar nada pacta la fecha y hora en que lo
+  // vuelve a llamar para saber si va o no va. Esa llamada queda como compromiso (va al calendario)
+  // y la secuencia se corre hasta entonces.
+  //   exigir_llamada_pactada: true = no se puede guardar el resultado sin fecha y hora de la llamada
+  //     (el diálogo las pide). false = si no las pone, el siguiente toque cae por TRAS_CONVERSACION.
+  //   correo_mismo_dia: true = además se crea un compromiso "Enviar la información" para hoy.
+  //   guion: lo que ve Angie en el diálogo, paso a paso. Es texto: cámbialo cuando cambie el guion.
+  // Ver el efecto: node sdr/cli.js resultado pide_info --etapa contactado
+  PIDE_INFO: {
+    exigir_llamada_pactada: true,
+    correo_mismo_dia: true,
+    titulo_llamada: 'Llamar: ¿va o no va? (pidió información)',
+    titulo_correo: 'Enviar la información que pidió',
+    guion: [
+      'Acepta sin pelear: "Claro, te la mando."',
+      'Devuelve una pregunta: "Para no mandarte algo genérico, ¿qué te serviría ver: casos de vacantes como las tuyas o los precios?"',
+      'Si se cierra, nombra la objeción con permiso de decir no: "Dime una cosa, ¿de verdad te sirve verla o es que no es el momento? Si no es el momento me lo dices y listo, no te molesto."',
+      'Si hay algo de interés, propón la reunión con dos horarios antes que el correo: "Mejor que un PDF: Luisa te muestra dos casos en 20 minutos, ¿jueves a las 10 o viernes a las 3?"',
+      'Si insiste en el correo, pacta la llamada: "Te la mando hoy y te llamo el jueves a las 10 para saber si va o no va, ¿te sirve?" Esa fecha y hora van abajo.',
+      'Si dice que no decide, pide el contacto: "¿Con quién lo revisarías? Para mandárselo directo a esa persona también."',
+    ],
+  },
 
   // Qué mueve: al agendar reunión se crea un toque de WhatsApp de recordatorio este número de
   // días antes de la reunión (si Angie anotó la fecha). 0 = el mismo día. null = sin recordatorio.
@@ -357,8 +383,13 @@ module.exports = {
   // Evaluación con rúbrica (resto de la fase 4) y mejora semanal (fase 5)
   // ---------------------------------------------------------------------------
   // Qué mueve: qué rúbrica se usa para evaluar. Las versiones viven en sdr/rubrica/ y se siembran
-  // al arrancar; cambiar de versión NO reevalúa lo viejo (cada evaluación guarda su versión).
-  RUBRICA_ACTIVA: 'v1',
+  // al arrancar; cambiar de versión NO reevalúa lo viejo (cada evaluación guarda su versión; la
+  // ficha de la llamada muestra la que tenga y "Evaluar de nuevo" la pasa a la activa).
+  // v2 (oct 2026): juzga con la realidad de la llamada en frío (lead a la defensiva, contexto antes
+  // de preguntar, no_aplica cuando no cabía), trata "mándame la información" como objeción con su
+  // propio criterio y, por cada criterio no cumplido, dice qué frase cabía en ese momento.
+  // Ver el efecto: node sdr/cli.js rubrica
+  RUBRICA_ACTIVA: 'v2',
   // Qué mueve: el modelo de Claude del evaluador. null = el mismo del Sandler (ANALYZE_MODEL en
   // Render) o claude-sonnet-4-5. Necesita ANTHROPIC_API_KEY (ya está en Render).
   EVALUADOR_MODELO: null,
@@ -367,10 +398,11 @@ module.exports = {
   EVALUADOR_REINTENTOS: 3,
 
   // Qué mueve: cuánto pesa cada criterio al elegir el foco de la semana. Las palancas (apertura con
-  // permiso, pregunta antes del pitch, cierre concreto) son las que más mueven reuniones por
-  // llamada según la literatura; el resto pesa 1. Un criterio que no esté aquí pesa 1.
+  // permiso, contexto antes de preguntar, cierre concreto y, desde v2, cómo se maneja "mándame la
+  // información") son las que más mueven reuniones por llamada; el resto pesa 1. Un criterio que no
+  // esté aquí pesa 1; uno que no exista en la rúbrica activa no hace nada.
   // Ver el efecto: node sdr/cli.js mejora --set PESOS_CRITERIOS.no_monologo=2
-  PESOS_CRITERIOS: { apertura_permiso: 2, pregunta_antes_pitch: 2, cierre_concreto: 2 },
+  PESOS_CRITERIOS: { apertura_permiso: 2, pregunta_antes_pitch: 2, cierre_concreto: 2, pide_informacion: 2 },
   // Qué mueve: un criterio es "hábito" (no rasgo de una llamada) cuando falla en al menos este
   // número de llamadas evaluadas de la ventana. Con pocas llamadas nada es hábito, a propósito.
   HABITO_MIN_LLAMADAS: 3,

@@ -288,7 +288,7 @@ function imprimirEvaluacion(e) {
   console.log(`\nEvaluación · rúbrica ${e.rubrica_version} · ${e.modelo}`);
   for (const c of e.resultado.criterios) {
     const marca = c.estado === 'no_cumple' ? '✗' : c.estado === 'no_aplica' ? '–' : '✓';
-    console.log(`  ${marca} ${c.id.padEnd(24)} ${c.estado.padEnd(10)} conf ${c.confianza}  ${c.nota || ''}${c.cita ? '\n      «' + c.cita + '»' : ''}`);
+    console.log(`  ${marca} ${c.id.padEnd(24)} ${c.estado.padEnd(10)} conf ${c.confianza}  ${c.nota || ''}${c.cita ? '\n      «' + c.cita + '»' : ''}${c.alternativa ? '\n      Cómo se pudo hacer: ' + c.alternativa : ''}`);
   }
   if (e.resultado.mejor_momento) console.log(`  Mejor momento: «${e.resultado.mejor_momento.cita}» — ${e.resultado.mejor_momento.por_que}`);
   console.log(`  Resumen: ${e.resultado.resumen}`);

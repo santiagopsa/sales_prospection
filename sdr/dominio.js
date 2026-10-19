@@ -23,13 +23,17 @@ const CANAL_LABEL = { llamada: 'Llamada', whatsapp: 'WhatsApp', correo: 'Correo'
 
 // Resultados cerrados de una llamada. Los toques por otro canal usan el nombre del canal
 // como resultado ("whatsapp" = WhatsApp enviado).
-const RESULTADOS_LLAMADA = ['no_contesto', 'buzon', 'gatekeeper', 'conversacion', 'reunion_agendada', 'descartado'];
+// pide_info: el prospecto dijo "mándame la información". Casi siempre es la forma educada de
+// terminar la llamada, así que se trata como objeción: se registra con la fecha y hora en que Angie
+// lo vuelve a llamar para saber si va o no va (resultados.registrarToque crea ese compromiso).
+const RESULTADOS_LLAMADA = ['no_contesto', 'buzon', 'gatekeeper', 'conversacion', 'pide_info', 'reunion_agendada', 'descartado'];
 
 const RESULTADO_LABEL = {
   no_contesto: 'No contestó',
   buzon: 'Buzón',
   gatekeeper: 'Gatekeeper',
   conversacion: 'Conversación sin reunión',
+  pide_info: 'Pidió información (objeción)',
   reunion_agendada: 'Reunión agendada',
   descartado: 'Descartado',
   whatsapp: 'WhatsApp enviado',
@@ -48,10 +52,10 @@ const RESULTADO_LABEL = {
 };
 
 // Solo estos resultados pasan por el pipeline de audio (fase 4).
-const RESULTADOS_CON_CONVERSACION = ['conversacion', 'reunion_agendada'];
+const RESULTADOS_CON_CONVERSACION = ['conversacion', 'pide_info', 'reunion_agendada'];
 // Cuando el prospecto RESPONDE por WhatsApp, correo o LinkedIn, ese toque puede llevar uno de estos
 // resultados (como una llamada). Sin resultado, el toque es el envío normal (resultado = canal).
-const RESPUESTAS_OTRO_CANAL = ['conversacion', 'reunion_agendada', 'descartado'];
+const RESPUESTAS_OTRO_CANAL = ['conversacion', 'pide_info', 'reunion_agendada', 'descartado'];
 
 // Razones para sacar un lead de la cola. Con una razón "no ahora" (sin presupuesto, ya tiene
 // proveedor…) el lead se puede PAUSAR en vez de descartar: vuelve solo a la cola meses después

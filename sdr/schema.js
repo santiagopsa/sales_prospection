@@ -312,6 +312,11 @@ const MIGRACIONES = [
   `ALTER TABLE ${T.calendly} ADD COLUMN IF NOT EXISTS respuestas JSONB`,
   `ALTER TABLE ${T.calendly} ADD COLUMN IF NOT EXISTS invitados JSONB`,
   `ALTER TABLE ${T.calendly} ADD COLUMN IF NOT EXISTS invitados_at TIMESTAMPTZ`,
+
+  // ---- M10 · Contexto de la rúbrica ---------------------------------------------------------
+  // contexto: el párrafo que la rúbrica le da al modelo antes de las reglas (v2: cómo es una llamada
+  // en frío y cuándo cabe preguntar). Las rúbricas sin contexto (v1) lo dejan en NULL.
+  `ALTER TABLE ${T.rubricas} ADD COLUMN IF NOT EXISTS contexto TEXT`,
 ];
 
 async function initSchema(db, log = console) {

@@ -47,7 +47,7 @@ function tasas(criterios, evaluaciones, config) {
       const c = (ev.resultado.criterios || []).find(x => x.id === def.id);
       if (!c || c.estado === 'no_aplica') continue;
       aplican++;
-      if (c.estado === 'no_cumple') { noCumple++; if (ejemplos.length < 3) ejemplos.push({ call_id: ev.call_id, empresa: ev.empresa, cita: c.cita, nota: c.nota, confianza: c.confianza }); }
+      if (c.estado === 'no_cumple') { noCumple++; if (ejemplos.length < 3) ejemplos.push({ call_id: ev.call_id, empresa: ev.empresa, cita: c.cita, nota: c.nota, alternativa: c.alternativa || null, confianza: c.confianza }); }
     }
     return { id: def.id, nombre: def.nombre, descripcion: def.descripcion, peso: pesos[def.id] || 1, aplican, no_cumple: noCumple, tasa: aplican ? Number((noCumple / aplican).toFixed(2)) : null, ejemplos };
   });

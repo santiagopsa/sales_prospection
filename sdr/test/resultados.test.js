@@ -81,6 +81,41 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
     assert.strictEqual(c.indicadores.marcaciones, 2);
   });
 
+  await t.test('pidió información: es objeción; exige la llamada pactada, la crea como compromiso y detiene la secuencia', async () => {
+    await importar(db, base, { archivo: 'y.csv', contenido: 'empresa,contacto,telefono\nOmega,Olga,3008881111\nSigma,Saúl,3008882222', simular: false, ahora: lunes });
+    const omega = await id('Omega');
+    assert.ok((await pendientes('Omega')).length > 1);
+    // Sin fecha pactada no se guarda (PIDE_INFO.exigir_llamada_pactada).
+    await assert.rejects(registrarToque(db, base, { leadId: omega, canal: 'llamada', resultado: 'pide_info', ahora: lunes }), /Pacta la fecha/);
+    await assert.rejects(registrarToque(db, base, { leadId: omega, canal: 'llamada', resultado: 'pide_info', detalle: { llamar_fecha: '2026-09-18', llamar_hora: '10:00' }, ahora: lunes }), /pasado/);
+    await assert.rejects(registrarToque(db, base, { leadId: omega, canal: 'llamada', resultado: 'pide_info', detalle: { llamar_fecha: '2026-09-24', llamar_hora: '25:00' }, ahora: lunes }), /HH:MM/);
+    assert.strictEqual((await db.query('SELECT COUNT(*)::int AS n FROM sdr.touches WHERE lead_id=$1', [omega])).rows[0].n, 0);
+    const antes = (await consultarCola(db, base, { ahora: lunes })).indicadores.conversaciones;
+    const r = await registrarToque(db, base, { leadId: omega, canal: 'llamada', resultado: 'pide_info', nota: 'Pidió casos de backend', detalle: { llamar_fecha: '2026-09-24', llamar_hora: '10:00' }, ahora: lunes });
+    assert.strictEqual(r.etapa, 'conversacion');
+    assert.deepStrictEqual(await pendientes('Omega'), []);                 // la secuencia se detiene
+    assert.strictEqual(r.proxima.canal, 'llamada'); assert.strictEqual(r.proxima.compromiso, true);
+    assert.strictEqual(tiempo.fechaBogota(new Date(r.proxima.due_at)), '2026-09-24');
+    assert.strictEqual(tiempo.horaBogota(new Date(r.proxima.due_at)), '10:00');
+    const comps = (await db.query(`SELECT tipo, canal, titulo, con_hora, usuario, estado, due_at FROM sdr.tasks WHERE lead_id=$1 AND tipo<>'secuencia' ORDER BY id`, [omega])).rows;
+    assert.deepStrictEqual(comps.map(c => [c.tipo, c.canal, c.con_hora, c.usuario, c.estado]), [['seguimiento', 'llamada', true, null, 'pendiente'], ['enviar', 'correo', false, null, 'pendiente']]);
+    assert.strictEqual(comps[0].titulo, base.PIDE_INFO.titulo_llamada);
+    assert.strictEqual(tiempo.fechaBogota(new Date(comps[1].due_at)), '2026-09-21');   // el correo, hoy
+    assert.deepStrictEqual(r.compromisos_creados.length, 2);
+    assert.ok(r.avisos.some(a => /Llamada pactada para el .*24 de sept.* a las 10:00/.test(a)));
+    // Cuenta como conversación (habló con la persona) y el toque guarda la fecha pactada.
+    assert.strictEqual((await consultarCola(db, base, { ahora: lunes })).indicadores.conversaciones, antes + 1);
+    const tq = (await db.query(`SELECT resultado, detalle FROM sdr.touches WHERE lead_id=$1`, [omega])).rows[0];
+    assert.strictEqual(tq.resultado, 'pide_info'); assert.strictEqual(tq.detalle.llamar_fecha, '2026-09-24');
+    // Sin exigir fecha ni correo: cae por TRAS_CONVERSACION, sin compromisos.
+    const cfg = { ...base, PIDE_INFO: { ...base.PIDE_INFO, exigir_llamada_pactada: false, correo_mismo_dia: false } };
+    const r2 = await registrarToque(db, cfg, { leadId: await id('Sigma'), canal: 'llamada', resultado: 'pide_info', ahora: lunes });
+    assert.strictEqual(r2.etapa, 'conversacion');
+    assert.strictEqual(r2.proxima.canal, base.TRAS_CONVERSACION.canal);
+    assert.strictEqual(tiempo.fechaBogota(new Date(r2.proxima.due_at)), tiempo.avanzar('2026-09-21', base.TRAS_CONVERSACION.dias, true));
+    assert.strictEqual((await db.query(`SELECT COUNT(*)::int AS n FROM sdr.tasks WHERE lead_id=$1 AND tipo<>'secuencia'`, [await id('Sigma')])).rows[0].n, 0);
+  });
+
   await t.test('reunión agendada: deal en el Sandler, recordatorio y etapa', async () => {
     const r = await registrarToque(db, base, {
       leadId: await id('ACME'), canal: 'llamada', resultado: 'reunion_agendada', ahora: lunes,

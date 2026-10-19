@@ -28,6 +28,7 @@ function rutas({ db, config, anthropic = null }) {
       resultados: D.RESULTADOS_LLAMADA.map(r => ({ id: r, label: D.RESULTADO_LABEL[r] })),
       resultadoLabel: D.RESULTADO_LABEL,
       respuestasOtroCanal: D.RESPUESTAS_OTRO_CANAL,
+      pideInfo: { guion: (config.PIDE_INFO || {}).guion || [], exigirLlamadaPactada: (config.PIDE_INFO || {}).exigir_llamada_pactada !== false, correoMismoDia: (config.PIDE_INFO || {}).correo_mismo_dia !== false },
       razones: D.RAZONES_DESCARTE.filter(r => r !== 'sin_respuesta' && r !== 'lista_negra').map(r => ({ id: r, label: D.RAZON_LABEL[r], definitiva: D.RAZONES_DEFINITIVAS.includes(r), reintento: (config.REINTENTO_POR_RAZON || {})[r] || null })),
       razonLabel: D.RAZON_LABEL,
       reintentoMeses: config.OPCIONES_REINTENTO_MESES || [1, 3, 6],

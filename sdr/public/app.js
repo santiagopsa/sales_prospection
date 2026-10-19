@@ -838,6 +838,7 @@
         <div class="cab">${marca(x)} <b>${esc((defs[x.id] || {}).nombre || x.id)}</b> <span class="suave" style="font-size:12px">confianza ${Math.round(x.confianza * 100)} %</span></div>
         ${x.nota ? `<div class="nota">${esc(x.nota)}</div>` : ''}
         ${x.cita ? `<div class="cita">«${esc(x.cita)}»</div>` : ''}
+        ${x.alternativa ? `<div class="alternativa"><b>Cómo se pudo hacer:</b> ${esc(x.alternativa)}</div>` : ''}
       </li>`).join('')}</ul>
       ${r.mejor_momento ? `<div class="mejor"><b>Mejor momento:</b> «${esc(r.mejor_momento.cita)}»<div class="suave" style="font-size:12px">${esc(r.mejor_momento.por_que || '')}</div></div>` : ''}
       ${(e.avisos || []).length ? `<div class="suave" style="font-size:11px;margin-top:8px">Validador: ${e.avisos.map(esc).join(' · ')}</div>` : ''}
@@ -1563,6 +1564,15 @@
           <select name="razon">${meta.razones.map(r => `<option value="${r.id}">${esc(r.label)}</option>`).join('')}</select>
           ${camposReintento()}
         </div>
+        <div id="campos-pide-info" hidden>
+          <div class="guion-objecion">
+            <b>"Mándame la información" casi siempre es la forma educada de colgar.</b> Trátalo como objeción, no como interés:
+            <ol>${((meta.pideInfo || {}).guion || []).map(p => `<li>${esc(p)}</li>`).join('')}</ol>
+          </div>
+          <label>¿Cuándo lo llamas para saber si va o no va?${(meta.pideInfo || {}).exigirLlamadaPactada ? ' <span class="suave">(obligatorio: se pacta en la llamada, antes de mandar el correo)</span>' : ''}</label>
+          <div class="dos"><div><input type="date" name="llamar_fecha" min="${fechaLocal(new Date()).slice(0, 10)}" /></div><div><input type="time" name="llamar_hora" /></div></div>
+          <div class="suave" style="font-size:12px;margin-top:4px">Esa llamada queda como compromiso tuyo (con hora, va al calendario)${(meta.pideInfo || {}).correoMismoDia ? ' y además queda el compromiso de enviarle la información hoy' : ''}. La secuencia se detiene hasta entonces.</div>
+        </div>
         <div id="campos-reunion" hidden>
           ${meta.calendly ? `<div class="calendly-aviso">📅 Llena la ficha y al guardar se abre el <b>Calendly de ${esc(meta.calendly.ejecutiva)}</b>. La reunión queda registrada solo cuando Calendly confirme la reserva.
             ${meta.calendly.permitirManual ? `<label class="check"><input type="checkbox" name="manual" value="1"> Ya quedó agendada por fuera de Calendly (pongo la fecha a mano)</label>` : ''}</div>` : ''}
@@ -1602,6 +1612,9 @@
       const v = ($frm.querySelector('input[name=resultado]:checked') || {}).value;
       document.getElementById('campos-descarte').hidden = v !== 'descartado';
       document.getElementById('campos-reunion').hidden = v !== 'reunion_agendada';
+      document.getElementById('campos-pide-info').hidden = v !== 'pide_info';
+      // Con "pidió información" el compromiso ya es la llamada pactada: el bloque "¿Quedaste en algo?" sobra.
+      const $quede = document.getElementById('quede'); if ($quede) $quede.hidden = v === 'pide_info';
       const $manual = $frm.querySelector('input[name=manual]');
       const reserva = !soloDescarte && reservasEnLlamada[l.id];
       $frm.querySelector('button[type=submit]').textContent = v === 'reunion_agendada' && meta.calendly && !reserva && !($manual && $manual.checked) ? 'Guardar y abrir Calendly' : 'Guardar';
@@ -1638,6 +1651,11 @@
         ruta = `leads/${l.id}/toques`;
         Object.assign(body, { canal: respuesta ? (f.get('canal') || 'whatsapp') : 'llamada', resultado, call_uuid: callUuid, compromiso_id: compromisoId });
         if (resultado === 'descartado') { body.razon = f.get('razon'); body.reintento_meses = Number(f.get('reintento') || 0); }
+        if (resultado === 'pide_info') {
+          const lf = f.get('llamar_fecha'), lh = f.get('llamar_hora');
+          if ((meta.pideInfo || {}).exigirLlamadaPactada && !lf) { document.getElementById('frm-error').innerHTML = pintarError(new Error('Pacta la fecha de la llamada ("te llamo el jueves a las 10 para saber si va o no va") antes de mandar el correo.')); return; }
+          body.detalle = { llamar_fecha: lf || null, llamar_hora: lh || null };
+        }
         if (resultado === 'reunion_agendada') {
           const local = f.get('reunion_at');
           const aMano = !meta.calendly || (f.get('manual') && !reservasEnLlamada[l.id]);
@@ -1662,7 +1680,7 @@
         const r = await api(ruta, { method: 'POST', body });
         delete reservasEnLlamada[l.id];
         // El compromiso que quedó pactado en la llamada, si lo llenó.
-        if (f.get('c_titulo') && f.get('c_fecha') && resultado !== 'descartado') {
+        if (f.get('c_titulo') && f.get('c_fecha') && resultado !== 'descartado' && resultado !== 'pide_info') {
           try { const rc = await api('tareas', { method: 'POST', body: { lead_id: l.id, tipo: f.get('c_tipo') || 'seguimiento', titulo: f.get('c_titulo'), fecha: f.get('c_fecha'), hora: f.get('c_hora') || null } }); (r.avisos = r.avisos || []).push(rc.calendario && rc.calendario.ok ? 'Compromiso anotado y en el calendario.' : 'Compromiso anotado.'); }
           catch (err) { (r.avisos = r.avisos || []).push('El compromiso no se guardó: ' + err.message); }
         } else if (f.get('c_titulo') && !f.get('c_fecha')) (r.avisos = r.avisos || []).push('El compromiso no se guardó: faltó la fecha.');
@@ -1902,7 +1920,7 @@
   function pintarMejora(m) {
     if (!m) return '';
     const pct = v => v == null ? '—' : Math.round(v * 100) + ' %';
-    const ejemplos = xs => (xs || []).slice(0, 2).map(x => `<div class="cita">«${esc(x.cita || x.nota || '')}»${x.empresa ? ` <span class="suave">· ${esc(x.empresa)}${veTranscripcion() && x.call_id ? ` · <a href="#/llamada/${x.call_id}">ver</a>` : ''}</span>` : ''}</div>`).join('');
+    const ejemplos = xs => (xs || []).slice(0, 2).map(x => `<div class="cita">«${esc(x.cita || x.nota || '')}»${x.empresa ? ` <span class="suave">· ${esc(x.empresa)}${veTranscripcion() && x.call_id ? ` · <a href="#/llamada/${x.call_id}">ver</a>` : ''}</span>` : ''}${x.alternativa ? `<div class="alternativa"><b>Cómo se pudo hacer:</b> ${esc(x.alternativa)}</div>` : ''}</div>`).join('');
     const foco = m.foco;
     const focoHtml = !foco ? (m.suficiente ? '<p class="suave" style="margin:0">Sin hábitos que señalar esta semana: ningún criterio falla en varias llamadas.</p>' : '')
       : foco.estado === 'activo' ? `

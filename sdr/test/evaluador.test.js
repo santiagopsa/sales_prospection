@@ -3,9 +3,12 @@ const test = require('node:test');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const base = require('../config');
+// La base de prueba se siembra con v1 (la rúbrica de 10 criterios con la que están escritas las
+// respuestas del Claude falso); v2 se prueba aparte (criterios, contexto, alternativa).
+const base = { ...require('../config'), RUBRICA_ACTIVA: 'v1' };
 const E = require('../evaluador');
 const rubricaV1 = require('../rubrica/v1');
+const rubricaV2 = require('../rubrica/v2');
 const url = process.env.SDR_TEST_DATABASE_URL;
 const fixture = () => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'deepgram.json'), 'utf8'));
 
@@ -35,7 +38,45 @@ test('rúbrica v1: 10 criterios con id único, ejemplos y reglas', () => {
   assert.strictEqual(new Set(rubricaV1.criterios.map(c => c.id)).size, 10);
   for (const c of rubricaV1.criterios) for (const k of ['id', 'nombre', 'descripcion', 'cumple', 'no_cumple']) assert.ok(c[k], `${c.id} sin ${k}`);
   assert.ok(rubricaV1.reglas.some(r => /cita/i.test(r)));
-  assert.ok(Object.keys(base.PESOS_CRITERIOS).every(k => rubricaV1.criterios.some(c => c.id === k)));
+});
+
+test('rúbrica v2: llamada en frío, "mándame la info" propio, alternativa; los pesos apuntan a la activa', () => {
+  const cfg = require('../config');
+  assert.strictEqual(cfg.RUBRICA_ACTIVA, 'v2');
+  assert.strictEqual(rubricaV2.criterios.length, 11);
+  assert.strictEqual(new Set(rubricaV2.criterios.map(c => c.id)).size, 11);
+  for (const c of rubricaV2.criterios) for (const k of ['id', 'nombre', 'descripcion', 'cumple', 'no_cumple', 'fase']) assert.ok(c[k], `${c.id} sin ${k}`);
+  // Los ids de v1 siguen (hábitos y focos de Angie no se pierden) y entra pide_informacion.
+  for (const c of rubricaV1.criterios) assert.ok(rubricaV2.criterios.some(x => x.id === c.id), `v2 perdió ${c.id}`);
+  assert.ok(rubricaV2.criterios.some(c => c.id === 'pide_informacion'));
+  assert.ok(Object.keys(cfg.PESOS_CRITERIOS).every(k => rubricaV2.criterios.some(c => c.id === k)));
+  // La realidad de la llamada en frío está en el contexto y en las reglas, no solo en los criterios.
+  assert.match(rubricaV2.contexto, /EN FRÍO/);
+  assert.match(rubricaV2.contexto, /defensiva/);
+  assert.ok(rubricaV2.reglas.some(r => /alternativa/.test(r)));
+  assert.ok(rubricaV2.reglas.some(r => /no dio espacio/.test(r)));
+  // "Mándame la info" ya no lo evalúa manejo_objecion.
+  assert.match(rubricaV2.criterios.find(c => c.id === 'manejo_objecion').descripcion, /NO se evalúa aquí/);
+  assert.match(rubricaV2.criterios.find(c => c.id === 'calificacion_basica').descripcion, /no_aplica/);
+  // El prompt con v2 lleva el contexto y pide la alternativa; con v1 no.
+  const turnos = [{ quien: 'angie', inicio: 0, texto: 'Hola' }];
+  const p2 = E.construirPrompt(rubricaV2, cfg, { turnos, metricas: {} });
+  assert.match(p2.system, /CONTEXTO DE LA LLAMADA/);
+  assert.match(p2.system, /"alternativa"/);
+  assert.match(p2.system, /Incluye los 11 criterios/);
+  const p1 = E.construirPrompt(rubricaV1, cfg, { turnos, metricas: {} });
+  assert.doesNotMatch(p1.system, /CONTEXTO DE LA LLAMADA/);
+  assert.doesNotMatch(p1.system, /"alternativa"/);
+  // validar: la alternativa se conserva solo en no_cumple y se recorta.
+  const crudo = { criterios: [
+    { id: 'pide_informacion', estado: 'no_cumple', cita: 'Hola', confianza: 0.9, nota: 'n', alternativa: 'x'.repeat(500) },
+    { id: 'apertura_permiso', estado: 'cumple', cita: null, confianza: 0.9, nota: 'n', alternativa: 'no debería estar' },
+  ] };
+  const { resultado } = E.validar(rubricaV2, crudo, turnos);
+  const por = Object.fromEntries(resultado.criterios.map(c => [c.id, c]));
+  assert.strictEqual(por.pide_informacion.alternativa.length, 400);
+  assert.strictEqual(por.apertura_permiso.alternativa, null);
+  assert.strictEqual(resultado.criterios.length, 11);
 });
 
 test('prompt: incluye criterios, reglas, métricas y transcripción con hablantes', () => {

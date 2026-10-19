@@ -15,16 +15,16 @@ function error(status, message) { return Object.assign(new Error(message), { sta
 // Siembra una versión de rúbrica si no existe. Nunca sobreescribe: una versión es inmutable.
 async function sembrarRubrica(db, rubrica, { activar = false } = {}) {
   const r = await db.query(
-    `INSERT INTO ${T.rubricas} (version, fuentes, criterios, reglas, activa)
-     VALUES ($1, $2, $3::jsonb, $4::jsonb, $5) ON CONFLICT (version) DO NOTHING RETURNING id`,
-    [rubrica.version, rubrica.fuentes || null, JSON.stringify(rubrica.criterios), JSON.stringify(rubrica.reglas), !!activar]);
+    `INSERT INTO ${T.rubricas} (version, fuentes, criterios, reglas, contexto, activa)
+     VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6) ON CONFLICT (version) DO NOTHING RETURNING id`,
+    [rubrica.version, rubrica.fuentes || null, JSON.stringify(rubrica.criterios), JSON.stringify(rubrica.reglas), rubrica.contexto || null, !!activar]);
   if (activar) await db.query(`UPDATE ${T.rubricas} SET activa = (version = $1)`, [rubrica.version]);
   return { version: rubrica.version, nueva: r.rows.length > 0 };
 }
 
 async function rubricaActiva(db, config) {
   const v = config.RUBRICA_ACTIVA;
-  const r = await db.query(`SELECT version, fuentes, criterios, reglas FROM ${T.rubricas} WHERE ${v ? 'version = $1' : 'activa'} LIMIT 1`, v ? [v] : []);
+  const r = await db.query(`SELECT version, fuentes, criterios, reglas, contexto FROM ${T.rubricas} WHERE ${v ? 'version = $1' : 'activa'} LIMIT 1`, v ? [v] : []);
   if (!r.rows.length) throw error(503, `No hay rúbrica ${v ? v : 'activa'} en la base (se siembra al arrancar el servidor)`);
   return r.rows[0];
 }
@@ -59,15 +59,21 @@ function construirPrompt(rubrica, config, { turnos, metricas, lead, resultado, n
     nota && `Nota de Angie: ${nota}`,
   ].filter(Boolean).join('\n');
 
-  const system = `Eres un evaluador de llamadas en frío de un SDR de Peaku (headhunting tech, EOR y SaaS de reclutamiento en Colombia). Tu trabajo es aplicar una rúbrica con rigor: evidencia textual o nada. No eres un coach que da consejos; eres un juez que cita.
-
+  // v2 en adelante trae `contexto` (cómo es una llamada en frío y cuándo cabe preguntar) y pide una
+  // `alternativa` por criterio no cumplido: la frase concreta que cabía en ese momento.
+  const conContexto = !!(rubrica.contexto && String(rubrica.contexto).trim());
+  const system = `Eres un evaluador de llamadas en frío de un SDR de Peaku (headhunting tech, EOR y SaaS de reclutamiento en Colombia). Tu trabajo es aplicar una rúbrica con rigor: evidencia textual o nada. No eres un coach que da consejos genéricos; eres un juez que cita${conContexto ? ' y que, cuando señala algo, dice qué frase concreta cabía en ese momento con ese prospecto' : ''}.
+${conContexto ? `
+CONTEXTO DE LA LLAMADA (la lente con la que se juzga cada criterio):
+${String(rubrica.contexto).trim()}
+` : ''}
 REGLAS:
 ${rubrica.reglas.map(r => '- ' + r).join('\n')}
 
 FORMATO DE RESPUESTA (JSON estricto, nada más):
 {
   "criterios": [
-    { "id": "<id del criterio>", "estado": "cumple" | "no_cumple" | "no_aplica", "cita": "<fragmento literal de la transcripción o null>", "confianza": <0 a 1>, "nota": "<una frase concreta sobre esta llamada>" }
+    { "id": "<id del criterio>", "estado": "cumple" | "no_cumple" | "no_aplica", "cita": "<fragmento literal de la transcripción o null>", "confianza": <0 a 1>, "nota": "<una frase concreta sobre esta llamada>"${conContexto ? ', "alternativa": "<solo si no_cumple: qué pudo decir Angie en ese momento, una o dos frases en sus palabras, para ese prospecto en frío; null si cumple o no aplica>"' : ''} }
   ],
   "mejor_momento": { "cita": "<fragmento literal de Angie que valga la pena repetir>", "por_que": "<una frase>" } | null,
   "menciono_grabacion": true | false,
@@ -138,7 +144,9 @@ function validar(rubrica, crudo, turnos) {
     let confianza = Number(c.confianza);
     if (!Number.isFinite(confianza)) confianza = 0.5;
     confianza = Math.max(0, Math.min(1, confianza));
-    return { id: def.id, estado, cita, confianza: Number(confianza.toFixed(2)), nota: c.nota ? String(c.nota).slice(0, 300) : (estado === 'cumple' ? 'Nada que señalar.' : '') };
+    // La alternativa ("qué pudo decir Angie ahí") solo tiene sentido en un no_cumple.
+    const alternativa = estado === 'no_cumple' && c.alternativa && String(c.alternativa).trim() ? String(c.alternativa).trim().slice(0, 400) : null;
+    return { id: def.id, estado, cita, confianza: Number(confianza.toFixed(2)), nota: c.nota ? String(c.nota).slice(0, 300) : (estado === 'cumple' ? 'Nada que señalar.' : ''), alternativa };
   });
   const mm = crudo.mejor_momento && crudo.mejor_momento.cita ? { cita: String(crudo.mejor_momento.cita).slice(0, 400), por_que: String(crudo.mejor_momento.por_que || '').slice(0, 300) } : null;
   return {
@@ -176,12 +184,15 @@ async function evaluarLlamada(db, config, env, callId, { fetchFn } = {}) {
   return { evaluation_id: g.rows[0].id, call_id: fila.id, rubrica: rubrica.version, modelo: m.modelo, resultado, avisos, tokens: { in: m.tokens_in, out: m.tokens_out } };
 }
 
+// La evaluación de una llamada: la de la rúbrica activa si existe; si no, la más reciente de otra
+// versión (al cambiar de rúbrica las llamadas viejas no se reevalúan solas: conservan la suya, y el
+// botón "Evaluar de nuevo" las pasa a la activa).
 async function evaluacionDeLlamada(db, config, callId) {
-  const v = config.RUBRICA_ACTIVA;
+  const v = config.RUBRICA_ACTIVA || '';
   const r = await db.query(
     `SELECT e.id, e.rubrica_version, e.modelo, e.resultado, e.avisos, (EXTRACT(EPOCH FROM e.created_at) * 1000)::float8 AS created_ms, rb.criterios
      FROM ${T.evaluations} e JOIN ${T.rubricas} rb ON rb.version = e.rubrica_version
-     WHERE e.call_id = $1 ${v ? 'AND e.rubrica_version = $2' : ''} ORDER BY e.created_at DESC LIMIT 1`, v ? [Number(callId), v] : [Number(callId)]);
+     WHERE e.call_id = $1 ORDER BY (e.rubrica_version = $2) DESC, e.created_at DESC LIMIT 1`, [Number(callId), v]);
   return r.rows[0] || null;
 }
 

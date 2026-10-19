@@ -195,6 +195,21 @@ async function registrarToque(db, config, {
     reunionAt = new Date(detalle.reunion_at);
     if (isNaN(reunionAt)) throw error(400, 'La fecha de la reunión no es válida');
   }
+  // "Mándame la información": antes de mandar nada se pacta la llamada de "¿va o no va?".
+  let llamadaPactada = null;
+  if (resultado === 'pide_info') {
+    const pi = config.PIDE_INFO || {};
+    const f = detalle && detalle.llamar_fecha, h = detalle && detalle.llamar_hora;
+    if (f) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(f))) throw error(400, 'La fecha de la llamada pactada debe ser YYYY-MM-DD');
+      const due = h ? tiempo.instanteHM(f, h) : tiempo.instante(f, config.HORA_INICIO_JORNADA);
+      if (!due || isNaN(due)) throw error(400, 'La hora de la llamada pactada debe ser HH:MM');
+      if (due <= ahora) throw error(400, 'La llamada pactada tiene que ser más adelante, no en el pasado');
+      llamadaPactada = { fecha: String(f), hora: h ? String(h) : null };
+    } else if (pi.exigir_llamada_pactada !== false) {
+      throw error(400, 'Pacta la fecha y la hora de la llamada ("te llamo el jueves a las 10 para saber si va o no va") antes de mandar el correo.');
+    }
+  }
 
   const r = await enTransaccion(db, async c => {
     const lead = await leerLead(c, leadId);
@@ -246,7 +261,7 @@ async function registrarToque(db, config, {
 
     // 4 · Etapa y reprogramación.
     const nueva = siguienteEtapa(config, lead.etapa, resultado);
-    let proxima = null, dealId = null, avisos = [], pausadoHasta = null, compromisoCreado = null, compromisosOmitidos = [];
+    let proxima = null, dealId = null, avisos = [], pausadoHasta = null, compromisoCreado = null, compromisosOmitidos = [], compromisosCreados = [];
     // Cualquier toque real le quita la pausa (llegó la fecha, o Angie lo retomó antes).
     if (resultado !== 'descartado' && lead.pausado_hasta) await c.query(`UPDATE ${T.leads} SET pausado_hasta = NULL, razon_descarte = NULL WHERE id = $1`, [leadId]);
 
@@ -258,6 +273,35 @@ async function registrarToque(db, config, {
       await omitirPendientes(c, leadId);
       const tc = config.TRAS_CONVERSACION;
       proxima = await programar(c, config, leadId, tc.canal, tc.dias, ahora);
+      if (nueva) await cambiarEtapa(c, leadId, nueva);
+    } else if (resultado === 'pide_info') {
+      // Objeción "mándame la información": la secuencia se detiene y el siguiente paso es la llamada
+      // que Angie pactó ("¿va o no va?"), como compromiso con hora (va al calendario). Si además hay
+      // que mandar el correo hoy, queda como compromiso "enviar" para hoy.
+      await omitirPendientes(c, leadId);
+      const pi = config.PIDE_INFO || {};
+      const C = require('./compromisos');
+      if (llamadaPactada) {
+        const t = await C.insertar(c, config, {
+          leadId, tipo: 'seguimiento', titulo: pi.titulo_llamada || 'Llamar: ¿va o no va? (pidió información)', canal: 'llamada',
+          fecha: llamadaPactada.fecha, hora: llamadaPactada.hora, nota: nota || null, usuario, creadoPor: usuario,
+        });
+        compromisosCreados.push(t.id);
+        proxima = { id: t.id, canal: 'llamada', due_at: t.due_at, compromiso: true };
+        const cuando = new Date(llamadaPactada.fecha + 'T12:00:00-05:00').toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' });
+        avisos.push(`Llamada pactada para el ${cuando}${llamadaPactada.hora ? ' a las ' + llamadaPactada.hora : ''}: queda como compromiso tuyo.`);
+      } else {
+        const tc = config.TRAS_CONVERSACION;
+        proxima = await programar(c, config, leadId, tc.canal, tc.dias, ahora);
+      }
+      if (pi.correo_mismo_dia !== false) {
+        const e = await C.insertar(c, config, {
+          leadId, tipo: 'enviar', titulo: pi.titulo_correo || 'Enviar la información que pidió', canal: 'correo',
+          fecha: tiempo.fechaBogota(ahora), hora: null, nota: nota || null, usuario, creadoPor: usuario,
+        });
+        compromisosCreados.push(e.id);
+        avisos.push('Queda el compromiso de enviarle la información hoy.');
+      }
       if (nueva) await cambiarEtapa(c, leadId, nueva);
     } else if (resultado === 'reunion_agendada') {
       await omitirPendientes(c, leadId);
@@ -321,7 +365,7 @@ async function registrarToque(db, config, {
     }
 
     const final = (await c.query(`SELECT etapa, deal_id, reunion_at FROM ${T.leads} WHERE id = $1`, [leadId])).rows[0];
-    return { toque_id: toque.id, call_id: callId, etapa: final.etapa, etapa_anterior: lead.etapa, deal_id: final.deal_id, proxima, pausado_hasta: pausadoHasta, avisos, compromiso_id: compromisoCreado, compromisosOmitidos, compromiso_hecho: compromisoHecho ? compromisoHecho.id : null };
+    return { toque_id: toque.id, call_id: callId, etapa: final.etapa, etapa_anterior: lead.etapa, deal_id: final.deal_id, proxima, pausado_hasta: pausadoHasta, avisos, compromiso_id: compromisoCreado, compromisos_creados: compromisosCreados, compromisosOmitidos, compromiso_hecho: compromisoHecho ? compromisoHecho.id : null };
   });
   // Calendario fuera de la transacción (red): mejor esfuerzo.
   await sincronizarCompromisos(db, config, env, r, usuario);
@@ -334,6 +378,8 @@ async function sincronizarCompromisos(db, config, env, r, usuario) {
     const emailAngie = require('./calendario').emailDe(config, usuario);
     r.calendario = await C.sincronizar(db, config, env, r.compromiso_id, 'crear', { invitados: emailAngie ? [emailAngie] : [] });
   }
+  // Compromisos propios de Angie creados por el resultado (la llamada pactada de "pide_info").
+  for (const id of r.compromisos_creados || []) { const s = await C.sincronizar(db, config, env, id, 'crear'); if (s && s.ok && s.evento) r.calendario = r.calendario || s; }
   for (const id of r.compromisosOmitidos || []) await C.sincronizar(db, config, env, id, 'borrar');
   if (r.compromiso_hecho) await C.sincronizar(db, config, env, r.compromiso_hecho, 'borrar');
   delete r.compromisosOmitidos;
