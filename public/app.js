@@ -2419,7 +2419,26 @@ async function renderTablero(params, { conservar = false } = {}) {
 // Los deals por etapa. Se mueven arrastrando la tarjeta o con "Mover a". Para "Calificados" hay que
 // marcar las 4 variables; "Prueba gratis o cotización" pide cuál; Ganado y Perdido piden motivo.
 // Datos y reglas: /sdr/api/embudo (sdr/embudo.js, reglas en EMBUDO de sdr/config.js).
-const EMB_COLOR = { sin_calificar: '#94a3b8', calificado: '#00C3FF', propuesta: '#6366f1', interesado: '#d97706', ganado: '#1D976C', perdido: '#dc2626' };
+const EMB_COLOR = { sin_calificar: '#94a3b8', calificado: '#00C3FF', propuesta: '#6366f1', prueba: '#8b5cf6', cotizacion: '#6366f1', interesado: '#d97706', ganado: '#1D976C', perdido: '#dc2626' };
+// "Prueba gratis o cotización" es una sola etapa en la base (propuesta, con su tipo), pero se ve
+// como dos columnas: la prueba va antes que la cotización y así se ve el paso de una a la otra.
+// Arrastrar entre las dos cambia el tipo.
+let EMB_COLS = [];
+function embColumnas(d) {
+  const out = [];
+  for (const e of d.etapas) {
+    if (e.id !== 'propuesta') { out.push({ id: e.id, label: e.label, items: d.columnas[e.id] || [] }); continue; }
+    const ps = d.columnas.propuesta || [];
+    out.push({ id: 'prueba', label: 'Prueba gratis', items: ps.filter(x => x.propuesta_tipo === 'prueba') });
+    out.push({ id: 'cotizacion', label: 'Cotización', items: ps.filter(x => x.propuesta_tipo !== 'prueba') });
+  }
+  return out;
+}
+const embFechaCorta = f => { if (!f) return ''; const [y, m, d] = String(f).slice(0, 10).split('-'); return `${d}/${m}`; };
+// Lo que Wei está haciendo con esa empresa en Operaciones (lo que marcó en prueba).
+const embOperacion = o => `${esc(o.producto)}: ${esc(o.cargo || 'sin cargo')}${o.estado ? ' · ' + esc(o.estado) : ''}`
+  + (o.producto === 'SaaS' && o.meta ? ` · ${o.destacados || 0}/${o.meta} destacados` : '')
+  + (o.producto === 'Headhunting' ? (o.primer_envio ? ` · primer candidato ${embFechaCorta(o.primer_envio)}` : ' · sin candidatos enviados') : '');
 const EMB_MOTIVOS = {
   ganado: ['Dolor bien desarrollado y demo enfocada', 'Ancla de precio funcionó (ROI vs statu quo)', 'Piloto validó la solución', 'Champion interno empujó la decisión', 'Otro'],
   perdido: ['Lead sin valor (no calificaba)', 'Precio / presupuesto', 'Se fueron con competidor', 'Timing / no era el momento', 'Decisión interna quedó frenada', 'Cliente no respondió (breakup día 30)', 'Otro'],
@@ -2430,21 +2449,24 @@ let embDatos = null;
 function embTarjeta(x, etapa) {
   const canal = x.canal === 'sdr_interno' ? (embDatos.sdr || 'SDR') : (EMB_CANAL[x.canal] || x.canal || '');
   const puntos = embDatos.criterios.map(c => `<i class="${x.items[c.clave] ? 'si' : ''}" title="${esc(c.label)}"></i>`).join('');
-  const opciones = embDatos.etapas.filter(e => e.id !== etapa).map(e => `<option value="${e.id}">${esc(e.label)}</option>`).join('');
+  const opciones = EMB_COLS.filter(e => e.id !== etapa).map(e => `<option value="${e.id}">${esc(e.label)}</option>`).join('');
+  const alerta = (embDatos.pruebas && embDatos.pruebas.alerta_dias) || 14;
+  const ops = x.operacion || [];
   return `<div class="emb-card" draggable="true" data-deal="${x.deal_id}" data-etapa="${etapa}">
     <a href="#/deal/${x.deal_id}" class="emb-emp">${esc(x.empresa || 'Sin empresa')}</a>
     ${x.contacto || x.cargo ? `<div class="muted chico">${esc([x.contacto, x.cargo].filter(Boolean).join(' · '))}</div>` : ''}
     <div class="emb-chips">
       ${canal ? `<span class="pill">${esc(canal)}</span>` : ''}
       ${x.calificacion ? calCell(x.calificacion) : ''}<span class="emb-puntos" title="${x.n} de 4 variables">${puntos}</span>
-      ${etapa === 'propuesta' && x.propuesta_tipo ? `<span class="pill">${esc(embDatos.tipos_propuesta[x.propuesta_tipo] || x.propuesta_tipo)}</span>` : ''}
+      ${etapa !== 'prueba' && x.fue_prueba ? `<span class="pill emb-vprueba" title="Esta empresa pasó por prueba gratis">Vino de prueba</span>` : ''}
       ${x.reunion_pendiente ? `<span class="pill warn">Reunión ${tbFecha(x.reunion_ms)}</span>` : ''}
     </div>
     ${etapa === 'ganado' && x.productos && x.productos.length ? `<div class="emb-chips">${x.productos.map(pr => `<span class="pill good">${esc(pr)}</span>`).join('')}</div>` : ''}
     ${x.motivo && (etapa === 'ganado' || etapa === 'perdido') ? `<div class="muted chico">${esc(x.motivo)}</div>` : ''}
-    ${['propuesta', 'interesado', 'ganado'].includes(etapa) ? (x.cotizacion ? `<a class="emb-cot" href="#/deal/${x.deal_id}" title="${esc(x.cotizacion.archivo)}">📄 Cotización${x.cotizacion.analizada ? ' · analizada' : ' · sin analizar'}</a>` : `<button type="button" class="emb-cot falta" data-cotizar="${x.deal_id}">📄 Subir la cotización</button>`) : ''}
+    ${ops.length ? `<div class="emb-ops" title="Lo que Wei tiene en prueba en Operaciones">${ops.slice(0, 2).map(o => `<span>Wei · ${embOperacion(o)}</span>`).join('')}</div>` : (etapa === 'prueba' ? `<div class="emb-ops falta">Wei no la tiene marcada en prueba en Operaciones</div>` : '')}
+    ${['cotizacion', 'interesado', 'ganado'].includes(etapa) ? (x.cotizacion ? `<a class="emb-cot" href="#/deal/${x.deal_id}" title="${esc(x.cotizacion.archivo)}">📄 Cotización${x.cotizacion.analizada ? ' · analizada' : ' · sin analizar'}</a>` : `<button type="button" class="emb-cot falta" data-cotizar="${x.deal_id}">📄 Subir la cotización</button>`) : ''}
     <div class="emb-pie">
-      <span class="muted chico" title="Días en esta etapa">${x.dias_en_etapa === 0 ? 'hoy' : x.dias_en_etapa + ' d'}</span>
+      <span class="muted chico ${etapa === 'prueba' && x.dias_en_etapa >= alerta ? 'emb-quieta' : ''}" title="Días en esta etapa">${x.dias_en_etapa === 0 ? 'hoy' : x.dias_en_etapa + ' d'}${etapa === 'prueba' && x.dias_en_etapa >= alerta ? ' · quieta' : ''}</span>
       ${etapa === 'sin_calificar' || etapa === 'calificado' ? `<button class="btn ${etapa === 'sin_calificar' ? '' : 'ghost'} btn-sm" data-calificar="${x.deal_id}">${etapa === 'sin_calificar' ? 'Calificar' : 'Variables'}</button>` : ''}
       <select class="emb-mover" data-mover="${x.deal_id}" title="Mover a otra etapa"><option value="">Mover a…</option>${opciones}</select>
     </div>
@@ -2458,15 +2480,17 @@ async function renderEmbudo() {
   const d = embDatos;
   if (d.sin_tabla) { h(`<h1>Embudo</h1><p class="muted">No hay tabla de deals todavía.</p>`); return; }
   const abiertos = ['sin_calificar', 'calificado', 'propuesta', 'interesado'].reduce((n, k) => n + d.conteo[k], 0);
+  EMB_COLS = embColumnas(d);
   h(`
     <div class="split">
       <div><h1>Embudo</h1><p class="muted" style="margin:0">${abiertos} deals abiertos · arrastra la tarjeta a otra etapa o usa "Mover a". Ganados y perdidos de los últimos ${d.reglas.diasCerrados} días.</p></div>
       <div style="display:flex;gap:8px"><a class="btn btn-sm" href="#/">+ Nuevo deal</a><a class="btn ghost btn-sm" href="#/tablero">Tablero</a></div>
     </div>
-    <div class="emb-tablero">${d.etapas.map(e => `
+    ${embPruebasHtml(d.pruebas)}
+    <div class="emb-tablero">${EMB_COLS.map(e => `
       <section class="emb-col" data-col="${e.id}" style="--c:${EMB_COLOR[e.id]}">
-        <header><b>${esc(e.label)}</b><span>${d.conteo[e.id]}</span></header>
-        <div class="emb-lista">${d.columnas[e.id].map(x => embTarjeta(x, e.id)).join('') || '<p class="muted chico emb-vacio">—</p>'}</div>
+        <header><b>${esc(e.label)}</b><span>${e.items.length}</span></header>
+        <div class="emb-lista">${e.items.map(x => embTarjeta(x, e.id)).join('') || '<p class="muted chico emb-vacio">—</p>'}</div>
       </section>`).join('')}
     </div>
     <p class="muted chico">Para pasar a <b>Calificados</b> se marcan las variables Sandler (${d.reglas.minimo === 'Completa' ? 'las 4' : 'al menos 2'}: Dolor, Presupuesto, Decisión, Fecha límite).${d.reglas.exigir ? ' Sin calificar no se avanza a propuesta, interesados ni ganados.' : ''} Las reglas están en EMBUDO de sdr/config.js.</p>
@@ -2486,6 +2510,51 @@ async function renderEmbudo() {
   el.querySelectorAll('[data-mover]').forEach(s => s.addEventListener('change', () => { if (s.value) embMover(Number(s.dataset.mover), s.value); s.value = ''; }));
   el.querySelectorAll('[data-calificar]').forEach(b => b.addEventListener('click', () => embCalificar(Number(b.dataset.calificar))));
   el.querySelectorAll('[data-cotizar]').forEach(b => b.addEventListener('click', () => embCotizacion(Number(b.dataset.cotizar))));
+  el.querySelectorAll('[data-aprueba]').forEach(b => b.addEventListener('click', () => embEnviar(Number(b.dataset.aprueba), { etapa: 'propuesta', tipo: 'prueba' }, 'Prueba gratis')));
+}
+
+// ---------- Pruebas gratis: ¿cuáles se convierten en clientes? ----------
+// Lo calcula sdr/pruebas.js. Un deal "fue prueba" si alguna vez estuvo en Prueba gratis; de ahí se
+// sigue a cotización y a cliente. Abajo, lo que Wei tiene marcado en prueba en Operaciones y
+// Luisa todavía no sigue como prueba.
+const EMB_ESTADO_PRUEBA = {
+  prueba: { tx: 'En prueba', cls: '' }, cotizacion: { tx: 'Cotización', cls: '' }, interesado: { tx: 'Interesado', cls: 'warn' },
+  ganado: { tx: 'Cliente', cls: 'good' }, perdido: { tx: 'Perdida', cls: 'bad' },
+  calificado: { tx: 'Volvió a calificados', cls: '' }, sin_calificar: { tx: 'Volvió a sin calificar', cls: '' },
+};
+const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+function embPruebasHtml(p) {
+  if (!p) return '';
+  if (!p.total && !p.sin_deal.length) return `<p class="muted chico emb-pruebas-vacio">Pruebas gratis: cuando un deal pase a <b>Prueba gratis</b>, aquí ves si se convierte en cotización y en cliente.</p>`;
+  const pc = x => (x == null ? '—' : x + '%');
+  const kpis = [
+    { v: p.en_prueba, l: 'en prueba ahora', s: p.quietas ? `${p.quietas} quieta${p.quietas === 1 ? '' : 's'} ${p.alerta_dias}+ días` : 'ninguna quieta', cls: p.quietas ? 'warn' : '' },
+    { v: pc(p.a_cotizacion.pct), l: 'pasaron a cotización', s: `${p.a_cotizacion.n} de ${p.total}${p.mediana_dias_a_cotizacion != null ? ` · en ${p.mediana_dias_a_cotizacion} d (mediana)` : ''}` },
+    { v: pc(p.a_cliente.pct), l: 'se volvieron clientes', s: `${p.a_cliente.n} de ${p.total}${p.mediana_dias_a_cliente != null ? ` · en ${p.mediana_dias_a_cliente} d (mediana)` : ''}`, cls: 'good' },
+    { v: pc(p.conversion_cerradas.pct), l: 'de las ya resueltas', s: `${p.conversion_cerradas.n} clientes de ${p.conversion_cerradas.de} cerradas` },
+  ];
+  const detalle = x => x.estado === 'prueba' ? `${x.dias_en_prueba} d en prueba${x.quieta ? ` · <b class="emb-quieta">quieta hace ${x.dias_quieta} d</b>` : ''}`
+    : x.estado === 'ganado' ? `cliente a los ${x.dias_a_cliente ?? '—'} d${x.productos.length ? ' · ' + x.productos.map(esc).join(', ') : ''}`
+    : x.estado === 'perdido' ? esc(x.motivo || 'sin motivo')
+    : x.dias_a_cotizacion != null ? `cotizada a los ${x.dias_a_cotizacion} d de empezar la prueba` : '';
+  const fila = x => {
+    const E = EMB_ESTADO_PRUEBA[x.estado] || { tx: x.estado, cls: '' };
+    return `<div class="emb-prow"><a href="#/deal/${x.deal_id}" class="emb-emp">${esc(x.empresa || 'Sin empresa')}</a>
+      <span class="pill ${E.cls}">${esc(E.tx)}</span><span class="muted chico">${detalle(x)}</span>
+      ${x.operacion.length ? `<span class="emb-ops">${x.operacion.map(o => `<span>Wei · ${embOperacion(o)}</span>`).join('')}</span>` : ''}</div>`;
+  };
+  const abiertas = p.pruebas.filter(x => !['ganado', 'perdido'].includes(x.estado)), cerradas = p.pruebas.filter(x => ['ganado', 'perdido'].includes(x.estado));
+  return `<section class="card emb-pruebas">
+    <div class="split"><h2 style="margin:0">Pruebas gratis</h2><span class="muted chico">¿cuáles se convierten en clientes? · ${p.total} prueba${p.total === 1 ? '' : 's'} en total</span></div>
+    <div class="emb-kpis">${kpis.map(k => `<div class="emb-kpi ${k.cls || ''}"><b>${k.v}</b><span>${k.l}</span><small>${k.s}</small></div>`).join('')}</div>
+    ${abiertas.length ? `<div class="emb-plista">${abiertas.map(fila).join('')}</div>` : ''}
+    ${cerradas.length ? `<details class="emb-pcerradas"><summary class="chico">Resueltas: ${plural(cerradas.filter(x => x.estado === 'ganado').length, 'cliente', 'clientes')}, ${plural(cerradas.filter(x => x.estado === 'perdido').length, 'perdida', 'perdidas')}</summary><div class="emb-plista">${cerradas.map(fila).join('')}</div></details>` : ''}
+    ${p.sin_deal.length ? `<div class="emb-sindeal"><b class="chico">Wei las tiene en prueba y no están en tu embudo como prueba</b>
+      ${p.sin_deal.map(s => `<div class="emb-prow"><span class="emb-emp">${esc(s.empresa)}</span>
+        ${s.deal ? `<button class="btn btn-sm" data-aprueba="${s.deal.deal_id}" type="button" title="Mover el deal #${s.deal.deal_id} a Prueba gratis">Pasar a prueba</button>` : `<a class="btn ghost btn-sm" href="#/">Crear el deal</a>`}
+        <span class="emb-ops">${s.operacion.map(o => `<span>Wei · ${embOperacion(o)}</span>`).join('')}</span></div>`).join('')}
+    </div>` : ''}
+  </section>`;
 }
 
 function embCotizacion(id) {
@@ -2503,8 +2572,11 @@ function embModal(html) { const m = document.getElementById('emb-modal'); m.inne
 
 async function embMover(id, etapa) {
   const x = embBuscar(id); if (!x) return;
-  const nombre = (embDatos.etapas.find(e => e.id === etapa) || {}).label || etapa;
+  const nombre = (EMB_COLS.find(e => e.id === etapa) || embDatos.etapas.find(e => e.id === etapa) || {}).label || etapa;
   if (etapa === 'calificado') return embCalificar(id, true);
+  // Las dos columnas de propuesta: el tipo lo dice la columna, no hay que preguntarlo.
+  if (etapa === 'prueba') return embEnviar(id, { etapa: 'propuesta', tipo: 'prueba' }, 'Prueba gratis');
+  if (etapa === 'cotizacion') { await embEnviar(id, { etapa: 'propuesta', tipo: 'cotizacion' }, 'Cotización'); if (!x.cotizacion) embCotizacion(id); return; }
   if (etapa === 'propuesta') {
     const m = embModal(`<h2 style="margin-top:0">${esc(x.empresa)} → ${esc(nombre)}</h2><p class="muted">¿Qué se le envió?</p>
       <div class="btn-row" style="justify-content:flex-start;margin-top:8px">${Object.entries(embDatos.tipos_propuesta).map(([k, v]) => `<button class="btn" data-tipo="${k}">${esc(v)}</button>`).join('')}<button class="btn ghost" data-cerrar>Cancelar</button></div>`);
@@ -2530,10 +2602,10 @@ async function embMover(id, etapa) {
   await embEnviar(id, { etapa });
 }
 
-async function embEnviar(id, body) {
+async function embEnviar(id, body, etiqueta = null) {
   try {
     await tbApi(`embudo/${id}/mover`, { method: 'POST', body: { ...body, usuario: embDatos.ejecutiva } });
-    tbAvisar(`Movido a ${(embDatos.etapas.find(e => e.id === body.etapa) || {}).label || body.etapa}.`);
+    tbAvisar(`Movido a ${etiqueta || (embDatos.etapas.find(e => e.id === body.etapa) || {}).label || body.etapa}.`);
   } catch (e) {
     tbAvisar(e.message, 'error');
     if (/calific/i.test(e.message) && body.etapa !== 'perdido') { await embRecargar(); return embCalificar(id, true); }

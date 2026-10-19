@@ -453,19 +453,42 @@ re-enlaza solo al deal que tenga el demo de la misma empresa.
 ## Embudo de la ejecutiva (Sandler Coach → Embudo)
 
 `/#/embudo`: todos los deals del Sandler (de la SDR y de otros canales) en columnas:
-**Sin calificar → Calificados → Prueba gratis o cotización → Interesados → Ganados** (y Perdidos).
-Se mueven arrastrando la tarjeta o con "Mover a…".
+**Sin calificar → Calificados → Prueba gratis → Cotización → Interesados → Ganados** (y Perdidos).
+Se mueven arrastrando la tarjeta o con "Mover a…". Prueba gratis y Cotización son una sola etapa en la
+base (`propuesta`, con `propuesta_tipo`); se ven como dos columnas y pasar de una a otra cambia el tipo.
 
 - **Calificados**: al moverlo se abren las 4 variables Sandler; con menos de las necesarias se queda en
   "Sin calificar" con sus chulos guardados. Si el deal es de la SDR, es la misma calificación del tablero
   (marca la reunión realizada, el lead calificado y cuenta para la comisión).
-- **Prueba gratis o cotización**: pide cuál; la cotización deja la fecha de cotización (indicador "cotizados").
+- **Prueba gratis**: deja `prueba_at` (cuándo empezó, no se borra al cotizar ni al ganar). **Cotización**:
+  deja la fecha de cotización (indicador "cotizados") y pide el documento si no lo tiene.
 - **Ganado / Perdido**: piden motivo (el mismo del historial) y cierran el deal; moverlo de vuelta lo reabre.
 - Deals de antes sin etapa guardada: se deducen (ganado/perdido, cotizado → propuesta, calificación
   suficiente → calificados). Los de la SDR cuya reunión no se hizo no aparecen hasta que se reagenden.
 - Columnas en `public.deals`: `etapa_embudo`, `etapa_embudo_at`, `propuesta_tipo` (las crea `embudo.js`);
   el recorrido queda en `data.embudoHistorial`. Reglas en `EMBUDO` de `config.js`
   (`minimo_calificado`, `exigir_calificado`, `dias_cerrados`); `node sdr/cli.js embudo` muestra el conteo.
+
+## Pruebas gratis: cuáles se convierten en clientes (arriba del Embudo)
+
+Algunos clientes empiezan con una prueba. Wei la marca en Operaciones (`/verificacion`, columna
+**Prueba** de Procesos, SaaS o Evaluaciones) y Luisa la lleva en su embudo: Prueba gratis → Cotización →
+Ganado (o Perdido). `sdr/pruebas.js` responde arriba del embudo, en "Pruebas gratis":
+
+- **En prueba ahora**, con las **quietas**: más de `EMBUDO.prueba_alerta_dias` (14) días sin moverse. La
+  tarjeta del embudo también lo marca.
+- **Pasaron a cotización**, **se volvieron clientes** (sobre todas las pruebas) y **de las ya resueltas**
+  (clientes sobre ganadas + perdidas, la tasa que no castiga las que van), con la mediana de días.
+- Cada prueba con dónde está hoy y **lo que Wei está haciendo con esa empresa** (lo que marcó en prueba:
+  cargo, etapa, primer candidato o destacados). La tarjeta del embudo lo muestra igual, y en Cotización,
+  Interesados y Ganados sale "Vino de prueba".
+- **Wei las tiene en prueba y no están en tu embudo como prueba**: empresas que Wei marcó y Luisa no sigue
+  como prueba. Si la empresa tiene un deal abierto, "Pasar a prueba" lo mueve de un clic.
+
+Un deal "fue prueba" si tiene `prueba_at` o, en los de antes de esa columna, si su `data.embudoHistorial`
+tiene un paso a prueba. Lo de Wei se cruza por el nombre de la empresa normalizado ("Alpina S.A.S." =
+"Alpina") y se lee de `verificacion.ops_*` (solo lectura; el esquema lo da `VERIF_SCHEMA`). Sin el módulo
+de verificación, el panel sale igual, sin lo de Wei. `node sdr/cli.js pruebas` imprime lo mismo.
 
 ## Proyección de la silla (Prospección → Proyección)
 
@@ -603,6 +626,7 @@ la variable); desde tu máquina necesitas `npm install` (para `pg`) y la URL ext
 ```
 npm run test:sdr                                        # unitarias; las de base se saltan sin la variable
 SDR_TEST_DATABASE_URL=postgres://... npm run test:sdr   # BORRA y recrea el schema sdr de esa base: nunca producción
+SDR_TEST_DATABASE_URL=postgres://... python3 sdr/test/e2e_pruebas.py   # Pruebas gratis en el navegador (embudo real)
 ```
 
 ## Desarrollo local sin el Sandler

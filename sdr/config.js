@@ -106,12 +106,16 @@ module.exports = {
   // Ver el efecto: node sdr/cli.js embudo   (conteo por etapa con estas reglas)
   //   productos: qué se vendió; al marcar "ganado" hay que elegir al menos uno (puede ser varios).
   //   cotizacion_max_chars: cuánto texto de la cotización se guarda y se le pasa al análisis.
+  //   prueba_alerta_dias: cuántos días puede estar un deal en "Prueba gratis" sin moverse antes de
+  //     salir marcado como quieto en "Pruebas" (arriba del embudo). Las pruebas que se enfrían no
+  //     convierten. Ver el efecto: node sdr/cli.js pruebas --set EMBUDO.prueba_alerta_dias=7
   EMBUDO: {
     minimo_calificado: 'Completa',
     exigir_calificado: true,
     dias_cerrados: 60,
     productos: ['SaaS', 'Headhunting', 'EOR', 'Evaluaciones'],
     cotizacion_max_chars: 40000,
+    prueba_alerta_dias: 14,
   },
 
   // ---------------------------------------------------------------------------

@@ -1349,7 +1349,7 @@ button.ores{cursor:pointer;transition:border-color .12s,background .12s}
 button.ores:hover{border-color:var(--acc)}
 button.ores.sel{border-color:var(--acc);background:var(--acc-soft)}
 .ores b{font-family:Montserrat,"Helvetica Neue",Arial,sans-serif;font-size:24px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums;color:var(--ink)}
-.ores.r b{color:var(--crit)} .ores.a b{color:var(--warn)} .ores.v b{color:var(--good)}
+.ores.r b{color:var(--crit)} .ores.a b{color:var(--warn)} .ores.v b{color:var(--good)} .ores.acc b{color:var(--acc)}
 .ores span{font-size:12px;color:var(--ink2);line-height:1.35}
 @media (max-width:900px){ .opsres{grid-template-columns:repeat(3,minmax(0,1fr))} }
 @media (max-width:520px){ .opsres{grid-template-columns:repeat(2,minmax(0,1fr))} }

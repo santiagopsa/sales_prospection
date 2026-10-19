@@ -12,6 +12,7 @@ const D = require('./dominio');
 const CAL = require('./calificacion');
 const E = require('./ejecutiva');
 const R = require('./resultados');
+const P = require('./pruebas');
 
 function error(status, message) { return Object.assign(new Error(message), { status }); }
 const ms = col => `(EXTRACT(EPOCH FROM ${col}) * 1000)::float8`;
@@ -49,6 +50,9 @@ async function asegurarColumnas(db) {
     `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS propuesta_tipo TEXT`,
     `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS productos TEXT`,
     `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS quoted_at TIMESTAMPTZ`,
+    // Cuándo empezó la prueba gratis. No se borra al pasar a cotización: así se sabe qué deals
+    // fueron prueba y cuáles se convirtieron (sdr/pruebas.js).
+    `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS prueba_at TIMESTAMPTZ`,
     `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS outcome_reason TEXT`,
     `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ`,
     `ALTER TABLE public.deals ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
@@ -81,7 +85,7 @@ async function tablero(db, config, { ahora = new Date() } = {}) {
               'procesoDecision', d.data->'procesoDecision', 'fechaLimiteDecision', d.data->'fechaLimiteDecision',
               'calificacionManual', d.data->'calificacionManual') AS data,
             COALESCE(d.data->>'transcript', '') <> '' AS con_demo,
-            ${ms('d.quoted_at')} AS quoted_ms, ${ms('d.closed_at')} AS closed_ms, ${ms('d.created_at')} AS created_ms,
+            ${ms('d.quoted_at')} AS quoted_ms, ${ms('d.closed_at')} AS closed_ms, ${ms('d.created_at')} AS created_ms, ${ms('d.prueba_at')} AS prueba_ms,
             ${ms('COALESCE(d.etapa_embudo_at, d.closed_at, d.quoted_at, d.created_at)')} AS etapa_ms,
             l.id AS lead_id, l.contacto, l.cargo, l.telefono, l.email, l.etapa AS lead_etapa, ${ms('l.reunion_at')} AS reunion_ms
      FROM public.deals d
@@ -89,6 +93,10 @@ async function tablero(db, config, { ahora = new Date() } = {}) {
      WHERE COALESCE(d.outcome, 'open') NOT IN ('won', 'lost') OR d.closed_at >= $1 OR d.closed_at IS NULL
      ORDER BY d.created_at DESC`, [desde]);
   const columnas = Object.fromEntries(IDS.map(id => [id, []]));
+  // Lo que Wei tiene marcado en prueba en Operaciones (/verificacion): se pega a la tarjeta de la
+  // empresa. Si falla, el embudo se muestra igual.
+  let ops = [];
+  try { ops = await P.operacionEnPrueba(db); } catch (e) { console.error('[sdr] pruebas de operaciones:', e.message); }
   for (const d of q.rows) {
     const etapa = etapaDe(config, d);
     // Deal de la SDR cuya reunión no se hizo (no asistió / canceló): vuelve a ser de la SDR y no
@@ -107,6 +115,7 @@ async function tablero(db, config, { ahora = new Date() } = {}) {
       cotizacion: d.cotizacion_archivo ? { archivo: d.cotizacion_archivo, ms: ms(d.cotizacion_at), analizada: !!d.con_analisis } : null,
       lead_id: d.lead_id, reunion_ms: d.reunion_ms, reunion_pendiente: !!(d.lead_id && d.lead_etapa === 'reunion_agendada' && d.reunion_ms && d.reunion_ms > ahora.getTime()),
       dias_en_etapa: Math.max(0, Math.floor((ahora.getTime() - d.etapa_ms) / 86400000)), created_ms: d.created_ms,
+      fue_prueba: !!d.prueba_ms || d.propuesta_tipo === 'prueba', operacion: P.deEmpresa(ops, d.company),
     });
   }
   // Dentro de cada columna: lo que lleva más tiempo quieto arriba (ganados/perdidos: lo más reciente).
@@ -114,7 +123,9 @@ async function tablero(db, config, { ahora = new Date() } = {}) {
   const conteo = Object.fromEntries(IDS.map(id => [id, columnas[id].length]));
   const ejecutiva = ((config.USUARIOS || []).find(u => u.rol === 'ejecutiva') || {}).nombre || null;
   const sdr = ((config.USUARIOS || []).find(u => u.rol === 'sdr') || {}).nombre || null;
-  return { etapas: ETAPAS, columnas, conteo, reglas: r, criterios: CAL.CRITERIOS, tipos_propuesta: TIPOS_PROPUESTA, productos: r.productos, ejecutiva, sdr };
+  let pruebas = null;
+  try { pruebas = await P.resumen(db, config, { ahora, etapaDe, ops }); } catch (e) { console.error('[sdr] pruebas:', e.message); }
+  return { etapas: ETAPAS, columnas, conteo, reglas: r, criterios: CAL.CRITERIOS, tipos_propuesta: TIPOS_PROPUESTA, productos: r.productos, ejecutiva, sdr, pruebas };
 }
 
 async function leerDeal(db, dealId) {
@@ -183,6 +194,7 @@ async function mover(db, config, { dealId, etapa, tipo, motivo, productos, usuar
   if (etapa === 'propuesta') {
     set('propuesta_tipo', tipo);
     if (tipo === 'cotizacion' && !d.quoted_at) set('quoted_at', ahora.toISOString());
+    if (tipo === 'prueba' && !d.prueba_at) set('prueba_at', ahora.toISOString());
   }
   if (etapa === 'ganado') set('productos', prods.join(', '));
   if (etapa === 'ganado' || etapa === 'perdido') {

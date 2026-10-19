@@ -573,6 +573,8 @@ Se edita como una hoja de cálculo: cada celda se guarda al salir, **Enter** baj
 
 **Columnas que cambiaron respecto a Airtable**: Procesos gana *Faltan para la terna* y *Garantía* (llenadas al importar desde las notas "Pendiente 1", "Garantía"; las notas se conservan) y pierde *Prioridad para el cliente* (repetía el tier). SaaS gana *Cargo* y pierde *Account Manager* y *Owner Ops* (eran siempre Luisa y Wei) y *¿Cliente activo?* (casi vacía). Evaluaciones gana *Aprobados*.
 
+**Prueba**: las tres tablas tienen la columna *Prueba* (sí/no) para los clientes que están probando PeakU. Arriba sale el filtro "en prueba". Marcarla no cuenta como movimiento. Luisa la ve en el Sandler Coach, arriba del Embudo ("Pruebas gratis", `sdr/pruebas.js`), cruzada por empresa con su deal: así se sigue cuáles pruebas pasan a cotización y a cliente.
+
 Rutas: `GET/POST /api/ops/:tipo`, `PATCH/DELETE /api/ops/:tipo/:id` (`tipo` = procesos | saas | evaluaciones). La misma función (`ops.atender`) atiende el servidor y el stub.
 
 ## La entrevista y la calificación son dos momentos

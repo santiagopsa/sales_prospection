@@ -1201,12 +1201,17 @@ function opsVisibles(){
 }
 
 // Lo que se ve arriba: cuántas hay y qué necesita atención. Cada cifra filtra la tabla.
+// Los clientes en prueba: Luisa los sigue en su embudo hasta que se convierten (o no). Aquí basta
+// con verlos y filtrarlos; la bandera se marca en la columna "Prueba".
+const opsChipPrueba = ab => { const n = ab.filter(f => f.prueba).length;
+  return n ? [{id: 'prueba', n, l: n === 1 ? 'cliente en prueba' : 'en prueba', cls: 'acc', fn: f => f.prueba}] : []; };
 function opsResumen(){
   const t = OPSV.tipo, F = OPSV.filas, ab = F.filter(f => f.abierto);
   const suma = (xs, k) => xs.reduce((n, f) => n + (Number(f[k]) || 0), 0);
   const cuenta = fn => ab.filter(fn).length;
   if(t === 'procesos') return [
     {id: 'ab', n: ab.length, l: 'procesos en curso'},
+    ...opsChipPrueba(ab),
     {id: 'roja', n: cuenta(f => f.salud === 'roja'), l: 'en riesgo (más de 5 días quietos)', cls: 'r', fn: f => f.salud === 'roja'},
     {id: 'amar', n: cuenta(f => f.salud === 'amarilla'), l: 'para revisar (3 a 5 días)', cls: 'a', fn: f => f.salud === 'amarilla'},
     {id: 'falt', n: suma(ab, 'faltan_terna'), l: `candidatos por enviar en ${cuenta(f => f.faltan_terna > 0)} procesos`, fn: f => f.faltan_terna > 0},
@@ -1216,6 +1221,7 @@ function opsResumen(){
   ];
   if(t === 'saas') return [
     {id: 'ab', n: ab.length, l: 'vacantes activas'},
+    ...opsChipPrueba(ab),
     {id: 'hoy', n: cuenta(f => (f.dias_sin_actualizar ?? 9) >= 1), l: 'sin actualizar hoy', cls: cuenta(f => (f.dias_sin_actualizar ?? 9) >= 1) ? 'a' : '', fn: f => (f.dias_sin_actualizar ?? 9) >= 1},
     {id: 'roja', n: cuenta(f => f.salud === 'roja'), l: 'en riesgo alto', cls: 'r', fn: f => f.salud === 'roja'},
     {id: 'meta', n: cuenta(f => f.meta_cumplida), l: 'con la meta cumplida', cls: 'v', fn: f => f.meta_cumplida},
@@ -1226,6 +1232,7 @@ function opsResumen(){
   const sat = F.filter(f => f.satisfaccion);
   return [
     {id: 'ab', n: ab.length, l: 'evaluaciones en curso'},
+    ...opsChipPrueba(ab),
     {id: 'ent', n: cuenta(f => f.estado === 'Resultados entregados'), l: 'con resultados entregados', fn: f => f.estado === 'Resultados entregados'},
     {id: 'sinap', n: cuenta(f => f.aprobados == null), l: 'sin aprobados registrados', cls: cuenta(f => f.aprobados == null) ? 'a' : '', fn: f => f.aprobados == null},
     {id: 'apr', n: conAp.length ? Math.round(conAp.reduce((n, f) => n + f.pct_aprobacion, 0) / conAp.length) + '%' : '—', l: 'aprobación promedio'},

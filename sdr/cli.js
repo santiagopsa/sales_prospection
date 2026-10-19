@@ -6,6 +6,7 @@
 //   node sdr/cli.js cola                                        orden de la cola de hoy con el desglose del puntaje
 //   node sdr/cli.js proyeccion                                  plan de la silla vs real, mes a mes (reglas PROYECCION)
 //   node sdr/cli.js embudo                                      deals por etapa del embudo de la ejecutiva (reglas EMBUDO)
+//   node sdr/cli.js pruebas                                     pruebas gratis: cuáles pasan a cotización y a cliente, y lo que Wei tiene en prueba
 //   node sdr/cli.js invitados <lead_id>                         reunión del lead: formulario de Calendly, invitados y si aceptaron (Google)
 //   node sdr/cli.js brevo [--forzar]                           cruce de los deals del Sandler con Brevo (pipelines, etapas sin regla, diferencias)
 //   node sdr/cli.js importar archivo.csv|.xlsx [--confirmar]   carga desde la terminal (sin --confirmar, simula)
@@ -167,6 +168,16 @@ async function main() {
       else {
         console.log(`\nEmbudo · calificado desde ${r.reglas.minimo} · ${r.reglas.exigir ? 'exige calificado para avanzar' : 'sin exigir calificado'} · cerrados de ${r.reglas.diasCerrados} días\n`);
         for (const e of r.etapas) console.log(`  ${pad(e.label, 30)}${pad(r.conteo[e.id], 5)}${r.columnas[e.id].slice(0, 4).map(x => x.empresa).join(', ')}`);
+      }
+    } else if (cmd === 'pruebas') {
+      const Em = require('./embudo');
+      if (!(await Em.asegurarColumnas(db))) { console.log('No está la tabla public.deals del Sandler.'); }
+      else {
+        const r = await require('./pruebas').resumen(db, config, { etapaDe: Em.etapaDe });
+        const p = x => (x == null ? '—' : x + '%');
+        console.log(`\nPruebas · ${r.total} en total · ${r.en_prueba} en prueba (${r.quietas} quietas ${r.alerta_dias}+ días) · a cotización ${p(r.a_cotizacion.pct)} · a cliente ${p(r.a_cliente.pct)} · de las cerradas ${p(r.conversion_cerradas.pct)} (${r.conversion_cerradas.n} de ${r.conversion_cerradas.de})\n`);
+        for (const x of r.pruebas) console.log(`  ${pad(x.estado, 12)}${pad(x.empresa, 32)}${x.dias_en_prueba != null ? x.dias_en_prueba + ' d en prueba' : ''}${x.quieta ? ' · QUIETA' : ''}${x.operacion.length ? ' · Wei: ' + x.operacion.map(o => `${o.producto} ${o.cargo} (${o.estado})`).join(', ') : ''}`);
+        if (r.sin_deal.length) { console.log('\n  En prueba con Wei, sin deal en prueba:'); for (const s of r.sin_deal) console.log(`    ${pad(s.empresa, 32)}${s.deal ? `deal #${s.deal.deal_id} en ${s.deal.etapa}` : 'sin deal abierto'}`); }
       }
     } else if (cmd === 'comision') {
       const r = await require('./comision').resumenMes(db, config, { mes: args.mes, usuario: args.usuario || null });

@@ -272,5 +272,23 @@ const hace = dias => new Date(AH - dias * 86400000).toISOString();
     assert.ok(es.every(e => e.salud === null));
   });
 
+  await t('la bandera de prueba se guarda en las tres tablas y no cuenta como movimiento', async () => {
+    const ops = OPS.crearOps({ semilla: false, ahora: () => Date.parse('2026-10-19T15:00:00Z') });
+    await ops.init();
+    for (const [tipo, base] of [['procesos', { empresa: 'Rappi', cargo: 'Data', etapa: 'Reclutamiento' }],
+                                ['saas', { cliente: 'Rappi', peaku_id: '123', estado: 'Activa' }],
+                                ['evaluaciones', { empresa: 'Rappi', cargo: 'Prueba técnica', estado: 'En evaluación' }]]) {
+      assert.ok(OPS.ESPECS[tipo].campos.some(c => c.k === 'prueba' && c.t === 'bool'), `falta la columna en ${tipo}`);
+      const f = (await ops.crear(tipo, { ...base, prueba: true })).fila;
+      assert.strictEqual(f.prueba, true, tipo);
+      const g = (await ops.actualizar(tipo, f.id, { prueba: false })).fila;
+      assert.strictEqual(g.prueba, false, tipo);
+    }
+    const p = (await ops.listar('procesos'))[0];
+    const antes = p.movido_at;
+    await ops.actualizar('procesos', p.id, { prueba: true });
+    assert.strictEqual((await ops.listar('procesos'))[0].movido_at, antes, 'marcar prueba no es movimiento');
+  });
+
   console.log(`\n${n} pruebas · todo en verde`);
 })().catch(e => { console.error(e); process.exit(1); });

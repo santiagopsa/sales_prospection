@@ -315,3 +315,26 @@ details.tb-criterios summary { cursor: pointer; color: var(--peaku-blue-dark); }
 .crit-accion { font-size: 13px; margin-top: 4px; padding: 8px 10px; background: #fff; border-radius: 8px; border: 1px dashed var(--peaku-blue); }
 .reunion-fila.directo { border-left: 4px solid var(--line); }
 .rf-cta { margin-top: 6px; padding: 6px 10px; background: #fff; border: 1px dashed var(--peaku-blue); border-radius: 8px; display: grid; gap: 3px; }
+
+/* ---- Pruebas gratis: de la bandera de Wei al cliente ---- */
+.emb-pruebas { margin: 14px 0 4px; }
+.emb-pruebas-vacio { margin: 10px 0 0; }
+.emb-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 12px 0; }
+.emb-kpi { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.emb-kpi b { font-size: 22px; color: var(--text); font-variant-numeric: tabular-nums; }
+.emb-kpi.good b { color: var(--peaku-green-dark); }
+.emb-kpi.warn b { color: var(--warn); }
+.emb-kpi span { font-size: 13px; font-weight: 600; color: var(--peaku-gray); }
+.emb-kpi small { font-size: 12px; color: var(--muted); }
+.emb-plista { display: flex; flex-direction: column; }
+.emb-prow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.emb-prow .emb-emp { min-width: 150px; }
+.emb-prow .emb-ops { flex-basis: 100%; }
+.emb-ops { display: flex; flex-direction: column; gap: 1px; font-size: 12px; color: var(--peaku-blue-dark); }
+.emb-ops.falta { color: var(--muted); font-style: italic; }
+.emb-quieta { color: var(--warn); font-weight: 700; }
+.emb-vprueba { background: #f3effe; border-color: #ddd3fb; color: #6d28d9; }
+.emb-pcerradas { margin-top: 6px; }
+.emb-pcerradas summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
+.emb-sindeal { margin-top: 10px; background: #fef3e2; border: 1px solid #f8d7a5; border-radius: 10px; padding: 10px 12px; }
+.emb-sindeal .emb-prow:first-of-type { border-top: 0; }
