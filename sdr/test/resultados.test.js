@@ -116,6 +116,45 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
     assert.strictEqual((await db.query(`SELECT COUNT(*)::int AS n FROM sdr.tasks WHERE lead_id=$1 AND tipo<>'secuencia'`, [await id('Sigma')])).rows[0].n, 0);
   });
 
+  await t.test('LinkedIn en dos pasos: conexión, aceptó (programa el mensaje sin consumir la secuencia), mensaje', async () => {
+    await importar(db, base, { archivo: 'z.csv', contenido: 'empresa,contacto,telefono\nLinke SA,Lina,3008883333', simular: false, ahora: lunes });
+    const lk = await id('Linke SA');
+    const pend = async () => (await db.query(`SELECT id, canal, estado FROM sdr.tasks WHERE lead_id=$1 AND tipo='secuencia' ORDER BY paso`, [lk])).rows;
+    const liAntes = (await pend()).filter(x => x.canal === 'linkedin').length;
+    assert.ok(liAntes >= 1, 'la secuencia trae un toque de LinkedIn');
+    // Sin resultado y sin aceptación: es la conexión; cumple el toque de LinkedIn de la secuencia.
+    const r1 = await registrarToque(db, base, { leadId: lk, canal: 'linkedin', ahora: lunes });
+    assert.strictEqual(r1.etapa, 'contactado');
+    const t1 = (await db.query(`SELECT resultado FROM sdr.touches WHERE lead_id=$1 ORDER BY id DESC LIMIT 1`, [lk])).rows[0];
+    assert.strictEqual(t1.resultado, 'linkedin_conexion');
+    assert.strictEqual((await pend()).filter(x => x.canal === 'linkedin' && x.estado === 'pendiente').length, liAntes - 1);
+    // Aceptó: no cumple ninguna tarea; programa el mensaje como siguiente toque.
+    const antes = (await pend()).filter(x => x.estado === 'hecha').length;
+    const r2 = await registrarToque(db, base, { leadId: lk, canal: 'linkedin', resultado: 'linkedin_acepto', ahora: lunes });
+    assert.strictEqual((await pend()).filter(x => x.estado === 'hecha').length, antes, 'aceptar no consume la secuencia');
+    assert.strictEqual(r2.proxima.canal, 'linkedin');
+    assert.strictEqual(tiempo.fechaBogota(new Date(r2.proxima.due_at)), tiempo.avanzar('2026-09-21', base.LINKEDIN.mensaje_dias_tras_aceptar, true));
+    assert.ok(r2.avisos.some(a => /mensaje de LinkedIn queda programado/.test(a)));
+    // Ahora un toque de LinkedIn sin resultado es el mensaje y cumple la tarea programada.
+    const r3 = await registrarToque(db, base, { leadId: lk, canal: 'linkedin', ahora: lunes });
+    const t3 = (await db.query(`SELECT resultado, task_id FROM sdr.touches WHERE lead_id=$1 ORDER BY id DESC LIMIT 1`, [lk])).rows[0];
+    assert.strictEqual(t3.resultado, 'linkedin');
+    assert.strictEqual(t3.task_id, r2.proxima.id);
+    assert.ok(r3.proxima === null || r3.proxima.id !== r2.proxima.id);
+    // Un resultado inventado por LinkedIn se trata como envío normal (no rompe).
+    await registrarToque(db, base, { leadId: lk, canal: 'linkedin', resultado: 'xx', ahora: lunes });
+    assert.strictEqual((await db.query(`SELECT resultado FROM sdr.touches WHERE lead_id=$1 ORDER BY id DESC LIMIT 1`, [lk])).rows[0].resultado, 'linkedin');
+    // El link de LinkedIn se guarda en extra.linkedin y se valida.
+    await assert.rejects(L.editarLead(db, base, lk, { linkedin: 'lina.co' }, 'Angie'), /linkedin\.com/);
+    const e = await L.editarLead(db, base, lk, { linkedin: 'https://www.linkedin.com/in/lina-x/' }, 'Angie');
+    assert.deepStrictEqual(Object.keys(e.cambios), ['linkedin']);
+    assert.strictEqual((await lead('Linke SA')).extra.linkedin, 'https://www.linkedin.com/in/lina-x/');
+    assert.strictEqual((await L.editarLead(db, base, lk, { linkedin: 'https://www.linkedin.com/in/lina-x/' }, 'Angie')).sin_cambios, true);
+    // La semana cuenta envíos y aceptadas por separado.
+    const w = await require('../ritmo').resumenSemana(db, base, { fecha: '2026-09-21', ahora: lunes });
+    assert.ok(w.totales.linkedin >= 3 && w.totales.linkedin_aceptadas >= 1);
+  });
+
   await t.test('reunión agendada: deal en el Sandler, recordatorio y etapa', async () => {
     const r = await registrarToque(db, base, {
       leadId: await id('ACME'), canal: 'llamada', resultado: 'reunion_agendada', ahora: lunes,

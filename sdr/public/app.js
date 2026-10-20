@@ -415,7 +415,7 @@
   }
 
   // Tarjeta de la cola: la acción que toca (verbo + canal), el contexto del último toque y el paso.
-  const ACCION = { llamada: '📞 Llamar', whatsapp: '💬 Enviar WhatsApp', correo: '✉️ Enviar correo', linkedin: '💼 Mensaje por LinkedIn' };
+  const ACCION = { llamada: '📞 Llamar', whatsapp: '💬 Enviar WhatsApp', correo: '✉️ Enviar correo', linkedin: '💼 LinkedIn' };
   function contextoToque(t) {
     if (!t.ultimo_ms) return 'Sin contacto todavía';
     const cuando = t.tocado_hoy ? 'hoy ' + new Date(t.ultimo_ms).toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit' }) : fecha(t.ultimo_ms);
@@ -1092,7 +1092,7 @@
               <div class="acciones">
                 <button class="btn" data-toque="whatsapp" ${l.telefono ? '' : 'disabled'}>WhatsApp enviado</button>
                 <button class="btn" data-toque="correo" ${l.email ? '' : 'disabled'}>Correo enviado</button>
-                <button class="btn" data-toque="linkedin">LinkedIn enviado</button>
+                <button class="btn" id="linkedin" title="Abre el perfil con el texto copiado: primero la conexión, el mensaje cuando acepte">💼 LinkedIn</button>
                 ${meta.calendly ? '<button class="btn" id="link-calendly" title="Agendar la reunión tú misma en Calendly, o mandarle el link al prospecto">📅 Calendly</button>' : ''}
                 <button class="btn" id="respondio" title="Te escribió por WhatsApp, correo o LinkedIn: registra qué pasó (cuenta como conversación)">Me respondió</button>
                 <button class="btn" id="compromiso" title="Algo que quedaste con el prospecto, con fecha y hora">Compromiso</button>
@@ -1206,6 +1206,8 @@
     });
 
     // Toques de un clic
+    const $li = document.getElementById('linkedin');
+    if ($li) $li.addEventListener('click', () => abrirLinkedin(l, despues));
     $app.querySelectorAll('[data-toque]').forEach(b => b.addEventListener('click', async () => {
       const canal = b.dataset.toque;
       if (canal === 'whatsapp' && l.telefono) window.open(waLink(l.telefono), '_blank', 'noopener');
@@ -1246,7 +1248,7 @@
           ${campo('empresa', 'Empresa', l.empresa, 'required')}${campo('contacto', 'Contacto', l.contacto)}
           ${campo('cargo', 'Cargo', l.cargo)}${campo('ciudad', 'Ciudad', l.ciudad)}
           ${campo('telefono', 'Teléfono principal', telVisible(l.telefono), 'inputmode="tel"')}${campo('telefono_alt', 'Otro teléfono', telVisible(l.telefono_alt), 'inputmode="tel" placeholder="Si tiene otro número"')}
-          ${campo('email', 'Correo', l.email, 'type="email"')}
+          ${campo('email', 'Correo', l.email, 'type="email"')}${campo('linkedin', 'Perfil de LinkedIn', (l.extra || {}).linkedin, 'placeholder="https://www.linkedin.com/in/…"')}
           <div class="acciones" style="grid-column:1/-1;margin:0"><button class="btn primario" type="submit">Guardar</button><button class="btn" type="button" id="editar-cancelar">Cancelar</button></div>
           <div id="editar-error" style="grid-column:1/-1"></div></form>`;
       $f.hidden = false; $dl.hidden = true; $editar.hidden = true;
@@ -1533,6 +1535,78 @@
         }
       } catch (e) { document.getElementById('link-msg').innerHTML = pintarError(e); }
     }));
+  }
+
+  // ---------------------------------------------------------------- LinkedIn en dos pasos
+  // La app no envía nada por LinkedIn (no hay API para cuentas de personas y automatizarlo arriesga la
+  // cuenta de Angie): abre el perfil, o la búsqueda si el lead no trae el link, deja el texto copiado y
+  // registra el toque. Primero la solicitud de conexión con nota corta; el mensaje solo cuando aceptó.
+  function estadoLinkedin(l) {
+    const ts = (l.toques || []).filter(t => t.canal === 'linkedin');
+    const conexion = ts.find(t => t.resultado === 'linkedin_conexion'), acepto = ts.find(t => t.resultado === 'linkedin_acepto');
+    return { conexion: !!conexion, conexion_ms: conexion ? conexion.created_ms : null, acepto: !!acepto, acepto_ms: acepto ? acepto.created_ms : null, mensajes: ts.filter(t => t.resultado === 'linkedin').length };
+  }
+  function textoLinkedin(plantilla, l) {
+    const nombre = (l.contacto || '').trim().split(/\s+/)[0] || '';
+    const eje = (meta.calendly || {}).ejecutiva || ((meta.usuarios || []).find(u => u.rol === 'ejecutiva') || {}).nombre || 'Luisa';
+    return String(plantilla || '').replace(/\{nombre\}/g, nombre).replace(/\{empresa\}/g, l.empresa || '').replace(/\{cargo\}/g, l.cargo || '').replace(/\{sdr\}/g, usuarioActual() || 'Angie').replace(/\{ejecutiva\}/g, eje).replace(/\s+,/g, ',').replace(/  +/g, ' ').trim();
+  }
+  const urlLinkedin = l => (l.extra && l.extra.linkedin) || `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent([l.contacto, l.empresa].filter(Boolean).join(' '))}`;
+  async function copiar(texto) { try { await navigator.clipboard.writeText(texto); return true; } catch (_) { return false; } }
+
+  function abrirLinkedin(l, despues) {
+    const $modal = document.getElementById('modal');
+    const li = meta.linkedin || {};
+    const st = estadoLinkedin(l);
+    const paso = st.acepto ? 'mensaje' : 'conexion';   // qué toca ahora
+    const texto = textoLinkedin(paso === 'mensaje' ? li.mensaje : li.notaConexion, l);
+    const max = li.notaMaxChars || 300;
+    const conLink = !!(l.extra && l.extra.linkedin);
+    $modal.innerHTML = `<div class="velo"><form class="dialogo" id="frm-li" style="max-width:520px">
+      <h2>💼 LinkedIn · ${esc(l.contacto || l.empresa || '')}</h2>
+      <p class="suave" style="margin:0 0 10px;font-size:12px">${st.acepto
+        ? `Aceptó la conexión${st.acepto_ms ? ' el ' + fecha(st.acepto_ms) : ''}${st.mensajes ? ' · ' + plural(st.mensajes, 'mensaje enviado', 'mensajes enviados') : ''}. Ahora sí va el mensaje.`
+        : st.conexion ? `Solicitud de conexión enviada${st.conexion_ms ? ' el ' + fecha(st.conexion_ms) : ''}. El mensaje real solo cuando acepte: hasta entonces le llega como InMail o no le llega.`
+        : 'Primero la solicitud de conexión con una nota corta y sin pitch. El mensaje real va cuando acepte.'}</p>
+      <label>Perfil de LinkedIn ${conLink ? '' : '<span class="suave">(no vino en la lista: se abre la búsqueda; pega el link para la próxima)</span>'}</label>
+      <input name="linkedin" value="${esc((l.extra || {}).linkedin || '')}" placeholder="https://www.linkedin.com/in/…" />
+      <label>${paso === 'mensaje' ? 'Mensaje' : `Nota de conexión <span class="suave" id="li-cuenta"></span>`}</label>
+      <textarea name="texto" rows="${paso === 'mensaje' ? 7 : 4}">${esc(texto)}</textarea>
+      <div class="acciones" style="flex-wrap:wrap">
+        <button class="btn primario" type="submit">${paso === 'mensaje' ? 'Abrir perfil, copiar el mensaje y registrar' : 'Abrir perfil, copiar la nota y registrar'}</button>
+        ${!st.acepto ? `<button class="btn" type="button" id="li-acepto" title="Marca que aceptó: el mensaje queda programado como siguiente toque">✅ Aceptó la conexión</button>` : ''}
+        <button class="btn" type="button" id="li-cancelar">Cancelar</button>
+      </div>
+      <div id="frm-error"></div>
+    </form></div>`;
+    const $frm = document.getElementById('frm-li');
+    const $t = $frm.querySelector('textarea[name=texto]'), $cuenta = document.getElementById('li-cuenta');
+    const contar = () => { if ($cuenta) { const n = $t.value.length; $cuenta.textContent = `${n}/${max} caracteres`; $cuenta.style.color = n > max ? 'var(--mal)' : ''; } };
+    $t.addEventListener('input', contar); contar();
+    document.getElementById('li-cancelar').addEventListener('click', () => { $modal.innerHTML = ''; });
+    const guardarLink = async () => {
+      const v = $frm.querySelector('input[name=linkedin]').value.trim();
+      if (v === ((l.extra || {}).linkedin || '')) return;
+      try { await api(`leads/${l.id}/editar`, { method: 'POST', body: { linkedin: v } }); l.extra = { ...(l.extra || {}), linkedin: v || undefined }; }
+      catch (e) { avisar('El link de LinkedIn no se guardó: ' + e.message, 'error'); }
+    };
+    const registrar = async (resultado, abrir) => {
+      await guardarLink();
+      if (abrir) {
+        const ok = await copiar($t.value.trim());
+        window.open(urlLinkedin(l), '_blank', 'noopener');
+        if (!ok) avisar('No se pudo copiar el texto: cópialo del cuadro.', 'aviso');
+      }
+      try {
+        const r = await api(`leads/${l.id}/toques`, { method: 'POST', body: { canal: 'linkedin', resultado } });
+        $modal.innerHTML = '';
+        despues(r);
+        await vistaLead(l.id, { tocado: true });
+      } catch (e) { document.getElementById('frm-error').innerHTML = pintarError(e); }
+    };
+    $frm.addEventListener('submit', e => { e.preventDefault(); if (paso === 'conexion' && $t.value.length > max) { document.getElementById('frm-error').innerHTML = pintarError(new Error(`LinkedIn corta la nota a ${max} caracteres: acórtala.`)); return; } registrar(paso === 'mensaje' ? 'linkedin' : 'linkedin_conexion', true); });
+    const $ac = document.getElementById('li-acepto');
+    if ($ac) $ac.addEventListener('click', () => registrar('linkedin_acepto', false));
   }
 
   function abrirResultado(l, { callUuid = null, obligatorio = false, soloDescarte = false, compromisoId = null, alTerminar = null, respuesta = false, agendar = false } = {}) {
@@ -1893,9 +1967,9 @@
         <div class="kpi"><b>${w.metas.diasCumplidos}<span class="suave" style="font-size:14px"> / ${w.metas.diasHabilesTranscurridos}</span></b><span>Días con meta cumplida</span></div>
       </div>
       <div class="panel tabla-env">
-        <table><thead><tr><th>Día</th><th class="num">Marcaciones</th><th class="num">Conversaciones</th><th class="num">Reuniones</th><th class="num">WhatsApp</th><th class="num">Correo</th><th class="num">LinkedIn</th><th>Meta</th></tr></thead>
+        <table><thead><tr><th>Día</th><th class="num">Marcaciones</th><th class="num">Conversaciones</th><th class="num">Reuniones</th><th class="num">WhatsApp</th><th class="num">Correo</th><th class="num" title="Conexiones y mensajes enviados · ✓ conexiones aceptadas">LinkedIn</th><th>Meta</th></tr></thead>
         <tbody>${w.dias.map(d => `<tr class="${d.fecha === w.hoy ? 'hoy' : ''} ${d.habil ? '' : 'suave'}">
-          <td><a href="#/historial/${d.fecha}${visto ? '?de=' + encodeURIComponent(visto) : (params.get('de') != null ? '?de=' : '')}" title="Ver qué se hizo ese día">${dia(d.fecha)}</a></td><td class="num" title="${d.marcaciones_tarde ? `+${d.marcaciones_tarde} después de las ${d.corte} (no suman a la meta)` : ''}">${d.marcaciones}${d.marcaciones_tarde ? `<span class="suave" style="font-size:11px"> +${d.marcaciones_tarde}</span>` : ''}</td><td class="num">${d.conversaciones}</td><td class="num">${d.reuniones}</td><td class="num">${d.whatsapp}</td><td class="num">${d.correo}</td><td class="num">${d.linkedin}</td>
+          <td><a href="#/historial/${d.fecha}${visto ? '?de=' + encodeURIComponent(visto) : (params.get('de') != null ? '?de=' : '')}" title="Ver qué se hizo ese día">${dia(d.fecha)}</a></td><td class="num" title="${d.marcaciones_tarde ? `+${d.marcaciones_tarde} después de las ${d.corte} (no suman a la meta)` : ''}">${d.marcaciones}${d.marcaciones_tarde ? `<span class="suave" style="font-size:11px"> +${d.marcaciones_tarde}</span>` : ''}</td><td class="num">${d.conversaciones}</td><td class="num">${d.reuniones}</td><td class="num">${d.whatsapp}</td><td class="num">${d.correo}</td><td class="num" title="${d.linkedin_aceptadas ? plural(d.linkedin_aceptadas, 'conexión aceptada', 'conexiones aceptadas') : ''}">${d.linkedin}${d.linkedin_aceptadas ? `<span class="suave" style="font-size:11px"> ✓${d.linkedin_aceptadas}</span>` : ''}</td>
           <td>${!d.habil ? '' : d.cumplida ? `<span class="chip whatsapp" title="${d.cumplida_por === 'reuniones' ? `${d.reuniones} reuniones agendadas (meta: ${w.metas.reunionesDia})` : 'por ' + d.cumplida_por}">cumplida${d.cumplida_por === 'reuniones' ? ` · ${d.reuniones} reuniones` : ''}</span>` : (d.fecha < w.hoy ? '<span class="chip vencida">no</span>' : (d.fecha === w.hoy ? '<span class="chip hoy">en curso</span>' : ''))}</td>
         </tr>`).join('')}</tbody></table>
       </div>
@@ -1988,7 +2062,7 @@
         <div class="kpi"><b>${r.marcaciones}</b><span>Marcaciones</span></div>
         <div class="kpi"><b>${r.conversaciones}</b><span>Conversaciones</span></div>
         <div class="kpi"><b>${r.reuniones}</b><span>Reuniones agendadas</span></div>
-        <div class="kpi"><b>${r.whatsapp + r.correo + r.linkedin}</b><span>WhatsApp / correo / LinkedIn</span><small>${r.whatsapp} · ${r.correo} · ${r.linkedin}</small></div>
+        <div class="kpi"><b>${r.whatsapp + r.correo + r.linkedin}</b><span>WhatsApp / correo / LinkedIn</span><small>${r.whatsapp} · ${r.correo} · ${r.linkedin}${r.linkedin_aceptadas ? ` · ${plural(r.linkedin_aceptadas, 'conexión aceptada', 'conexiones aceptadas')}` : ''}</small></div>
         <div class="kpi"><b>${r.leads}</b><span>Leads tocados</span><small>${plural(r.toques, 'toque', 'toques')} en total</small></div>
       </div>
       ${h.compromisosHechos.length ? `<div class="panel" style="margin-bottom:14px"><h2>Compromisos cumplidos sin toque <span class="suave" style="font-weight:400;font-size:12px">se marcaron hechos pero no quedó registrado qué pasó</span></h2>

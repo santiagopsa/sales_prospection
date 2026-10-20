@@ -253,6 +253,23 @@ module.exports = {
     whatsapp: 'contactado',
     correo: 'contactado',
     linkedin: 'contactado',
+    linkedin_conexion: 'contactado',
+    linkedin_acepto: 'contactado',
+  },
+
+  // Qué mueve: LinkedIn en dos pasos. El toque de LinkedIn de la secuencia es la SOLICITUD DE CONEXIÓN
+  // con nota corta y sin pitch (LinkedIn la corta a 300 caracteres); el mensaje real solo se manda
+  // cuando el prospecto aceptó: Angie marca "aceptó" y el mensaje queda programado a
+  // mensaje_dias_tras_aceptar días. Así se mide lo único que importa de LinkedIn: cuántos aceptan y
+  // cuántos responden después. Los textos llevan {nombre} (primer nombre), {empresa}, {cargo}, {sdr}
+  // y {ejecutiva}; el botón abre el perfil (o la búsqueda, si el lead no trae el link) con el texto
+  // copiado, y Angie solo pega. No se envía nada desde la app: LinkedIn no lo permite y arriesga la cuenta.
+  // Ver el efecto: node sdr/cli.js resultado linkedin_acepto --etapa contactado
+  LINKEDIN: {
+    nota_conexion: 'Hola {nombre}, soy {sdr} de Peaku. Te llamé por el tema de vacantes de tecnología en {empresa}; te agrego para que tengas mi contacto y, si se les abre una, me escribes.',
+    mensaje: 'Gracias por aceptar, {nombre}. Te cuento en dos líneas por qué te llamé: en empresas como {empresa} una vacante de tecnología se demora 2 o 3 meses, y en Peaku la cubrimos en días con base de datos propia (el 80 % del talento tech de Colombia). ¿Tienen algo abierto ahora o viene algo en el trimestre? Si te sirve, {ejecutiva} te muestra dos casos en 20 minutos.',
+    mensaje_dias_tras_aceptar: 0,
+    nota_max_chars: 300,
   },
 
   // Qué mueve: cuántos días (hábiles si SALTAR_FINES_DE_SEMANA) después de una conversación sin

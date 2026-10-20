@@ -17,7 +17,8 @@ async function actividadPorDia(db, desde, hasta, config = {}, usuario = null) {
             COUNT(*) FILTER (WHERE resultado = 'reunion_agendada')::int AS reuniones,
             COUNT(*) FILTER (WHERE canal = 'whatsapp')::int AS whatsapp,
             COUNT(*) FILTER (WHERE canal = 'correo')::int AS correo,
-            COUNT(*) FILTER (WHERE canal = 'linkedin')::int AS linkedin,
+            COUNT(*) FILTER (WHERE canal = 'linkedin' AND resultado <> 'linkedin_acepto')::int AS linkedin,
+            COUNT(*) FILTER (WHERE resultado = 'linkedin_acepto')::int AS linkedin_aceptadas,
             COUNT(*) FILTER (WHERE canal <> 'ejecutiva')::int AS toques
      FROM ${T.touches}
      WHERE created_at >= $1 AND created_at < $2 ${filtroUsuario(config, 4, usuario)}
@@ -26,7 +27,7 @@ async function actividadPorDia(db, desde, hasta, config = {}, usuario = null) {
   const porFecha = Object.fromEntries(r.rows.map(x => [x.fecha, x]));
   const dias = [];
   for (let f = desde; f <= hasta; f = tiempo.sumarDias(f, 1)) {
-    const d = { fecha: f, marcaciones: 0, marcaciones_total: 0, conversaciones: 0, reuniones: 0, whatsapp: 0, correo: 0, linkedin: 0, toques: 0, ...(porFecha[f] || {}) };
+    const d = { fecha: f, marcaciones: 0, marcaciones_total: 0, conversaciones: 0, reuniones: 0, whatsapp: 0, correo: 0, linkedin: 0, linkedin_aceptadas: 0, toques: 0, ...(porFecha[f] || {}) };
     d.marcaciones_tarde = d.marcaciones_total - d.marcaciones; d.corte = corteAplica(config, f) ? corteMeta(config).hora : null;
     dias.push(d);
   }
@@ -130,7 +131,7 @@ async function resumenSemana(db, config, { fecha, usuario = null, ahora = new Da
   const dias = await actividadPorDia(db, lunes, domingo, config, usuario);
   const habiles = dias.filter(d => !tiempo.esFinDeSemana(d.fecha) && d.fecha <= hoy);
   const suma = k => dias.reduce((s, d) => s + d[k], 0);
-  const totales = { marcaciones: suma('marcaciones'), marcaciones_tarde: suma('marcaciones_tarde'), conversaciones: suma('conversaciones'), reuniones: suma('reuniones'), whatsapp: suma('whatsapp'), correo: suma('correo'), linkedin: suma('linkedin'), toques: suma('toques') };
+  const totales = { marcaciones: suma('marcaciones'), marcaciones_tarde: suma('marcaciones_tarde'), conversaciones: suma('conversaciones'), reuniones: suma('reuniones'), whatsapp: suma('whatsapp'), correo: suma('correo'), linkedin: suma('linkedin'), linkedin_aceptadas: suma('linkedin_aceptadas'), toques: suma('toques') };
   return {
     lunes, domingo, hoy,
     dias: dias.map(d => ({ ...d, habil: !tiempo.esFinDeSemana(d.fecha), cumplida: diaCumplido(config, d), cumplida_por: motivoCumplido(config, d) })),
@@ -186,7 +187,8 @@ async function historialDia(db, config, { fecha, usuario = null } = {}) {
     reuniones: toques.filter(x => x.resultado === 'reunion_agendada').length,
     whatsapp: toques.filter(x => x.canal === 'whatsapp').length,
     correo: toques.filter(x => x.canal === 'correo').length,
-    linkedin: toques.filter(x => x.canal === 'linkedin').length,
+    linkedin: toques.filter(x => x.canal === 'linkedin' && x.resultado !== 'linkedin_acepto').length,
+    linkedin_aceptadas: toques.filter(x => x.resultado === 'linkedin_acepto').length,
     toques: toques.length,
     leads: new Set(toques.map(x => x.lead_id)).size,
     compromisosSinToque: k.rows.length,

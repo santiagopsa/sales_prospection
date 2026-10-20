@@ -220,6 +220,12 @@ async function editarLead(db, config, id, campos, usuario = null) {
     nuevo[k] = n.e164;
   }
   if (nuevo.telefono && nuevo.telefono_alt && nuevo.telefono === nuevo.telefono_alt) nuevo.telefono_alt = null;
+  // El perfil de LinkedIn del contacto vive en extra.linkedin (viene de la lista o lo pega Angie).
+  let linkedin;
+  if ('linkedin' in c) {
+    linkedin = limpiar(c.linkedin);
+    if (linkedin && !/^https?:\/\/([a-z]+\.)?linkedin\.com\//i.test(linkedin)) throw error(400, 'El link de LinkedIn tiene que empezar por https://www.linkedin.com/');
+  }
   // Choques con otros leads (teléfono principal o correo).
   const tel = 'telefono' in nuevo ? nuevo.telefono : actual.telefono;
   const mail = 'email' in nuevo ? nuevo.email : actual.email;
@@ -228,9 +234,14 @@ async function editarLead(db, config, id, campos, usuario = null) {
   if (choque) throw error(409, `Ese ${tel && choque.id ? 'teléfono o correo' : 'dato'} ya es del lead #${choque.id} (${choque.empresa})`);
   const cambios = {};
   for (const [k, v] of Object.entries(nuevo)) if ((actual[k] || null) !== (v || null)) cambios[k] = { antes: actual[k] || null, ahora: v || null };
+  const extraActual = (actual.extra && typeof actual.extra === 'object') ? actual.extra : {};
+  if (linkedin !== undefined && (extraActual.linkedin || null) !== (linkedin || null)) cambios.linkedin = { antes: extraActual.linkedin || null, ahora: linkedin || null };
   if (!Object.keys(cambios).length) return { id, cambios: {}, sin_cambios: true };
   const sets = [], params = [id];
-  for (const k of Object.keys(cambios)) { params.push(nuevo[k]); sets.push(`${k} = $${params.length}`); }
+  for (const k of Object.keys(cambios)) {
+    if (k === 'linkedin') { params.push(JSON.stringify({ ...extraActual, linkedin: linkedin || undefined })); sets.push(`extra = $${params.length}::jsonb`); continue; }
+    params.push(nuevo[k]); sets.push(`${k} = $${params.length}`);
+  }
   await db.query(`UPDATE ${T.leads} SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $1`, params);
   // El deal del Sandler, si existe y la ejecutiva no lo ha trabajado aún, hereda el nombre nuevo.
   if (cambios.empresa && actual.deal_id) {

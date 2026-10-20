@@ -47,6 +47,12 @@ async function omitirPendientes(c, leadId, todo = false) {
   return r.rows.filter(t => t.tipo !== 'secuencia').map(t => t.id);
 }
 
+// ¿El prospecto ya aceptó la conexión de LinkedIn? (último toque de LinkedIn con ese resultado)
+async function aceptoLinkedin(c, leadId) {
+  const r = await c.query(`SELECT 1 FROM ${T.touches} WHERE lead_id = $1 AND resultado = 'linkedin_acepto' LIMIT 1`, [leadId]);
+  return r.rows.length > 0;
+}
+
 // Llamadas sin conversación de un lead desde su última conversación (o desde siempre).
 async function llamadasSinConversacion(c, leadId) {
   const r = await c.query(
@@ -183,6 +189,9 @@ async function registrarToque(db, config, {
   if (!D.CANALES.includes(canal)) throw error(400, `canal inválido: ${canal}`);
   if (canal === 'llamada') {
     if (!D.RESULTADOS_LLAMADA.includes(resultado)) throw error(400, 'El resultado de la llamada es obligatorio');
+  } else if (canal === 'linkedin' && (!resultado || D.RESULTADOS_LINKEDIN.includes(resultado))) {
+    // LinkedIn en dos pasos: sin resultado se decide dentro de la transacción (conexión o mensaje).
+    resultado = resultado || null;
   } else if (!D.RESPUESTAS_OTRO_CANAL.includes(resultado)) resultado = canal; // envío normal; solo una respuesta lleva resultado
   let meses = null;
   if (resultado === 'descartado') {
@@ -216,6 +225,10 @@ async function registrarToque(db, config, {
     if (!D.ETAPAS_DE_ANGIE.includes(lead.etapa) && resultado !== 'descartado') {
       throw error(409, `El lead está en "${D.ETAPA_LABEL[lead.etapa]}"; desde ahí los toques los registra la ejecutiva.`);
     }
+    // LinkedIn sin resultado: conexión si el prospecto no ha aceptado todavía, mensaje si ya aceptó.
+    if (canal === 'linkedin' && !resultado) resultado = (await aceptoLinkedin(c, leadId)) ? 'linkedin' : 'linkedin_conexion';
+    // "Aceptó la conexión" no es un envío: no cumple ninguna tarea de la secuencia.
+    const sinTarea = resultado === 'linkedin_acepto';
 
     // 1 · La tarea que este toque cumple: la indicada, o la primera pendiente del mismo canal.
     //     Con `compromisoId` el toque cumple un compromiso (seguimiento, enviar algo…) y no
@@ -228,7 +241,7 @@ async function registrarToque(db, config, {
       if (!compromisoHecho) throw error(404, 'Ese compromiso ya no está pendiente');
       await c.query(`UPDATE ${T.tasks} SET estado = 'hecha', done_at = $2 WHERE id = $1`, [compromisoHecho.id, ahora.toISOString()]);
       tarea = compromisoHecho;
-    } else {
+    } else if (!sinTarea) {
       tarea = taskId ? pendientes.find(t => t.id === Number(taskId)) : pendientes.find(t => t.canal === canal);
       if (tarea) {
         await c.query(`UPDATE ${T.tasks} SET estado = 'hecha', done_at = $2 WHERE id = $1`, [tarea.id, ahora.toISOString()]);
@@ -354,6 +367,14 @@ async function registrarToque(db, config, {
           pendientes = pendientes.filter(x => x.canal !== 'llamada');
           avisos.push(`${t.llamadas} llamadas sin conversación: ${pendientes.length ? 'la secuencia sigue por ' + pendientes.map(x => D.CANAL_LABEL[x.canal] || x.canal).filter((v, i, a) => a.indexOf(v) === i).join(', ') + '.' : 'se omitieron las llamadas que quedaban y no hay otro canal pendiente.'}`);
         }
+      }
+      // Aceptó la conexión de LinkedIn: el mensaje queda programado (LINKEDIN.mensaje_dias_tras_aceptar)
+      // sin consumir la secuencia; es el siguiente toque.
+      if (resultado === 'linkedin_acepto') {
+        const li = config.LINKEDIN || {};
+        const t = await programar(c, config, leadId, 'linkedin', Number(li.mensaje_dias_tras_aceptar) || 0, ahora);
+        pendientes = [t, ...pendientes];
+        avisos.push(`Aceptó la conexión: el mensaje de LinkedIn queda programado para ${new Date(t.due_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'short' }) === new Date(ahora).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'short' }) ? 'hoy' : 'el ' + new Date(t.due_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'short', day: 'numeric', month: 'short' })}.`);
       }
       proxima = pendientes[0] || null;
       if (!proxima && config.AL_AGOTAR_SECUENCIA === 'descartar') {

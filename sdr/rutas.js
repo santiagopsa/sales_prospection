@@ -28,6 +28,8 @@ function rutas({ db, config, anthropic = null }) {
       resultados: D.RESULTADOS_LLAMADA.map(r => ({ id: r, label: D.RESULTADO_LABEL[r] })),
       resultadoLabel: D.RESULTADO_LABEL,
       respuestasOtroCanal: D.RESPUESTAS_OTRO_CANAL,
+      resultadosLinkedin: D.RESULTADOS_LINKEDIN,
+      linkedin: { notaConexion: (config.LINKEDIN || {}).nota_conexion || '', mensaje: (config.LINKEDIN || {}).mensaje || '', notaMaxChars: (config.LINKEDIN || {}).nota_max_chars || 300, mensajeDiasTrasAceptar: Number((config.LINKEDIN || {}).mensaje_dias_tras_aceptar) || 0 },
       pideInfo: { guion: (config.PIDE_INFO || {}).guion || [], exigirLlamadaPactada: (config.PIDE_INFO || {}).exigir_llamada_pactada !== false, correoMismoDia: (config.PIDE_INFO || {}).correo_mismo_dia !== false },
       razones: D.RAZONES_DESCARTE.filter(r => r !== 'sin_respuesta' && r !== 'lista_negra').map(r => ({ id: r, label: D.RAZON_LABEL[r], definitiva: D.RAZONES_DEFINITIVAS.includes(r), reintento: (config.REINTENTO_POR_RAZON || {})[r] || null })),
       razonLabel: D.RAZON_LABEL,

@@ -450,6 +450,23 @@ empresa…* (`POST /api/deals/:id/demo/mover`) pasa el demo a un deal nuevo (o a
 descarta) y el deal de origen vuelve a ser la ficha del SDR, pendiente de demo. El lead de la SDR se
 re-enlaza solo al deal que tenga el demo de la misma empresa.
 
+## LinkedIn en dos pasos (ficha del lead → 💼 LinkedIn)
+
+La app no envía nada por LinkedIn: no hay API de mensajería para cuentas de personas y automatizarlo
+(Waalaxy, Expandi y similares) viola los términos y arriesga la cuenta de Angie. Lo que hace es dejarlo a
+un clic, como WhatsApp: el botón abre el perfil del lead (`extra.linkedin`, de la lista o pegado en
+"Editar"; si no hay, la búsqueda de LinkedIn con nombre y empresa), deja el texto copiado con `{nombre}`,
+`{empresa}`, `{cargo}`, `{sdr}` y `{ejecutiva}` rellenados, y registra el toque. Angie solo pega.
+
+Y lo divide en lo que LinkedIn de verdad permite en frío: primero la **solicitud de conexión** con nota
+corta y sin pitch (`linkedin_conexion`; LinkedIn la corta a `LINKEDIN.nota_max_chars`, el cuadro cuenta),
+y el **mensaje** real (`linkedin`) solo cuando el prospecto aceptó: Angie marca "Aceptó la conexión"
+(`linkedin_acepto`, que no consume la secuencia) y el mensaje queda programado a
+`LINKEDIN.mensaje_dias_tras_aceptar` días como siguiente toque. Un toque de LinkedIn sin resultado es
+conexión si el lead no ha aceptado y mensaje si ya aceptó, así los registros viejos y la cola siguen
+funcionando. Los textos viven en `LINKEDIN` de `config.js`. Semana e Historial cuentan envíos y, aparte,
+conexiones aceptadas (✓): lo único que mide si LinkedIn sirve.
+
 ## Embudo de la ejecutiva (Sandler Coach → Embudo)
 
 `/#/embudo`: todos los deals del Sandler (de la SDR y de otros canales) en columnas:

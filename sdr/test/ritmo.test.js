@@ -88,7 +88,7 @@ test('ritmo: bloques, racha y semana', { skip: !url && 'sin SDR_TEST_DATABASE_UR
     assert.deepStrictEqual(h.toques.map(x => [x.canal, x.resultado]), [['llamada', 'no_contesto'], ['llamada', 'conversacion'], ['whatsapp', 'whatsapp'], ['llamada', 'no_contesto'], ['correo', 'correo']]); // el 4.º lo metió el test de racha
     assert.strictEqual(h.toques[0].empresa, 'ACME');
     assert.strictEqual(h.toques[4].tarea_titulo, 'Propuesta');
-    assert.deepStrictEqual({ ...h.resumen }, { marcaciones: 3, conversaciones: 1, reuniones: 0, whatsapp: 1, correo: 1, linkedin: 0, toques: 5, leads: 1, compromisosSinToque: 1 });
+    assert.deepStrictEqual({ ...h.resumen }, { marcaciones: 3, conversaciones: 1, reuniones: 0, whatsapp: 1, correo: 1, linkedin: 0, linkedin_aceptadas: 0, toques: 5, leads: 1, compromisosSinToque: 1 });
     assert.strictEqual(h.compromisosHechos[0].id, c1.id);
     assert.strictEqual(h.ayer, '2026-09-21'); assert.strictEqual(h.manana, '2026-09-23');
     // Fecha inválida → hoy; usuario que no tocó nada → vacío.

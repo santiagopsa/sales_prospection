@@ -38,7 +38,9 @@ const RESULTADO_LABEL = {
   descartado: 'Descartado',
   whatsapp: 'WhatsApp enviado',
   correo: 'Correo enviado',
-  linkedin: 'LinkedIn enviado',
+  linkedin: 'Mensaje de LinkedIn enviado',
+  linkedin_conexion: 'Conexión de LinkedIn enviada',
+  linkedin_acepto: 'Aceptó la conexión de LinkedIn',
   // registrados por la ejecutiva comercial
   reunion_realizada: 'Reunión realizada',
   no_show: 'No se presentó',
@@ -51,6 +53,10 @@ const RESULTADO_LABEL = {
   editado: 'Datos editados',
 };
 
+// LinkedIn en dos pasos: primero la solicitud de conexión con nota corta (linkedin_conexion); el
+// mensaje real (linkedin) solo cuando el prospecto aceptó (linkedin_acepto, que programa el mensaje).
+// Un toque de LinkedIn sin resultado es conexión si el lead no ha aceptado, y mensaje si ya aceptó.
+const RESULTADOS_LINKEDIN = ['linkedin_conexion', 'linkedin_acepto', 'linkedin'];
 // Solo estos resultados pasan por el pipeline de audio (fase 4).
 const RESULTADOS_CON_CONVERSACION = ['conversacion', 'pide_info', 'reunion_agendada'];
 // Cuando el prospecto RESPONDE por WhatsApp, correo o LinkedIn, ese toque puede llevar uno de estos
@@ -78,5 +84,5 @@ const RAZON_LABEL = {
 
 module.exports = {
   ETAPAS, ETAPA_LABEL, ETAPAS_DE_ANGIE, CANALES, CANAL_LABEL,
-  RESULTADOS_LLAMADA, RESULTADO_LABEL, RESULTADOS_CON_CONVERSACION, RESPUESTAS_OTRO_CANAL, RAZONES_DESCARTE, RAZONES_DEFINITIVAS, RAZON_LABEL,
+  RESULTADOS_LLAMADA, RESULTADO_LABEL, RESULTADOS_CON_CONVERSACION, RESPUESTAS_OTRO_CANAL, RESULTADOS_LINKEDIN, RAZONES_DESCARTE, RAZONES_DEFINITIVAS, RAZON_LABEL,
 };
