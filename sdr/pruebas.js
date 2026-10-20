@@ -84,7 +84,7 @@ async function resumen(db, config, { ahora = new Date(), etapaDe, ops = null } =
     `SELECT d.id, d.company, d.outcome, d.outcome_reason, d.etapa_embudo, d.propuesta_tipo, d.productos, d.calificacion_sandler,
             ${ms('d.prueba_at')} AS prueba_ms, ${ms('d.quoted_at')} AS quoted_ms, ${ms('d.closed_at')} AS closed_ms,
             ${ms('COALESCE(d.etapa_embudo_at, d.closed_at, d.quoted_at, d.created_at)')} AS etapa_ms, ${ms('d.created_at')} AS created_ms,
-            d.data->'embudoHistorial' AS historial
+            d.data->'embudoHistorial' AS historial, d.data->'prueba' AS ficha
      FROM public.deals d
      WHERE d.prueba_at IS NOT NULL OR d.propuesta_tipo = 'prueba'
         OR COALESCE(d.data->'embudoHistorial', '[]'::jsonb) @> '[{"tipo":"prueba"}]'::jsonb
@@ -107,8 +107,24 @@ async function resumen(db, config, { ahora = new Date(), etapaDe, ops = null } =
       dias_a_cliente: estado === 'ganado' ? dias(h.inicio, d.closed_ms) : null,
       llego_a_cotizacion: !!h.cotizada || ['cotizacion', 'interesado', 'ganado'].includes(estado),
       operacion: deEmpresa(ops, d.company),
+      // La ficha de la prueba (sdr/ficha_prueba.js): champion, día N, decisión.
+      ficha: require('./ficha_prueba').resumenFicha(config, d.ficha, ahora),
     };
   });
+  // El esquema de pruebas: cuántas terminan en una decisión y cuántos champions trajeron al jefe.
+  const conFicha = pruebas.filter(p => p.ficha.tiene_ficha);
+  const decididas = conFicha.filter(p => p.ficha.decision);
+  const conJefe = conFicha.filter(p => p.ficha.champion_trae_jefe != null);
+  const porDecision = {};
+  for (const p of decididas) porDecision[p.ficha.decision.tipo] = (porDecision[p.ficha.decision.tipo] || 0) + 1;
+  const esquema = {
+    con_ficha: conFicha.length, sin_ficha: pruebas.filter(p => p.estado === 'prueba' && !p.ficha.tiene_ficha).length,
+    vencidas: conFicha.filter(p => p.ficha.vencida).length,
+    con_decision: { n: decididas.length, de: conFicha.length, pct: pct(decididas.length, conFicha.length) },
+    champion_trajo_jefe: { n: conJefe.filter(p => p.ficha.champion_trae_jefe).length, de: conJefe.length, pct: pct(conJefe.filter(p => p.ficha.champion_trae_jefe).length, conJefe.length) },
+    por_decision: porDecision,
+    decisiones: (config.PRUEBA || {}).decisiones || {},
+  };
   // Lo que Wei tiene en prueba y Luisa no está siguiendo: empresas sin deal en prueba. Si la
   // empresa tiene un deal abierto en otra etapa, se dice cuál, para pasarlo a prueba de un clic.
   const conDeal = new Set(pruebas.map(p => LN.normalizarEmpresa(p.empresa)).filter(Boolean));
@@ -144,6 +160,7 @@ async function resumen(db, config, { ahora = new Date(), etapaDe, ops = null } =
     mediana_dias_a_cliente: mediana(ganadas.map(p => p.dias_a_cliente).filter(x => x != null)),
     mediana_dias_a_cotizacion: mediana(cotizadas.map(p => p.dias_a_cotizacion).filter(x => x != null)),
     alerta_dias: r.alertaDias,
+    esquema,
     pruebas, sin_deal,
   };
 }

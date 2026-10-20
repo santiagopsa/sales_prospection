@@ -490,6 +490,35 @@ tiene un paso a prueba. Lo de Wei se cruza por el nombre de la empresa normaliza
 "Alpina") y se lee de `verificacion.ops_*` (solo lectura; el esquema lo da `VERIF_SCHEMA`). Sin el módulo
 de verificación, el panel sale igual, sin lo de Wei. `node sdr/cli.js pruebas` imprime lo mismo.
 
+## El esquema de la prueba: ficha en el deal (Ventas → Embudo y detalle del deal)
+
+Lo que dice la literatura de pilotos que convierten, aplicado sin romper la relación con el reclutador: la
+prueba es para el **champion** (el reclutador tiene que ver con sus ojos que Peaku le resuelve lo que su
+herramienta no); el **decisor** no entra a la prueba, entra a la **decisión**. `sdr/ficha_prueba.js`, en
+`public.deals.data.prueba`, con reglas en `PRUEBA` de `config.js`:
+
+1. **Arranque** (al mover un deal a Prueba gratis, o con "Arrancar" en la tarjeta): champion, vacante,
+   criterio de éxito en una frase (sugerido con el cargo), y el decisor **como descubrimiento** (quién
+   aprobaría, cuándo arman el presupuesto, qué pediría, si la plata es de este año): nada bloquea; "perfiles
+   fuera de alcance" solo avisa. Se calcula la **reunión de resultados** a `dias_habiles` (10) y queda como
+   compromiso de la ejecutiva (va a su calendario), con un **check-in** el día `checkin_dia` (5). Volver a
+   arrancar cancela esos compromisos y crea otros.
+2. **Durante**: la tarjeta del embudo dice "Prueba · día N de 10 · champion …"; vencida la fecha sin
+   decisión, "resultados vencidos". Lo de Wei en Operaciones se pega solo.
+3. **Resultados**: los números (presentados, entrevistados, días a la 1.ª terna, contratados, pruebas
+   usadas, contra qué, criterio cumplido) y la **página de resultados**, que redacta Claude para que el
+   champion la reenvíe a su jefe: criterio, números, lo que el cliente dijo que le dolía en el demo (cita
+   sus palabras si hay transcripción: se le pasan hasta `pagina.transcript_max_chars`), y el siguiente paso
+   con las dos salidas. Luisa la edita a mano (se guarda) o le pide ajustes a Claude sobre esa versión.
+4. **Decisión**: ¿el champion trae al jefe? (sí/no: la prueba real de si es champion) y una de cuatro
+   salidas (`PRUEBA.decisiones`): plan y consumo → **ganado** con producto; no → **perdido** con motivo;
+   presupuesto del otro año → **interesados** con `fechaLimiteDecision` (mes o día del comité, obligatorio)
+   y compromiso de retomar `retomar_dias_antes` antes, con el consumo como puente.
+
+Arriba del embudo, "Pruebas gratis" suma el esquema: cuántas tienen ficha (y cuántas en prueba sin
+arrancar o con resultados vencidos), cuántas terminaron en una decisión y de qué tipo, y cuántos champions
+trajeron al jefe. `node sdr/cli.js prueba <deal_id>` imprime la ficha; `node sdr/cli.js pruebas` el esquema.
+
 ## Proyección de la silla (Prospección → Proyección)
 
 `/sdr/#/proyeccion`: el plan del modelo financiero de la silla (hoja "silla-comercial") contra lo real,

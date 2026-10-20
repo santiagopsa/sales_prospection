@@ -119,6 +119,44 @@ module.exports = {
   },
 
   // ---------------------------------------------------------------------------
+  // Esquema de la prueba gratis (ficha en el deal, en Ventas → Embudo / detalle del deal)
+  // ---------------------------------------------------------------------------
+  // La prueba es para el reclutador (el champion): él tiene que ver con sus ojos que Peaku le resuelve
+  // lo que su herramienta no. El decisor NO entra a la prueba; entra a la decisión. Por eso la ficha
+  // de arranque pregunta por el decisor como descubrimiento (quién aprueba, cuándo se arma el
+  // presupuesto, qué le pediría) y nada de eso bloquea. Lo que sí tiene fecha desde el primer día es
+  // la reunión de resultados, donde el champion trae al jefe (o no: esa es la prueba de si es champion).
+  // Qué mueve cada uno:
+  //   dias_habiles: cuánto dura la prueba. La reunión de resultados queda ese número de días hábiles
+  //     después del arranque, como compromiso de la ejecutiva (va a su calendario).
+  //   checkin_dia: en qué día hábil de la prueba se crea el compromiso de llamar al champion a ver cómo
+  //     va (null = sin check-in).
+  //   hora_reunion: hora por defecto de la reunión de resultados y del check-in.
+  //   criterio_por_defecto: el criterio de éxito sugerido al arrancar; {cargo} se reemplaza por el cargo
+  //     de la vacante si se puso. Luisa lo edita.
+  //   retomar_dias_antes: con decisión "presupuesto del otro año" y fecha de comité, se crea el
+  //     compromiso de retomar este número de días antes.
+  //   decisiones: las salidas posibles de la prueba y su etiqueta. plan y consumo cierran el deal como
+  //     ganado; no lo cierra como perdido; otro_ano lo deja en interesados con fecha límite.
+  //   pagina: cómo redacta Claude la página de resultados (modelo null = ANALYZE_MODEL; palabras tope;
+  //     transcript_max_chars = cuánto del demo se le pasa para que cite al cliente con sus palabras).
+  // Ver el efecto: node sdr/cli.js prueba <deal_id>
+  PRUEBA: {
+    dias_habiles: 10,
+    checkin_dia: 5,
+    hora_reunion: '10:00',
+    criterio_por_defecto: 'Terna de {cargo} en 5 días hábiles, con al menos un candidato que el reclutador quiera entrevistar',
+    retomar_dias_antes: 7,
+    decisiones: {
+      plan: 'Plan (contrato)',
+      consumo: 'Por consumo (vacante a vacante)',
+      otro_ano: 'Presupuesto del otro año (con fecha)',
+      no: 'No',
+    },
+    pagina: { modelo: null, max_palabras: 250, transcript_max_chars: 14000 },
+  },
+
+  // ---------------------------------------------------------------------------
   // Proyección de la silla comercial (Prospección → Proyección)
   // ---------------------------------------------------------------------------
   // Los supuestos del modelo financiero de la silla (hoja "silla-comercial"), para comparar mes a mes

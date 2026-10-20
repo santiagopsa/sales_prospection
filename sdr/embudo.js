@@ -83,7 +83,7 @@ async function tablero(db, config, { ahora = new Date() } = {}) {
             jsonb_build_object('dolor', d.data->'dolor', 'dolorCuantificar', d.data->'dolorCuantificar', 'dolorHistoria', d.data->'dolorHistoria',
               'dolorImpacto', d.data->'dolorImpacto', 'presupuesto', d.data->'presupuesto', 'decisor', d.data->'decisor',
               'procesoDecision', d.data->'procesoDecision', 'fechaLimiteDecision', d.data->'fechaLimiteDecision',
-              'calificacionManual', d.data->'calificacionManual') AS data,
+              'calificacionManual', d.data->'calificacionManual') AS data, d.data->'prueba' AS ficha_prueba,
             COALESCE(d.data->>'transcript', '') <> '' AS con_demo,
             ${ms('d.quoted_at')} AS quoted_ms, ${ms('d.closed_at')} AS closed_ms, ${ms('d.created_at')} AS created_ms, ${ms('d.prueba_at')} AS prueba_ms,
             ${ms('COALESCE(d.etapa_embudo_at, d.closed_at, d.quoted_at, d.created_at)')} AS etapa_ms,
@@ -116,6 +116,7 @@ async function tablero(db, config, { ahora = new Date() } = {}) {
       lead_id: d.lead_id, reunion_ms: d.reunion_ms, reunion_pendiente: !!(d.lead_id && d.lead_etapa === 'reunion_agendada' && d.reunion_ms && d.reunion_ms > ahora.getTime()),
       dias_en_etapa: Math.max(0, Math.floor((ahora.getTime() - d.etapa_ms) / 86400000)), created_ms: d.created_ms,
       fue_prueba: !!d.prueba_ms || d.propuesta_tipo === 'prueba', operacion: P.deEmpresa(ops, d.company),
+      prueba: require('./ficha_prueba').resumenFicha(config, d.ficha_prueba, ahora),
     });
   }
   // Dentro de cada columna: lo que lleva más tiempo quieto arriba (ganados/perdidos: lo más reciente).

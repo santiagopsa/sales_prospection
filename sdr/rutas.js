@@ -172,6 +172,13 @@ function rutas({ db, config, anthropic = null }) {
     ['get', '/api/embudo/:id/cotizacion', async ({ params }) => { sinDb(); return require('./embudo').cotizacion(db, params.id); }],
     ['post', '/api/embudo/:id/cotizacion', async ({ params, body }) => { sinDb(); const b = body || {}; return require('./embudo').guardarCotizacion(db, config, { dealId: params.id, archivo: b.archivo, base64: b.base64, texto: b.texto, usuario: b.usuario }); }],
     ['post', '/api/embudo/:id/cotizacion/analizar', async ({ params, body }) => { sinDb(); return require('./embudo').analizarCotizacion(db, config, anthropic, { dealId: params.id, usuario: (body || {}).usuario }); }],
+    // Ficha de la prueba gratis (sdr/ficha_prueba.js): arranque, números, página de resultados y decisión.
+    ['get', '/api/embudo/:id/prueba', async ({ params }) => { sinDb(); return require('./ficha_prueba').ficha(db, config, params.id); }],
+    ['post', '/api/embudo/:id/prueba', async ({ params, body }) => { sinDb(); const b = body || {}; return require('./ficha_prueba').arrancar(db, config, { dealId: params.id, ficha: b, usuario: b.usuario }); }],
+    ['post', '/api/embudo/:id/prueba/resultados', async ({ params, body }) => { sinDb(); const b = body || {}; return require('./ficha_prueba').registrarResultados(db, config, { dealId: params.id, numeros: b, usuario: b.usuario }); }],
+    ['post', '/api/embudo/:id/prueba/pagina', async ({ params, body }) => { sinDb(); const b = body || {}; return require('./ficha_prueba').redactarPagina(db, config, anthropic, { dealId: params.id, usuario: b.usuario, instrucciones: b.instrucciones }); }],
+    ['post', '/api/embudo/:id/prueba/pagina/guardar', async ({ params, body }) => { sinDb(); const b = body || {}; return require('./ficha_prueba').guardarPagina(db, config, { dealId: params.id, texto: b.texto, usuario: b.usuario }); }],
+    ['post', '/api/embudo/:id/prueba/decision', async ({ params, body }) => { sinDb(); const b = body || {}; return require('./ficha_prueba').decidir(db, config, { dealId: params.id, tipo: b.tipo, fecha: b.fecha, nota: b.nota, championTraeJefe: b.champion_trae_jefe, reunionJefeFecha: b.reunion_jefe_fecha, productos: b.productos, usuario: b.usuario }); }],
     // Tablero de la ejecutiva: reuniones de la SDR del mes y calificación con chulos.
     ['get', '/api/ejecutiva', async ({ query }) => { sinDb(); return require('./ejecutiva').tablero(db, config, { mes: query.mes }); }],
     ['post', '/api/leads/:id/calificacion', async ({ params, body }) => {

@@ -7,6 +7,7 @@
 //   node sdr/cli.js proyeccion                                  plan de la silla vs real, mes a mes (reglas PROYECCION)
 //   node sdr/cli.js embudo                                      deals por etapa del embudo de la ejecutiva (reglas EMBUDO)
 //   node sdr/cli.js pruebas                                     pruebas gratis: cuáles pasan a cotización y a cliente, y lo que Wei tiene en prueba
+//   node sdr/cli.js prueba <deal_id>                            la ficha de una prueba: champion, criterio, fechas, números, página y decisión (reglas PRUEBA)
 //   node sdr/cli.js invitados <lead_id>                         reunión del lead: formulario de Calendly, invitados y si aceptaron (Google)
 //   node sdr/cli.js brevo [--forzar]                           cruce de los deals del Sandler con Brevo (pipelines, etapas sin regla, diferencias)
 //   node sdr/cli.js importar archivo.csv|.xlsx [--confirmar]   carga desde la terminal (sin --confirmar, simula)
@@ -176,8 +177,30 @@ async function main() {
         const r = await require('./pruebas').resumen(db, config, { etapaDe: Em.etapaDe });
         const p = x => (x == null ? '—' : x + '%');
         console.log(`\nPruebas · ${r.total} en total · ${r.en_prueba} en prueba (${r.quietas} quietas ${r.alerta_dias}+ días) · a cotización ${p(r.a_cotizacion.pct)} · a cliente ${p(r.a_cliente.pct)} · de las cerradas ${p(r.conversion_cerradas.pct)} (${r.conversion_cerradas.n} de ${r.conversion_cerradas.de})\n`);
-        for (const x of r.pruebas) console.log(`  ${pad(x.estado, 12)}${pad(x.empresa, 32)}${x.dias_en_prueba != null ? x.dias_en_prueba + ' d en prueba' : ''}${x.quieta ? ' · QUIETA' : ''}${x.operacion.length ? ' · Wei: ' + x.operacion.map(o => `${o.producto} ${o.cargo} (${o.estado})`).join(', ') : ''}`);
+        const e = r.esquema || {};
+        if (e.con_ficha) console.log(`  Esquema: ${e.con_ficha} con ficha (${e.sin_ficha} en prueba sin arrancar, ${e.vencidas} con resultados vencidos) · con decisión ${p(e.con_decision.pct)} (${Object.entries(e.por_decision).map(([k, n]) => n + ' ' + k).join(', ') || 'ninguna'}) · champions que trajeron al jefe ${p(e.champion_trajo_jefe.pct)} (${e.champion_trajo_jefe.n} de ${e.champion_trajo_jefe.de})\n`);
+        for (const x of r.pruebas) console.log(`  ${pad(x.estado, 12)}${pad(x.empresa, 32)}${x.dias_en_prueba != null ? x.dias_en_prueba + ' d en prueba' : ''}${x.quieta ? ' · QUIETA' : ''}${x.ficha && x.ficha.tiene_ficha ? ` · ficha: ${x.ficha.decision ? x.ficha.decision.label : 'día ' + x.ficha.dia + ' de ' + x.ficha.dias_total}${x.ficha.champion ? ', champion ' + x.ficha.champion : ''}` : x.estado === 'prueba' ? ' · SIN FICHA' : ''}${x.operacion.length ? ' · Wei: ' + x.operacion.map(o => `${o.producto} ${o.cargo} (${o.estado})`).join(', ') : ''}`);
         if (r.sin_deal.length) { console.log('\n  En prueba con Wei, sin deal en prueba:'); for (const s of r.sin_deal) console.log(`    ${pad(s.empresa, 32)}${s.deal ? `deal #${s.deal.deal_id} en ${s.deal.etapa}` : 'sin deal abierto'}`); }
+      }
+    } else if (cmd === 'prueba') {
+      const id = Number(args._[1]);
+      if (!id) { console.log('Uso: node sdr/cli.js prueba <deal_id>'); }
+      else {
+        const f = await require('./ficha_prueba').ficha(db, config, id);
+        console.log(`\nDeal #${f.deal_id} · ${f.empresa} · etapa ${f.etapa}${f.propuesta_tipo ? ' (' + f.propuesta_tipo + ')' : ''} · reglas: ${f.dias_total} días hábiles, check-in día ${f.reglas.checkinDia}, retomar ${f.reglas.retomarDiasAntes} días antes`);
+        const pr = f.prueba;
+        if (!pr) console.log('  Sin ficha de prueba. Sugerido: ' + JSON.stringify(f.sugerido));
+        else {
+          console.log(`  Champion: ${pr.champion.nombre}${pr.champion.cargo ? ' (' + pr.champion.cargo + ')' : ''} · vacante: ${pr.cargo || '—'} ${pr.vacante_url || ''}`);
+          console.log(`  Criterio: ${pr.criterio}`);
+          console.log(`  Decisor: ${(pr.decisor || {}).quien || 'no se sabe'} · presupuesto: ${(pr.decisor || {}).cuando || '—'} · plata: ${(pr.decisor || {}).plata}`);
+          console.log(`  Arrancó ${pr.inicio} · check-in ${pr.checkin_fecha || '—'} · resultados ${pr.resultados_fecha} ${pr.resultados_hora} · hoy es el día ${f.dia}${f.vencida ? ' · RESULTADOS VENCIDOS' : ''}`);
+          if (pr.numeros) console.log(`  Números: ${JSON.stringify(pr.numeros)}`);
+          if (pr.pagina && pr.pagina.texto) console.log(`  Página (${pr.pagina.texto.split(/\s+/).length} palabras${pr.pagina.editada_at ? ', editada' : ''}):\n    ${pr.pagina.texto.replace(/\n/g, '\n    ')}`);
+          console.log(`  Champion trae al jefe: ${pr.champion_trae_jefe == null ? 'sin respuesta' : pr.champion_trae_jefe ? 'sí' : 'no'}`);
+          if (pr.decision) console.log(`  Decisión: ${pr.decision.label}${pr.decision.fecha ? ' · ' + pr.decision.fecha : ''}${pr.decision.nota ? ' · ' + pr.decision.nota : ''}`);
+        }
+        if (f.operacion.length) console.log('  Wei: ' + f.operacion.map(o => `${o.producto} ${o.cargo} (${o.estado})`).join(', '));
       }
     } else if (cmd === 'comision') {
       const r = await require('./comision').resumenMes(db, config, { mes: args.mes, usuario: args.usuario || null });

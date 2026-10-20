@@ -103,6 +103,100 @@ test('pruebas: cuáles se convierten, y lo que Wei tiene en prueba', { skip: !ur
   const card = Object.values(t.columnas).flat().find(x => x.deal_id === rappi);
   assert.strictEqual(card.fue_prueba, true);
   assert.strictEqual(card.operacion[0].cargo, 'Data Engineer');
+
+  // ---- El esquema de la prueba: ficha de arranque, números, página y decisión (sdr/ficha_prueba.js).
+  const F = require('../ficha_prueba');
+  const ahora = new Date('2026-10-20T15:00:00Z');   // martes
+  const sinDemo = await deal('Cimpa', { data: { fichaCargos: 'Ingeniero de datos, QA', decisor: 'Gerente general' } });
+  await mover(sinDemo, 'propuesta', '2026-10-20T14:00:00Z', { tipo: 'prueba' });
+  let f = await F.ficha(db, base, sinDemo, { ahora });
+  assert.strictEqual(f.prueba, null);
+  assert.strictEqual(f.sugerido.decisor_quien, 'Gerente general');
+  assert.match(f.sugerido.criterio, /Ingeniero de datos/);
+  await assert.rejects(F.arrancar(db, base, { dealId: sinDemo, ficha: { criterio: 'x' }, usuario: 'Luisa', ahora }), /champion/);
+  await assert.rejects(F.arrancar(db, base, { dealId: sinDemo, ficha: { champion_nombre: 'Marian' }, usuario: 'Luisa', ahora }), /criterio/);
+  const a = await F.arrancar(db, base, { dealId: sinDemo, usuario: 'Luisa', ahora, env: {}, ficha: {
+    champion_nombre: 'Marian Ruiz', champion_cargo: 'Reclutadora', criterio: 'Terna de ingeniero de datos en 5 días hábiles',
+    decisor_quien: 'Gerente general', decisor_cuando: 'Presupuesto en noviembre', plata: 'otro_ano', vacante_url: 'https://peaku.co/es/empresas/vacantes/59865', cargo: 'Ingeniero de datos',
+  } });
+  assert.strictEqual(a.prueba.inicio, '2026-10-20');
+  assert.strictEqual(a.prueba.resultados_fecha, '2026-11-03', '10 días hábiles después');
+  assert.strictEqual(a.prueba.checkin_fecha, '2026-10-27');
+  assert.strictEqual(a.prueba.vacante_id, 59865);
+  assert.strictEqual(a.movido, false, 'ya estaba en prueba');
+  const comps = (await db.query(`SELECT tipo, titulo, usuario, estado, due_at FROM sdr.tasks WHERE id IN ($1, $2) ORDER BY due_at`, [a.prueba.checkin_compromiso_id, a.prueba.compromiso_id])).rows;
+  assert.deepStrictEqual(comps.map(c => [c.tipo, c.usuario, c.estado]), [['seguimiento', 'Luisa', 'pendiente'], ['reunion', 'Luisa', 'pendiente']]);
+  assert.match(comps[1].titulo, /Resultados de la prueba · Cimpa/);
+  f = await F.ficha(db, base, sinDemo, { ahora: new Date('2026-10-27T15:00:00Z') });
+  assert.strictEqual(f.dia, 6);
+  assert.strictEqual(f.vencida, false);
+  assert.strictEqual((await F.ficha(db, base, sinDemo, { ahora: new Date('2026-11-05T15:00:00Z') })).vencida, true);
+  // Volver a arrancar cancela los compromisos anteriores y crea otros.
+  const a2 = await F.arrancar(db, base, { dealId: sinDemo, usuario: 'Luisa', ahora: new Date('2026-10-21T15:00:00Z'), env: {}, ficha: { champion_nombre: 'Marian Ruiz', criterio: 'Terna en 5 días' } });
+  assert.strictEqual((await db.query(`SELECT estado FROM sdr.tasks WHERE id = $1`, [a.prueba.compromiso_id])).rows[0].estado, 'omitida');
+  assert.notStrictEqual(a2.prueba.compromiso_id, a.prueba.compromiso_id);
+  // Página: sin números no hay nada que decir.
+  const claude = { messages: { create: async ({ system, messages }) => { claude.ultimo = { system, user: messages[0].content }; return { model: 'claude-falso', content: [{ type: 'text', text: 'Se probó Peaku con la vacante de ingeniero de datos. Candidatos presentados: 6. Entrevistados: 3. Siguiente paso: reunión de 20 minutos.' }] }; } } };
+  await assert.rejects(F.redactarPagina(db, base, claude, { dealId: sinDemo, usuario: 'Luisa' }), /números/);
+  await assert.rejects(F.registrarResultados(db, base, { dealId: sinDemo, numeros: {}, usuario: 'Luisa' }), /al menos un número/);
+  const n = await F.registrarResultados(db, base, { dealId: sinDemo, numeros: { presentados: '6', entrevistados: 3, dias_primera_terna: 4, contratados: '', pruebas_usadas: true, comparado_con: 'Magneto', criterio_cumplido: true }, usuario: 'Luisa' });
+  assert.deepStrictEqual([n.numeros.presentados, n.numeros.contratados, n.numeros.criterio_cumplido], [6, null, true]);
+  const pg = await F.redactarPagina(db, base, claude, { dealId: sinDemo, usuario: 'Luisa' });
+  assert.match(pg.pagina.texto, /Candidatos presentados: 6/);
+  assert.match(claude.ultimo.system, /REENVÍE a su jefe/);
+  assert.match(claude.ultimo.user, /Candidatos presentados: 6/);
+  assert.match(claude.ultimo.user, /Gerente general/);
+  assert.doesNotMatch(claude.ultimo.user, /TRANSCRIPCIÓN DEL DEMO/, 'este deal no tiene demo');
+  // Ajustes de Luisa: a mano, y pidiéndole a Claude cambios sobre la versión anterior.
+  const g = await F.guardarPagina(db, base, { dealId: sinDemo, texto: pg.pagina.texto + '\nContacto: Luisa.', usuario: 'Luisa' });
+  assert.ok(g.pagina.editada_at && g.pagina.texto.endsWith('Contacto: Luisa.'));
+  await F.redactarPagina(db, base, claude, { dealId: sinDemo, usuario: 'Luisa', instrucciones: 'Más corto y sin la parte de Magneto' });
+  assert.match(claude.ultimo.user, /VERSIÓN ANTERIOR DE LA PÁGINA/);
+  assert.match(claude.ultimo.user, /Más corto y sin la parte de Magneto/);
+  // Con demo: la transcripción entra (recortada) para citar al cliente.
+  const conDemo = await deal('Enlace Editorial', { data: { transcript: 'EJECUTIVA: hola\nCLIENTE: nos demoramos tres meses llenando una vacante de desarrollador. ' + 'x'.repeat(20000), dolor: 'Se demoran 3 meses por vacante' } });
+  await mover(conDemo, 'propuesta', '2026-10-01T14:00:00Z', { tipo: 'prueba' });
+  await F.arrancar(db, base, { dealId: conDemo, usuario: 'Luisa', ahora: new Date('2026-10-01T15:00:00Z'), env: {}, ficha: { champion_nombre: 'Angie Pérez', criterio: 'Terna en 5 días' } });
+  await F.registrarResultados(db, base, { dealId: conDemo, numeros: { presentados: 5, contratados: 1 }, usuario: 'Luisa' });
+  await F.redactarPagina(db, base, { messages: { create: async ({ messages }) => { claude.ultimo = { user: messages[0].content }; return { content: [{ type: 'text', text: 'Página de prueba con más de ochenta caracteres para pasar la validación mínima del texto.' }] }; } } }, { dealId: conDemo, usuario: 'Luisa' });
+  assert.match(claude.ultimo.user, /TRANSCRIPCIÓN DEL DEMO/);
+  assert.match(claude.ultimo.user, /transcripción recortada/);
+  assert.ok(claude.ultimo.user.length < 20000);
+  // Decisión: "otro año" exige fecha; deja interesado + fecha límite + compromiso de retomar; cierra la reunión de resultados.
+  await assert.rejects(F.decidir(db, base, { dealId: conDemo, tipo: 'otro_ano', usuario: 'Luisa' }), /fecha/);
+  await assert.rejects(F.decidir(db, base, { dealId: conDemo, tipo: 'nada', usuario: 'Luisa' }), /Elige la decisión/);
+  const dz = await F.decidir(db, base, { dealId: conDemo, tipo: 'otro_ano', fecha: '2027-01', championTraeJefe: true, nota: 'Comité de presupuesto', usuario: 'Luisa', ahora: new Date('2026-10-20T15:00:00Z'), env: {} });
+  const fila = (await db.query(`SELECT etapa_embudo, data->>'fechaLimiteDecision' AS fl, data->'prueba' AS p FROM public.deals WHERE id = $1`, [conDemo])).rows[0];
+  assert.strictEqual(fila.etapa_embudo, 'interesado');
+  assert.strictEqual(fila.fl, '2027-01-01');
+  assert.strictEqual(fila.p.champion_trae_jefe, true);
+  assert.strictEqual(fila.p.decision.tipo, 'otro_ano');
+  const ret = (await db.query(`SELECT titulo, due_at, estado FROM sdr.tasks WHERE id = $1`, [dz.compromiso_id])).rows[0];
+  assert.match(ret.titulo, /Retomar Enlace Editorial/);
+  assert.strictEqual(new Date(ret.due_at).toISOString().slice(0, 10), '2026-12-25');
+  assert.strictEqual((await db.query(`SELECT estado FROM sdr.tasks WHERE id = $1`, [fila.p.compromiso_id])).rows[0].estado, 'hecha');
+  // Consumo cierra como ganado con producto (por defecto SaaS); "no" cierra como perdido con el motivo de la prueba.
+  await F.decidir(db, base, { dealId: sinDemo, tipo: 'consumo', productos: ['Headhunting'], championTraeJefe: false, usuario: 'Luisa', ahora, env: {} });
+  const g2 = (await db.query(`SELECT outcome, outcome_reason, productos FROM public.deals WHERE id = $1`, [sinDemo])).rows[0];
+  assert.deepStrictEqual([g2.outcome, g2.productos], ['won', 'Headhunting']);
+  assert.match(g2.outcome_reason, /Por consumo/);
+  const noVa = await deal('Aurofarma');
+  await mover(noVa, 'propuesta', '2026-10-01T14:00:00Z', { tipo: 'prueba' });
+  await F.arrancar(db, base, { dealId: noVa, usuario: 'Luisa', ahora: new Date('2026-10-01T15:00:00Z'), env: {}, ficha: { champion_nombre: 'X', criterio: 'y', fuera_de_alcance: true } });
+  await F.decidir(db, base, { dealId: noVa, tipo: 'no', nota: 'Perfiles fuera de alcance', usuario: 'Luisa', ahora, env: {} });
+  assert.strictEqual((await db.query(`SELECT outcome FROM public.deals WHERE id = $1`, [noVa])).rows[0].outcome, 'lost');
+  // El resumen de pruebas trae el esquema: con ficha, decididas, champions que trajeron al jefe, por decisión.
+  t = await Em.tablero(db, base, { ahora });
+  const es = t.pruebas.esquema;
+  assert.strictEqual(es.con_ficha, 3);
+  assert.deepStrictEqual(es.con_decision, { n: 3, de: 3, pct: 100 });
+  assert.deepStrictEqual(es.champion_trajo_jefe, { n: 1, de: 2, pct: 50 });
+  assert.deepStrictEqual(es.por_decision, { otro_ano: 1, consumo: 1, no: 1 });
+  assert.strictEqual(es.sin_ficha, 2, 'rappi y quieta siguen en prueba sin ficha');
+  const cardCimpa = Object.values(t.columnas).flat().find(x => x.deal_id === sinDemo);
+  assert.strictEqual(cardCimpa.prueba.champion, 'Marian Ruiz');
+  assert.strictEqual(cardCimpa.prueba.decision.tipo, 'consumo');
+
   await db.query('DROP SCHEMA IF EXISTS verif_pruebas CASCADE');
   delete process.env.VERIF_SCHEMA;
   await db.end();

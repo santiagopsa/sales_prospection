@@ -8,7 +8,15 @@ const base = require('../config');
 const { conectar } = require('../db');
 const { initSchema } = require('../schema');
 const Em = require('../embudo');
+const { rutas } = require('../rutas');
 const PUB = path.join(__dirname, '..', '..', 'public');
+// Claude falso para la página de resultados de la prueba (sdr/ficha_prueba.js).
+const anthropic = { messages: { create: async ({ messages }) => ({ model: 'claude-falso', content: [{ type: 'text', text: `Se probó Peaku con la vacante acordada. Criterio de éxito: cumplido.\nCandidatos presentados: 6. Entrevistados: 3.\nEl cliente nos había dicho que "nos demoramos tres meses"; la primera terna llegó en 4 días hábiles.\nSiguiente paso: 20 minutos con quien aprueba para elegir entre plan o por consumo.` }] }) } };
+function compilar(ruta) {
+  const nombres = [];
+  const re = new RegExp('^' + ruta.replace(/:(\w+)/g, (_, n) => { nombres.push(n); return '([^/]+)'; }) + '$');
+  return p => { const m = re.exec(p); return m && Object.fromEntries(nombres.map((n, i) => [n, decodeURIComponent(m[i + 1])])); };
+}
 const db = conectar(process.env.SDR_TEST_DATABASE_URL);
 process.env.VERIF_SCHEMA = 'verif_e2e';
 
@@ -47,13 +55,24 @@ const leer = req => new Promise(ok => { let b = ''; req.on('data', c => b += c);
 const json = (res, st, j) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(j)); };
 
 sembrar().then(() => {
+  const tabla = rutas({ db, config: base, anthropic }).map(([m, r, h]) => ({ m: m.toUpperCase(), match: compilar(r), h }));
   http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x');
     try {
-      if (u.pathname === '/sdr/api/embudo') return json(res, 200, await Em.tablero(db, base));
-      const m = u.pathname.match(/^\/sdr\/api\/embudo\/(\d+)\/mover$/);
-      if (m && req.method === 'POST') { const b = await leer(req); return json(res, 200, await Em.mover(db, base, { dealId: m[1], ...b })); }
-      if (u.pathname.startsWith('/sdr/api/') || u.pathname.startsWith('/api/')) return json(res, 200, {});
+      // El detalle del deal del Sandler (/api/deals/:id), lo justo para la ficha.
+      const md = u.pathname.match(/^\/api\/deals\/(\d+)$/);
+      if (md && req.method === 'GET') { const d = (await db.query('SELECT * FROM public.deals WHERE id = $1', [md[1]])).rows[0]; return json(res, d ? 200 : 404, d || { error: 'no' }); }
+      if (u.pathname.startsWith('/sdr/api/')) {
+        const p = u.pathname.slice(4);
+        for (const r of tabla) {
+          const params = r.m === req.method && r.match(p);
+          if (!params) continue;
+          const b = await leer(req);
+          return json(res, 200, await r.h({ params, query: Object.fromEntries(u.searchParams), body: b, headers: req.headers }));
+        }
+        return json(res, 404, { error: 'Ruta no encontrada' });
+      }
+      if (u.pathname.startsWith('/api/')) return json(res, 200, {});
       const f = path.join(PUB, u.pathname === '/' ? 'index.html' : u.pathname);
       if (!f.startsWith(PUB) || !fs.existsSync(f)) { res.writeHead(404); return res.end(); }
       res.writeHead(200, { 'content-type': TIPOS[path.extname(f)] || 'application/octet-stream' }); fs.createReadStream(f).pipe(res);

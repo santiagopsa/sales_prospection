@@ -1756,6 +1756,7 @@ async function renderDealDetail(id) {
         ${d.calificacionManual ? `<p class="muted" style="font-size:12px;margin:8px 0 0">Chulos marcados en el <a href="#/tablero">tablero</a> por ${esc(d.calificacionManual.por || '—')}${d.calificacionManual.at ? ' · ' + new Date(d.calificacionManual.at).toLocaleString('es-CO') : ''}.</p>` : ''}</div>`;
     })()}
 
+    <div id="prueba-card"></div>
     <div id="cotizacion-card"></div>
 
     ${iaReportHtml(d.iaExtracted)}
@@ -1883,6 +1884,7 @@ async function renderDealDetail(id) {
     } catch (e) { alert('No se pudo mover: ' + e.message); $mover.disabled = false; $mover.textContent = 'Este demo es de otra empresa…'; }
   });
   pintarCotizacion(row.id);
+  pintarPrueba(row.id);
   // Bindings del panel de outcome
   const wonBtn = el.querySelector('[data-outcome="won"]');
   const lostBtn = el.querySelector('[data-outcome="lost"]');
@@ -2435,10 +2437,23 @@ function embColumnas(d) {
   return out;
 }
 const embFechaCorta = f => { if (!f) return ''; const [y, m, d] = String(f).slice(0, 10).split('-'); return `${d}/${m}`; };
+const embFechaDecision = f => { if (!f) return ''; const s = String(f).slice(0, 10); return s.endsWith('-01') ? new Date(s + 'T12:00:00-05:00').toLocaleDateString('es-CO', { month: 'short', year: 'numeric' }) : embFechaCorta(s); };
 // Lo que Wei está haciendo con esa empresa en Operaciones (lo que marcó en prueba).
 const embOperacion = o => `${esc(o.producto)}: ${esc(o.cargo || 'sin cargo')}${o.estado ? ' · ' + esc(o.estado) : ''}`
   + (o.producto === 'SaaS' && o.meta ? ` · ${o.destacados || 0}/${o.meta} destacados` : '')
   + (o.producto === 'Headhunting' ? (o.primer_envio ? ` · primer candidato ${embFechaCorta(o.primer_envio)}` : ' · sin candidatos enviados') : '');
+// La ficha de la prueba en la tarjeta (sdr/ficha_prueba.js): día N de 10 y el champion, o el botón
+// para arrancarla; después de la decisión, qué se decidió.
+function embPruebaLinea(x, etapa) {
+  const p = x.prueba || {};
+  if (etapa === 'prueba') {
+    if (!p.tiene_ficha) return `<div class="emb-ops falta"><button type="button" class="emb-cot falta" data-prueba-arrancar="${x.deal_id}">▶ Arrancar la prueba (champion, criterio, fecha de resultados)</button></div>`;
+    const estado = p.decision ? `decidida: ${esc(p.decision.label)}` : p.vencida ? `<b class="emb-quieta">resultados vencidos (${embFechaCorta(p.resultados_fecha)})</b>` : `día ${p.dia} de ${p.dias_total} · resultados ${embFechaCorta(p.resultados_fecha)}`;
+    return `<div class="emb-prueba"><a href="#/deal/${x.deal_id}#prueba">Prueba · ${estado}</a>${p.champion ? `<span class="muted chico"> · champion ${esc(p.champion)}</span>` : ''}${p.champion_trae_jefe === true ? ' <span class="pill good" title="El champion trae al jefe a la reunión de resultados">trae al jefe</span>' : ''}</div>`;
+  }
+  if (p.tiene_ficha && p.decision) return `<div class="emb-prueba muted chico">Prueba: ${esc(p.decision.label)}${p.decision.fecha ? ' · ' + embFechaDecision(p.decision.fecha) : ''}</div>`;
+  return '';
+}
 const EMB_MOTIVOS = {
   ganado: ['Dolor bien desarrollado y demo enfocada', 'Ancla de precio funcionó (ROI vs statu quo)', 'Piloto validó la solución', 'Champion interno empujó la decisión', 'Otro'],
   perdido: ['Lead sin valor (no calificaba)', 'Precio / presupuesto', 'Se fueron con competidor', 'Timing / no era el momento', 'Decisión interna quedó frenada', 'Cliente no respondió (breakup día 30)', 'Otro'],
@@ -2463,6 +2478,7 @@ function embTarjeta(x, etapa) {
     </div>
     ${etapa === 'ganado' && x.productos && x.productos.length ? `<div class="emb-chips">${x.productos.map(pr => `<span class="pill good">${esc(pr)}</span>`).join('')}</div>` : ''}
     ${x.motivo && (etapa === 'ganado' || etapa === 'perdido') ? `<div class="muted chico">${esc(x.motivo)}</div>` : ''}
+    ${embPruebaLinea(x, etapa)}
     ${ops.length ? `<div class="emb-ops" title="Lo que Wei tiene en prueba en Operaciones">${ops.slice(0, 2).map(o => `<span>Wei · ${embOperacion(o)}</span>`).join('')}</div>` : (etapa === 'prueba' ? `<div class="emb-ops falta">Wei no la tiene marcada en prueba en Operaciones</div>` : '')}
     ${['cotizacion', 'interesado', 'ganado'].includes(etapa) ? (x.cotizacion ? `<a class="emb-cot" href="#/deal/${x.deal_id}" title="${esc(x.cotizacion.archivo)}">📄 Cotización${x.cotizacion.analizada ? ' · analizada' : ' · sin analizar'}</a>` : `<button type="button" class="emb-cot falta" data-cotizar="${x.deal_id}">📄 Subir la cotización</button>`) : ''}
     <div class="emb-pie">
@@ -2510,7 +2526,8 @@ async function renderEmbudo() {
   el.querySelectorAll('[data-mover]').forEach(s => s.addEventListener('change', () => { if (s.value) embMover(Number(s.dataset.mover), s.value); s.value = ''; }));
   el.querySelectorAll('[data-calificar]').forEach(b => b.addEventListener('click', () => embCalificar(Number(b.dataset.calificar))));
   el.querySelectorAll('[data-cotizar]').forEach(b => b.addEventListener('click', () => embCotizacion(Number(b.dataset.cotizar))));
-  el.querySelectorAll('[data-aprueba]').forEach(b => b.addEventListener('click', () => embEnviar(Number(b.dataset.aprueba), { etapa: 'propuesta', tipo: 'prueba' }, 'Prueba gratis')));
+  el.querySelectorAll('[data-aprueba]').forEach(b => b.addEventListener('click', async () => { const id = Number(b.dataset.aprueba); await embEnviar(id, { etapa: 'propuesta', tipo: 'prueba' }, 'Prueba gratis'); pruebaArrancar(id, { alTerminar: embRecargar }); }));
+  el.querySelectorAll('[data-prueba-arrancar]').forEach(b => b.addEventListener('click', () => pruebaArrancar(Number(b.dataset.pruebaArrancar), { alTerminar: embRecargar })));
 }
 
 // ---------- Pruebas gratis: ¿cuáles se convierten en clientes? ----------
@@ -2540,13 +2557,21 @@ function embPruebasHtml(p) {
   const fila = x => {
     const E = EMB_ESTADO_PRUEBA[x.estado] || { tx: x.estado, cls: '' };
     return `<div class="emb-prow"><a href="#/deal/${x.deal_id}" class="emb-emp">${esc(x.empresa || 'Sin empresa')}</a>
-      <span class="pill ${E.cls}">${esc(E.tx)}</span><span class="muted chico">${detalle(x)}</span>
+      <span class="pill ${E.cls}">${esc(E.tx)}</span><span class="muted chico">${detalle(x)}</span>${fichaDe(x)}
       ${x.operacion.length ? `<span class="emb-ops">${x.operacion.map(o => `<span>Wei · ${embOperacion(o)}</span>`).join('')}</span>` : ''}</div>`;
   };
+  const es = p.esquema || null;
+  const esquemaHtml = es && es.con_ficha ? `<div class="emb-kpis emb-kpis-esquema">
+      <div class="emb-kpi"><b>${es.con_ficha}</b><span>con ficha de prueba</span><small>${es.sin_ficha ? `${es.sin_ficha} en prueba sin arrancar` : 'todas las que van tienen ficha'}${es.vencidas ? ` · <b class="emb-quieta">${es.vencidas} con resultados vencidos</b>` : ''}</small></div>
+      <div class="emb-kpi ${es.con_decision.n ? 'good' : ''}"><b>${pc(es.con_decision.pct)}</b><span>terminaron en una decisión</span><small>${es.con_decision.n} de ${es.con_ficha} · ${Object.entries(es.por_decision).map(([k, n]) => `${n} ${(es.decisiones[k] || k).toLowerCase().replace(/ \(.*\)$/, '')}`).join(', ') || 'ninguna todavía'}</small></div>
+      <div class="emb-kpi ${es.champion_trajo_jefe.n ? 'good' : es.champion_trajo_jefe.de ? 'warn' : ''}"><b>${pc(es.champion_trajo_jefe.pct)}</b><span>champions que trajeron al jefe</span><small>${es.champion_trajo_jefe.n} de ${es.champion_trajo_jefe.de} con respuesta · la prueba real del champion</small></div>
+    </div>` : '';
+  const fichaDe = x => { const f = x.ficha || {}; if (!f.tiene_ficha) return x.estado === 'prueba' ? `<button type="button" class="btn ghost btn-sm" data-prueba-arrancar="${x.deal_id}">Arrancar</button>` : ''; return `<span class="muted chico">${f.decision ? `decisión: ${esc(f.decision.label)}${f.decision.fecha ? ' · ' + embFechaDecision(f.decision.fecha) : ''}` : f.vencida ? `<b class="emb-quieta">resultados vencidos ${embFechaCorta(f.resultados_fecha)}</b>` : `día ${f.dia} de ${f.dias_total}`}${f.champion ? ` · champion ${esc(f.champion)}` : ''}${f.champion_trae_jefe === true ? ' · trae al jefe' : f.champion_trae_jefe === false ? ' · no trae al jefe' : ''}</span>`; };
   const abiertas = p.pruebas.filter(x => !['ganado', 'perdido'].includes(x.estado)), cerradas = p.pruebas.filter(x => ['ganado', 'perdido'].includes(x.estado));
   return `<section class="card emb-pruebas">
     <div class="split"><h2 style="margin:0">Pruebas gratis</h2><span class="muted chico">¿cuáles se convierten en clientes? · ${p.total} prueba${p.total === 1 ? '' : 's'} en total</span></div>
     <div class="emb-kpis">${kpis.map(k => `<div class="emb-kpi ${k.cls || ''}"><b>${k.v}</b><span>${k.l}</span><small>${k.s}</small></div>`).join('')}</div>
+    ${esquemaHtml}
     ${abiertas.length ? `<div class="emb-plista">${abiertas.map(fila).join('')}</div>` : ''}
     ${cerradas.length ? `<details class="emb-pcerradas"><summary class="chico">Resueltas: ${plural(cerradas.filter(x => x.estado === 'ganado').length, 'cliente', 'clientes')}, ${plural(cerradas.filter(x => x.estado === 'perdido').length, 'perdida', 'perdidas')}</summary><div class="emb-plista">${cerradas.map(fila).join('')}</div></details>` : ''}
     ${p.sin_deal.length ? `<div class="emb-sindeal"><b class="chico">Wei las tiene en prueba y no están en tu embudo como prueba</b>
@@ -2575,7 +2600,7 @@ async function embMover(id, etapa) {
   const nombre = (EMB_COLS.find(e => e.id === etapa) || embDatos.etapas.find(e => e.id === etapa) || {}).label || etapa;
   if (etapa === 'calificado') return embCalificar(id, true);
   // Las dos columnas de propuesta: el tipo lo dice la columna, no hay que preguntarlo.
-  if (etapa === 'prueba') return embEnviar(id, { etapa: 'propuesta', tipo: 'prueba' }, 'Prueba gratis');
+  if (etapa === 'prueba') { await embEnviar(id, { etapa: 'propuesta', tipo: 'prueba' }, 'Prueba gratis'); if (!(x.prueba || {}).tiene_ficha) pruebaArrancar(id, { alTerminar: embRecargar }); return; }
   if (etapa === 'cotizacion') { await embEnviar(id, { etapa: 'propuesta', tipo: 'cotizacion' }, 'Cotización'); if (!x.cotizacion) embCotizacion(id); return; }
   if (etapa === 'propuesta') {
     const m = embModal(`<h2 style="margin-top:0">${esc(x.empresa)} → ${esc(nombre)}</h2><p class="muted">¿Qué se le envió?</p>
@@ -2699,6 +2724,160 @@ async function pintarCotizacion(dealId) {
     $an.disabled = true; $an.textContent = 'Analizando…';
     try { await tbApi(`embudo/${dealId}/cotizacion/analizar`, { method: 'POST', body: {} }); tbAvisar('Análisis listo.'); await recargar(); }
     catch (e) { tbAvisar(e.message, 'error'); $an.disabled = false; $an.textContent = '✦ Analizar contra el demo'; }
+  });
+}
+
+// ---------- Prueba gratis: la ficha del deal (sdr/ficha_prueba.js) ----------
+// Cuatro momentos: arranque (champion, criterio, decisor como descubrimiento, fecha de resultados),
+// durante (día N), resultados (números + página redactada por Claude para que el champion la
+// reenvíe a su jefe; Luisa la edita o le pide ajustes) y decisión (plan / consumo / no / otro año).
+const PRUEBA_PLATA = { este_ano: 'De este año', otro_ano: 'Del otro año', no_sabe: 'No se sabe' };
+const prFecha = f => f ? new Date(f + 'T12:00:00-05:00').toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' }) : '—';
+let prEjecutiva = null;   // la ejecutiva, según /sdr/api/embudo/:id/prueba (USUARIOS en config)
+const prUsuario = () => prEjecutiva || (embDatos && embDatos.ejecutiva) || 'Luisa';
+
+function pruebaFichaHtml(f) {
+  const p = f.prueba || {}, sg = f.sugerido || {};
+  const v = (k, alt) => esc((p[k] != null && p[k] !== '' ? p[k] : alt) || '');
+  const ch = p.champion || {}, dz = p.decisor || {};
+  return `<div class="pr-form">
+    <p class="muted chico" style="margin:0 0 10px">La prueba es para el <b>reclutador</b>: él tiene que ver con sus ojos que Peaku le resuelve lo que su herramienta no. El decisor no entra a la prueba, entra a la <b>decisión</b>: aquí solo se anota quién es para preparar ese momento.</p>
+    <div class="pr-dos">
+      <div><label>Reclutador que hace la prueba (champion)</label><input data-f="champion_nombre" value="${esc(ch.nombre || sg.champion_nombre || '')}" placeholder="Nombre" /></div>
+      <div><label>Cargo</label><input data-f="champion_cargo" value="${esc(ch.cargo || sg.champion_cargo || '')}" placeholder="Ej. Analista de selección" /></div>
+    </div>
+    <div class="pr-dos">
+      <div><label>Vacante de la prueba (cargo)</label><input data-f="cargo" value="${v('cargo', sg.cargo)}" placeholder="Ej. Desarrollador backend" /></div>
+      <div><label>Link de la vacante en peaku.co</label><input data-f="vacante_url" value="${v('vacante_url', sg.vacante_url)}" placeholder="https://peaku.co/es/empresas/vacantes/…" /></div>
+    </div>
+    <label>Criterio de éxito <span class="muted">(una frase: qué tiene que pasar para que la prueba se dé por buena)</span></label>
+    <input data-f="criterio" value="${v('criterio', sg.criterio)}" />
+    <details ${dz.quien || sg.decisor_quien ? 'open' : ''} style="margin-top:10px"><summary class="chico" style="cursor:pointer;font-weight:600">El decisor, como descubrimiento (no bloquea nada)</summary>
+      <div class="pr-dos" style="margin-top:8px">
+        <div><label>¿Quién aprobaría una herramienta así?</label><input data-f="decisor_quien" value="${esc(dz.quien || sg.decisor_quien || '')}" placeholder="Nombre o cargo" /></div>
+        <div><label>¿Cuándo arman el presupuesto?</label><input data-f="decisor_cuando" value="${esc(dz.cuando || sg.decisor_cuando || '')}" placeholder="Ej. noviembre, comité de enero" /></div>
+      </div>
+      <label>¿Qué le pediría ese jefe para decir que sí?</label><input data-f="decisor_que_pide" value="${esc(dz.que_pide || '')}" placeholder="Ej. que la terna llegue en menos de una semana" />
+      <label>La plata</label><div class="chips" style="margin:0">${Object.entries(PRUEBA_PLATA).map(([k, l]) => `<label class="chip" style="padding:6px 10px;display:inline-flex;gap:6px;align-items:center"><input type="radio" name="pr-plata" value="${k}" ${(dz.plata || 'no_sabe') === k ? 'checked' : ''} style="margin:0"> ${l}</label>`).join('')}</div>
+    </details>
+    <label class="chip" style="margin-top:10px;padding:6px 10px;display:inline-flex;gap:6px;align-items:center"><input type="checkbox" data-f="fuera_de_alcance" ${p.fuera_de_alcance ? 'checked' : ''} style="margin:0"> Los perfiles están fuera de nuestro alcance (mejor no arrancar)</label>
+    <div class="pr-dos" style="margin-top:8px"><div><label>Arranca el</label><input type="date" data-f="inicio" value="${esc(p.inicio || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }))}" /></div>
+      <div class="muted chico" style="align-self:end;padding-bottom:8px">La reunión de resultados queda a ${f.dias_total} días hábiles como compromiso de ${esc(prUsuario())}${f.reglas && f.reglas.checkinDia ? `, con check-in el día ${f.reglas.checkinDia}` : ''}. Ahí el champion trae al jefe, o no.</div></div>
+  </div>`;
+}
+function pruebaLeerFicha($f) {
+  const b = {};
+  $f.querySelectorAll('[data-f]').forEach(i => { b[i.dataset.f] = i.type === 'checkbox' ? i.checked : i.value.trim(); });
+  const pl = $f.querySelector('input[name=pr-plata]:checked'); b.plata = pl ? pl.value : 'no_sabe';
+  return b;
+}
+async function pruebaArrancar(dealId, { alTerminar = null } = {}) {
+  let f; try { f = await tbApi(`embudo/${dealId}/prueba`); } catch (e) { tbAvisar(e.message, 'error'); return; }
+  prEjecutiva = f.ejecutiva || prEjecutiva;
+  const m = embModal(`<h2 style="margin-top:0">${f.prueba ? 'Ficha de la prueba' : 'Arrancar la prueba'} · ${esc(f.empresa || '')}</h2>
+    ${pruebaFichaHtml(f)}
+    <div class="btn-row"><button class="btn ghost" data-cerrar>Cancelar</button><button class="btn" id="pr-ok">${f.prueba ? 'Guardar y recalcular fechas' : '▶ Arrancar'}</button></div>`);
+  m.querySelector('#pr-ok').addEventListener('click', async () => {
+    const b = pruebaLeerFicha(m);
+    const $b = m.querySelector('#pr-ok'); $b.disabled = true;
+    try {
+      const r = await tbApi(`embudo/${dealId}/prueba`, { method: 'POST', body: { ...b, usuario: prUsuario() } });
+      m.innerHTML = '';
+      tbAvisar(['Prueba arrancada.', ...(r.avisos || [])].join(' '), r.avisos && r.avisos.some(a => /fuera de alcance/.test(a)) ? 'error' : 'ok');
+      if (alTerminar) await alTerminar();
+    } catch (e) { tbAvisar(e.message, 'error'); $b.disabled = false; }
+  });
+}
+
+function pruebaNumerosHtml(n = {}) {
+  const v = k => (n[k] == null ? '' : n[k]);
+  return `<div class="pr-numeros">
+    <div class="pr-cuatro">
+      <div><label>Candidatos presentados</label><input type="number" min="0" data-n="presentados" value="${v('presentados')}" /></div>
+      <div><label>Entrevistados por ellos</label><input type="number" min="0" data-n="entrevistados" value="${v('entrevistados')}" /></div>
+      <div><label>Días hábiles a la 1.ª terna</label><input type="number" min="0" data-n="dias_primera_terna" value="${v('dias_primera_terna')}" /></div>
+      <div><label>Contratados</label><input type="number" min="0" data-n="contratados" value="${v('contratados')}" /></div>
+    </div>
+    <div class="pr-dos">
+      <div><label>Contra qué lo compararon</label><input data-n="comparado_con" value="${esc(n.comparado_con || '')}" placeholder="Magneto, LinkedIn, nada…" /></div>
+      <div><label>Pruebas de Peaku</label><select data-n="pruebas_usadas"><option value="" ${n.pruebas_usadas == null ? 'selected' : ''}>—</option><option value="1" ${n.pruebas_usadas === true ? 'selected' : ''}>Las usaron</option><option value="0" ${n.pruebas_usadas === false ? 'selected' : ''}>No las usaron</option></select></div>
+    </div>
+    <div class="pr-dos">
+      <div><label>¿Se cumplió el criterio de éxito?</label><select data-n="criterio_cumplido"><option value="" ${n.criterio_cumplido == null ? 'selected' : ''}>—</option><option value="1" ${n.criterio_cumplido === true ? 'selected' : ''}>Sí</option><option value="0" ${n.criterio_cumplido === false ? 'selected' : ''}>No</option></select></div>
+      <div><label>Nota</label><input data-n="nota" value="${esc(n.nota || '')}" placeholder="Lo que valga la pena que diga la página" /></div>
+    </div>
+  </div>`;
+}
+const pruebaLeerNumeros = $f => { const b = {}; $f.querySelectorAll('[data-n]').forEach(i => { const v = i.value; b[i.dataset.n] = i.tagName === 'SELECT' ? (v === '' ? null : v === '1') : v.trim(); }); return b; };
+
+async function pintarPrueba(dealId) {
+  const $c = document.getElementById('prueba-card'); if (!$c) return;
+  let f; try { f = await tbApi(`embudo/${dealId}/prueba`); } catch (e) { $c.innerHTML = ''; return; }
+  prEjecutiva = f.ejecutiva || prEjecutiva;
+  const p = f.prueba;
+  const enPrueba = f.etapa === 'propuesta' && f.propuesta_tipo === 'prueba';
+  if (!p && !enPrueba) { $c.innerHTML = ''; return; }
+  const dec = p && p.decision;
+  const paso = (n, titulo, hecho, abierto, cuerpo) => `<details class="pr-paso ${hecho ? 'hecho' : ''}" ${abierto ? 'open' : ''}><summary><span class="pr-n">${hecho ? '✓' : n}</span> <b>${titulo}</b></summary><div class="pr-cuerpo">${cuerpo}</div></details>`;
+  const cab = p ? `${dec ? `<span class="pill ${dec.tipo === 'no' ? 'bad' : dec.tipo === 'otro_ano' ? 'warn' : 'good'}">${esc(dec.label)}</span>` : f.vencida ? `<span class="pill bad">Resultados vencidos · ${prFecha(p.resultados_fecha)}</span>` : f.resultados_hoy ? `<span class="pill warn">Reunión de resultados hoy</span>` : `<span class="pill">Día ${f.dia} de ${f.dias_total}</span>`} <span class="muted chico">champion ${esc(p.champion ? p.champion.nombre : '—')} · resultados ${prFecha(p.resultados_fecha)}</span>` : '<span class="pill bad">Sin arrancar</span>';
+  $c.innerHTML = `<div class="card" id="prueba"><div class="split"><h2 style="margin:0">Prueba gratis</h2><div>${cab}</div></div>
+    ${paso(1, 'Arranque', !!p, !p, p ? `<div class="pr-resumen">
+        <div><b>Champion:</b> ${esc(p.champion.nombre)}${p.champion.cargo ? ', ' + esc(p.champion.cargo) : ''}</div>
+        <div><b>Vacante:</b> ${esc(p.cargo || '—')}${p.vacante_url ? ` · <a href="${esc(p.vacante_url)}" target="_blank" rel="noopener">ver en peaku.co</a>` : ''}</div>
+        <div><b>Criterio de éxito:</b> ${esc(p.criterio)}</div>
+        <div><b>Decisor:</b> ${esc((p.decisor || {}).quien || 'no se sabe')}${(p.decisor || {}).cuando ? ' · presupuesto: ' + esc(p.decisor.cuando) : ''}${(p.decisor || {}).que_pide ? ' · pediría: ' + esc(p.decisor.que_pide) : ''} · plata ${esc((PRUEBA_PLATA[(p.decisor || {}).plata] || 'no se sabe').toLowerCase())}</div>
+        <div><b>Fechas:</b> arrancó ${prFecha(p.inicio)}${p.checkin_fecha ? ' · check-in ' + prFecha(p.checkin_fecha) : ''} · resultados ${prFecha(p.resultados_fecha)} ${esc(p.resultados_hora || '')}</div>
+        ${f.operacion && f.operacion.length ? `<div><b>Wei en Operaciones:</b> ${f.operacion.map(o => esc(embOperacion(o))).join(' · ')}</div>` : ''}
+        <div style="margin-top:8px"><button class="btn ghost btn-sm" data-pr-editar>Editar la ficha</button></div></div>`
+      : `<p class="muted chico" style="margin:0 0 8px">El deal está en Prueba gratis pero sin ficha: no hay champion, criterio ni fecha de resultados.</p><button class="btn" data-pr-editar>▶ Arrancar la prueba</button>`)}
+    ${p ? paso(2, 'Resultados en números', !!p.numeros, !p.numeros && !dec, `<p class="muted chico" style="margin:0 0 8px">Lo que el cliente podrá defender en su comité. Si Wei lo tiene en Operaciones, ya aparece arriba.</p>${pruebaNumerosHtml(p.numeros || {})}<div class="btn-row" style="justify-content:flex-start;margin-top:8px"><button class="btn secondary btn-sm" data-pr-numeros>Guardar números</button>${p.numeros ? `<span class="muted chico">guardados ${new Date(p.numeros.at).toLocaleString('es-CO')}</span>` : ''}</div>`) : ''}
+    ${p ? paso(3, 'Página de resultados (para que el champion la reenvíe a su jefe)', !!(p.pagina && p.pagina.texto), !!p.numeros && !(p.pagina && p.pagina.texto) && !dec, p.pagina && p.pagina.texto
+      ? `<textarea data-pr-pagina style="min-height:220px;width:100%;font-size:13.5px;line-height:1.5">${esc(p.pagina.texto)}</textarea>
+         <div class="muted chico" style="margin:4px 0 8px">Redactada ${p.pagina.redactada_at ? new Date(p.pagina.redactada_at).toLocaleString('es-CO') : ''}${p.pagina.editada_at ? ' · editada a mano ' + new Date(p.pagina.editada_at).toLocaleString('es-CO') : ''}${f.con_demo ? ' · con la transcripción del demo' : ' · este deal no tiene demo: sin citas del cliente'}</div>
+         <div class="btn-row" style="justify-content:flex-start"><button class="btn secondary btn-sm" data-pr-guardar>Guardar mis cambios</button><button class="btn ghost btn-sm" data-pr-copiar>Copiar</button></div>
+         <div style="margin-top:10px"><label>Pedirle ajustes a Claude <span class="muted">(sobre esta versión)</span></label><div class="pr-dos" style="grid-template-columns:1fr auto"><input data-pr-instr placeholder="Ej. más corta, quita lo de Magneto, menciona que ya contrataron a uno" /><button class="btn btn-sm" data-pr-redactar>✦ Volver a redactar</button></div></div>`
+      : `<p class="muted chico" style="margin:0 0 8px">Claude la escribe con el criterio, los números, lo que el cliente dijo en el demo${f.con_demo ? ' (cita al cliente con sus palabras)' : ''} y el siguiente paso. Tú la ajustas antes de mandarla.</p><button class="btn" data-pr-redactar ${p.numeros ? '' : 'disabled title="Primero guarda los números"'}>✦ Redactar la página</button>`) : ''}
+    ${p ? paso(4, 'Decisión', !!dec, !!(p.pagina && p.pagina.texto) && !dec, dec
+      ? `<div class="pr-resumen"><div><b>${esc(dec.label)}</b>${dec.fecha ? ' · fecha límite ' + prFecha(dec.fecha) : ''}${dec.nota ? ' · ' + esc(dec.nota) : ''}</div><div class="muted chico">${p.champion_trae_jefe === true ? 'El champion trajo al jefe.' : p.champion_trae_jefe === false ? 'El champion no trajo al jefe.' : ''} Decidido ${new Date(dec.at).toLocaleString('es-CO')}${dec.por ? ' por ' + esc(dec.por) : ''}.</div></div>`
+      : `<label>¿El champion trae al jefe a la reunión de resultados?</label><div class="chips" style="margin:0 0 8px"><label class="chip" style="padding:6px 10px"><input type="radio" name="pr-jefe" value="1" style="margin:0 6px 0 0">Sí, con fecha</label><label class="chip" style="padding:6px 10px"><input type="radio" name="pr-jefe" value="0" style="margin:0 6px 0 0">No ("yo lo muevo internamente")</label></div>
+         <label>Decisión</label><div class="chips" style="margin:0 0 8px">${Object.entries(f.reglas.decisiones).map(([k, l]) => `<label class="chip" style="padding:6px 10px"><input type="radio" name="pr-dec" value="${k}" style="margin:0 6px 0 0">${esc(l)}</label>`).join('')}</div>
+         <div class="pr-dos"><div data-pr-fecha hidden><label>Mes o día del comité de presupuesto</label><input type="month" data-pr-mes /></div><div data-pr-prods hidden><label>¿Qué se vendió?</label><div class="chips" style="margin:0">${(f.reglas.productos || []).map(pr => `<label class="chip" style="padding:6px 10px"><input type="checkbox" value="${esc(pr)}" data-pr-prod style="margin:0 6px 0 0">${esc(pr)}</label>`).join('')}</div></div></div>
+         <label>Nota</label><input data-pr-nota placeholder="Ej. piden propuesta por consumo para los perfiles difíciles" />
+         <div class="btn-row" style="justify-content:flex-start;margin-top:8px"><button class="btn" data-pr-decidir>Registrar la decisión</button></div>
+         <p class="muted chico" style="margin:8px 0 0">Plan y consumo pasan el deal a <b>ganado</b>; "no" a <b>perdido</b> con el motivo; "otro año" lo deja en <b>interesados</b> con la fecha límite y un compromiso de retomar ${f.reglas.retomarDiasAntes} días antes del comité (puente por consumo mientras tanto).</p>`) : ''}
+  </div>`;
+  const recargar = () => pintarPrueba(dealId);
+  const u = prUsuario();
+  const $ed = $c.querySelector('[data-pr-editar]'); if ($ed) $ed.addEventListener('click', () => pruebaArrancar(dealId, { alTerminar: recargar }));
+  const $num = $c.querySelector('[data-pr-numeros]'); if ($num) $num.addEventListener('click', async () => {
+    try { await tbApi(`embudo/${dealId}/prueba/resultados`, { method: 'POST', body: { ...pruebaLeerNumeros($c.querySelector('.pr-numeros')), usuario: u } }); tbAvisar('Números guardados.'); await recargar(); } catch (e) { tbAvisar(e.message, 'error'); }
+  });
+  const $red = $c.querySelector('[data-pr-redactar]'); if ($red) $red.addEventListener('click', async () => {
+    const $i = $c.querySelector('[data-pr-instr]'); const instrucciones = $i ? $i.value.trim() : '';
+    $red.disabled = true; $red.textContent = 'Redactando…';
+    try { await tbApi(`embudo/${dealId}/prueba/pagina`, { method: 'POST', body: { instrucciones, usuario: u } }); tbAvisar('Página lista: revísala y ajústala antes de mandarla.'); await recargar(); }
+    catch (e) { tbAvisar(e.message, 'error'); $red.disabled = false; $red.textContent = '✦ Redactar la página'; }
+  });
+  const $gu = $c.querySelector('[data-pr-guardar]'); if ($gu) $gu.addEventListener('click', async () => {
+    try { await tbApi(`embudo/${dealId}/prueba/pagina/guardar`, { method: 'POST', body: { texto: $c.querySelector('[data-pr-pagina]').value, usuario: u } }); tbAvisar('Página guardada.'); await recargar(); } catch (e) { tbAvisar(e.message, 'error'); }
+  });
+  const $cp = $c.querySelector('[data-pr-copiar]'); if ($cp) $cp.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($c.querySelector('[data-pr-pagina]').value); tbAvisar('Copiada: pégala en el correo al champion.'); } catch (_) { tbAvisar('No se pudo copiar; selecciona el texto y cópialo.', 'error'); }
+  });
+  $c.querySelectorAll('input[name=pr-dec]').forEach(r => r.addEventListener('change', () => {
+    $c.querySelector('[data-pr-fecha]').hidden = r.value !== 'otro_ano';
+    $c.querySelector('[data-pr-prods]').hidden = !(r.value === 'plan' || r.value === 'consumo');
+  }));
+  const $dz = $c.querySelector('[data-pr-decidir]'); if ($dz) $dz.addEventListener('click', async () => {
+    const tipo = ($c.querySelector('input[name=pr-dec]:checked') || {}).value;
+    if (!tipo) return tbAvisar('Elige la decisión.', 'error');
+    const jefe = $c.querySelector('input[name=pr-jefe]:checked');
+    const body = { tipo, fecha: ($c.querySelector('[data-pr-mes]') || {}).value || null, nota: $c.querySelector('[data-pr-nota]').value.trim(), champion_trae_jefe: jefe ? jefe.value === '1' : null,
+      productos: [...$c.querySelectorAll('[data-pr-prod]:checked')].map(i => i.value), usuario: u };
+    if ((tipo === 'plan' || tipo === 'consumo') && !body.productos.length) return tbAvisar('Marca qué se vendió.', 'error');
+    $dz.disabled = true;
+    try { const r = await tbApi(`embudo/${dealId}/prueba/decision`, { method: 'POST', body }); tbAvisar((r.avisos || ['Decisión registrada.']).join(' ')); await recargar(); }
+    catch (e) { tbAvisar(e.message, 'error'); $dz.disabled = false; }
   });
 }
 
