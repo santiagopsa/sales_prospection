@@ -200,6 +200,7 @@ function router() {
   if (hash === '#/deals') return renderDeals();
   if (hash.startsWith('#/wishlist')) return renderWishlist(new URLSearchParams(hash.split('?')[1] || ''));
   if (hash.startsWith('#/brevo')) return renderBrevo(new URLSearchParams(hash.split('?')[1] || ''));
+  if (hash.startsWith('#/pruebas')) return renderPruebas();
   return renderWizard();
 }
 window.addEventListener('hashchange', router);
@@ -2752,6 +2753,52 @@ async function pintarCotizacion(dealId) {
     try { await tbApi(`embudo/${dealId}/cotizacion/analizar`, { method: 'POST', body: {} }); tbAvisar('Análisis listo.'); await recargar(); }
     catch (e) { tbAvisar(e.message, 'error'); $an.disabled = false; $an.textContent = '✦ Analizar contra el demo'; }
   });
+}
+
+// ---------- Pruebas (pestaña): el esquema completo, prueba por prueba ----------
+// Lo mismo que el bloque "Pruebas gratis" del embudo, más la lista de todas las pruebas con su ficha
+// (champion, día N, resultados, decisión) y lo que le falta a cada una. Datos: /sdr/api/embudo.
+async function renderPruebas() {
+  h(`<h1>Pruebas</h1><p class="muted">Cargando…</p>`);
+  try { embDatos = await tbApi('embudo'); } catch (e) { h(`<h1>Pruebas</h1><div class="card" style="border-left:4px solid var(--bad)">${esc(e.message)}</div>`); return; }
+  const d = embDatos; EMB_COLS = embColumnas(d);
+  const p = d.pruebas;
+  if (!p) { h(`<h1>Pruebas</h1><p class="muted">No hay tabla de deals todavía.</p>`); return; }
+  const cards = Object.values(d.columnas).flat();
+  const cardDe = id => cards.find(x => x.deal_id === id);
+  const falta = x => {
+    const f = x.ficha || {};
+    if (!['prueba', 'cotizacion', 'interesado'].includes(x.estado) && !f.tiene_ficha) return '';
+    if (!f.tiene_ficha) return 'arrancar la ficha (champion, criterio, fecha de resultados)';
+    if (f.decision) return '';
+    if (!f.con_numeros) return f.vencida ? 'registrar los números: la reunión de resultados ya pasó' : `números y página antes del ${embFechaCorta(f.resultados_fecha)}`;
+    if (!f.con_pagina) return 'redactar la página de resultados';
+    return 'registrar la decisión (¿trajo al jefe? plan / consumo / no / otro año)';
+  };
+  const fila = x => {
+    const f = x.ficha || {}, E = EMB_ESTADO_PRUEBA[x.estado] || { tx: x.estado, cls: '' };
+    const c = cardDe(x.deal_id);
+    return `<tr>
+      <td><a href="#/deal/${x.deal_id}#prueba"><b>${esc(x.empresa || 'Sin empresa')}</b></a>${c && (c.contacto || c.cargo) ? `<div class="muted chico">${esc([c.contacto, c.cargo].filter(Boolean).join(' · '))}</div>` : ''}</td>
+      <td><span class="pill ${E.cls}">${esc(E.tx)}</span></td>
+      <td>${f.tiene_ficha ? `${esc(f.champion || '—')}${f.champion_trae_jefe === true ? ' <span class="pill good" title="Trae al jefe a la reunión de resultados">trae al jefe</span>' : f.champion_trae_jefe === false ? ' <span class="pill warn">no trae al jefe</span>' : ''}${f.decisor ? `<div class="muted chico">decide: ${esc(f.decisor)}</div>` : ''}` : '<span class="muted">—</span>'}</td>
+      <td>${f.tiene_ficha ? (f.decision ? `<b>${esc(f.decision.label)}</b>${f.decision.fecha ? `<div class="muted chico">${embFechaDecision(f.decision.fecha)}</div>` : ''}` : f.vencida ? `<b class="emb-quieta">resultados vencidos</b><div class="muted chico">era el ${embFechaCorta(f.resultados_fecha)}</div>` : `día ${f.dia} de ${f.dias_total}<div class="muted chico">resultados ${embFechaCorta(f.resultados_fecha)}</div>`) : `<span class="muted">${x.dias_en_prueba != null ? x.dias_en_prueba + ' d en prueba' : ''}${x.quieta ? ' · <b class="emb-quieta">quieta</b>' : ''}</span>`}</td>
+      <td class="muted chico">${x.operacion.length ? x.operacion.map(o => esc(embOperacion(o))).join('<br>') : '—'}</td>
+      <td>${falta(x) ? `<span class="chico">${esc(falta(x))}</span>` : (f.decision ? '<span class="muted chico">cerrada</span>' : '')}${!f.tiene_ficha && x.estado === 'prueba' ? ` <button type="button" class="btn btn-sm" data-prueba-arrancar="${x.deal_id}">Arrancar</button>` : ''}</td>
+    </tr>`;
+  };
+  const abiertas = p.pruebas.filter(x => !['ganado', 'perdido'].includes(x.estado)), cerradas = p.pruebas.filter(x => ['ganado', 'perdido'].includes(x.estado));
+  const tabla = filas => `<div class="tabla-env"><table class="wl-tabla"><thead><tr><th>Empresa</th><th>Estado</th><th>Champion</th><th>Prueba</th><th>Wei en Operaciones</th><th>Qué falta</th></tr></thead><tbody>${filas.map(fila).join('')}</tbody></table></div>`;
+  h(`
+    <div class="split"><div><h1>Pruebas</h1><p class="muted" style="margin:0">La prueba es para el reclutador (el champion); el decisor entra a la decisión, no a la prueba. Arranque → día N → números y página → decisión. Reglas en PRUEBA de sdr/config.js.</p></div>
+      <a class="btn ghost btn-sm" href="#/embudo">Embudo</a></div>
+    ${embPruebasHtml(p)}
+    <div class="card"><h2>En curso <span class="muted chico" style="font-weight:400">${abiertas.length}</span></h2>${abiertas.length ? tabla(abiertas) : '<p class="muted">Ninguna prueba abierta. Un deal entra aquí al moverlo a "Prueba gratis" en el embudo.</p>'}</div>
+    ${cerradas.length ? `<details class="card"><summary class="muted" style="cursor:pointer">Resueltas (${cerradas.length})</summary>${tabla(cerradas)}</details>` : ''}
+  `);
+  const recargar = () => renderPruebas();
+  el.querySelectorAll('[data-prueba-arrancar]').forEach(b => b.addEventListener('click', () => pruebaArrancar(Number(b.dataset.pruebaArrancar), { alTerminar: recargar })));
+  el.querySelectorAll('[data-aprueba]').forEach(b => b.addEventListener('click', async () => { const id = Number(b.dataset.aprueba); try { await tbApi(`embudo/${id}/mover`, { method: 'POST', body: { etapa: 'propuesta', tipo: 'prueba', usuario: d.ejecutiva } }); } catch (e) { tbAvisar(e.message, 'error'); return; } pruebaArrancar(id, { alTerminar: recargar }); }));
 }
 
 // ---------- Prueba gratis: la ficha del deal (sdr/ficha_prueba.js) ----------

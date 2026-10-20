@@ -551,7 +551,8 @@ herramienta no); el **decisor** no entra a la prueba, entra a la **decisión**. 
    presupuesto del otro año → **interesados** con `fechaLimiteDecision` (mes o día del comité, obligatorio)
    y compromiso de retomar `retomar_dias_antes` antes, con el consumo como puente.
 
-Arriba del embudo, "Pruebas gratis" suma el esquema: cuántas tienen ficha (y cuántas en prueba sin
+La pestaña **Pruebas** de Ventas muestra lo mismo que el bloque del embudo más la tabla de todas las pruebas
+(champion, día N, decisión, lo de Wei y qué le falta a cada una). Arriba del embudo, "Pruebas gratis" suma el esquema: cuántas tienen ficha (y cuántas en prueba sin
 arrancar o con resultados vencidos), cuántas terminaron en una decisión y de qué tipo, y cuántos champions
 trajeron al jefe. `node sdr/cli.js prueba <deal_id>` imprime la ficha; `node sdr/cli.js pruebas` el esquema.
 
