@@ -1123,6 +1123,7 @@
               <dt>Cargado</dt><dd>${fechaHora(l.created_ms)}</dd>
               ${l.extra ? Object.entries({ industria: 'Industria', empleados: 'Empleados', seniority: 'Seniority', departamento: 'Área', pais: 'País', region: 'Región', ingresos: 'Ingresos', tecnologias: 'Tecnologías' })
                 .filter(([k]) => l.extra[k]).map(([k, lab]) => `<dt>${lab}</dt><dd>${esc(l.extra[k])}</dd>`).join('') : ''}
+              ${'brevo_id' in l ? `<dt>Brevo</dt><dd>${l.brevo_id ? `<a href="https://app.brevo.com/contact/index/${l.brevo_id}" target="_blank" rel="noopener">Contacto en Brevo ↗</a><span class="suave"> · sincronizado ${l.brevo_ms ? fecha(l.brevo_ms) : ''}</span>` : l.brevo_error ? `<span class="suave" title="${esc(l.brevo_error)}">No se pudo crear: ${esc(l.brevo_error.slice(0, 60))}</span> <button class="btn mini" id="brevo-reintentar">Reintentar</button>` : '<span class="suave">Pendiente (se crea solo en el próximo minuto)</span> <button class="btn mini" id="brevo-reintentar">Crear ahora</button>'}</dd>` : ''}
               ${l.extra && (l.extra.linkedin || l.extra.sitio_web || l.extra.linkedin_empresa) ? `<dt>Enlaces</dt><dd>${[l.extra.linkedin && `<a href="${esc(l.extra.linkedin)}" target="_blank" rel="noopener">LinkedIn</a>`, l.extra.linkedin_empresa && `<a href="${esc(l.extra.linkedin_empresa)}" target="_blank" rel="noopener">LinkedIn empresa</a>`, l.extra.sitio_web && `<a href="${esc(/^https?:/.test(l.extra.sitio_web) ? l.extra.sitio_web : 'https://' + l.extra.sitio_web)}" target="_blank" rel="noopener">Sitio web</a>`].filter(Boolean).join(' · ')}</dd>` : ''}
               ${l.extra && l.extra.telefonos_extra ? `<dt>Otros teléfonos</dt><dd>${l.extra.telefonos_extra.map(t => esc(telVisible(t))).join(', ')}</dd>` : ''}
               ${l.extra && l.extra.correos_extra ? `<dt>Otros correos</dt><dd>${l.extra.correos_extra.map(esc).join(', ')}</dd>` : ''}
@@ -1206,6 +1207,8 @@
     });
 
     // Toques de un clic
+    const $br = document.getElementById('brevo-reintentar');
+    if ($br) $br.addEventListener('click', async () => { $br.disabled = true; try { const r = await api(`leads/${l.id}/brevo`, { method: 'POST' }); avisar(`Contacto ${r.creado ? 'creado' : 'actualizado'} en Brevo.`); await vistaLead(l.id); } catch (e) { avisar('Brevo: ' + e.message, 'error'); $br.disabled = false; } });
     const $li = document.getElementById('linkedin');
     if ($li) $li.addEventListener('click', () => abrirLinkedin(l, despues));
     $app.querySelectorAll('[data-toque]').forEach(b => b.addEventListener('click', async () => {

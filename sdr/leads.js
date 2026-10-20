@@ -56,7 +56,7 @@ async function detalleLead(db, id) {
   if (!Number.isInteger(id)) throw error(400, 'id inválido');
   const l = await db.query(
     `SELECT id, empresa, contacto, cargo, telefono, telefono_original, telefono_alt, email, ciudad, fuente, etapa, extra,
-            razon_descarte, deal_id, import_id, ${ms('created_at')} AS created_ms, ${ms('etapa_at')} AS etapa_ms,
+            razon_descarte, deal_id, import_id, brevo_id, brevo_error, ${ms('brevo_at')} AS brevo_ms, ${ms('created_at')} AS created_ms, ${ms('etapa_at')} AS etapa_ms,
             ${ms('reunion_at')} AS reunion_ms, CASE WHEN pausado_hasta > NOW() THEN ${ms('pausado_hasta')} END AS pausado_ms,
             EXISTS (SELECT 1 FROM ${T.lista_negra} n WHERE (n.telefono IS NOT NULL AND n.telefono = l.telefono) OR (n.email IS NOT NULL AND n.email = l.email)) AS en_lista_negra
      FROM ${T.leads} l WHERE id = $1`, [id]);

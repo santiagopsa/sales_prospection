@@ -2077,12 +2077,37 @@ async function pintarBrevoDeal(dealId) {
     $p.innerHTML = r.deal ? `En Brevo: ${brevoLinea(r.deal)}` : `En Brevo: <span class="pill warn">no está</span> <span class="chico">no hay un deal con este correo ni esta empresa · <a href="#/brevo">ver el cruce</a></span>`;
   } catch (_) { /* Brevo caído o sin llave: la ficha sigue igual */ }
 }
+// Los contactos de Angie en Brevo (sdr/brevo_contactos.js): cuántos leads están allá, cuántos faltan y
+// los que no se pudieron crear. "Sincronizar ahora" manda los que faltan sin esperar al job.
+async function pintarBrevoContactos() {
+  const $c = document.getElementById('brevo-contactos'); if (!$c) return;
+  let e; try { e = await tbApi('brevo/contactos'); } catch (err) { $c.innerHTML = ''; return; }
+  const faltan = e.por_crear + e.por_actualizar;
+  $c.innerHTML = `<div class="card"><div class="split"><h2 style="margin:0">Contactos de Angie en Brevo</h2>
+      <span class="muted chico">lista "${esc(e.lista)}"${e.lista_id ? ' #' + e.lista_id : ''} · ${e.por_tanda} por minuto en segundo plano${e.ultimo ? ' · último ' + new Date(e.ultimo).toLocaleString('es-CO') : ''}</span></div>
+    ${e.activo ? '' : `<div class="tb-aviso">La sincronización está apagada${e.con_llave ? ' (BREVO.contactos.activo = false)' : ': falta BREVO_API_KEY'}.</div>`}
+    <div class="tb-kpis" style="margin-top:10px">
+      <div class="card compact"><div class="muted">Sincronizados</div><div class="num">${e.sincronizados}</div><div class="muted chico">de ${e.total} leads</div></div>
+      <div class="card compact ${faltan ? 'alerta' : ''}"><div class="muted">Faltan</div><div class="num">${faltan}</div><div class="muted chico">${e.por_crear} por crear · ${e.por_actualizar} cambiaron aquí</div></div>
+      <div class="card compact ${e.con_error ? 'alerta' : ''}"><div class="muted">No se pudieron crear</div><div class="num">${e.con_error}</div><div class="muted chico">sin correo ni teléfono, o Brevo los rechazó</div></div>
+    </div>
+    <div class="btn-row" style="justify-content:flex-start;margin-top:8px"><button class="btn btn-sm" data-brevo-sync ${e.activo && faltan ? '' : 'disabled'}>Sincronizar ahora (hasta 200)</button>
+      <span class="muted chico">Cada lead queda con empresa, cargo, ciudad, etapa en PeakU, fuente, lista y el link a su ficha, para armar automatizaciones en Brevo. Los que pidieron no ser contactados van bloqueados.</span></div>
+    ${e.errores.length ? `<details style="margin-top:8px"><summary class="muted chico" style="cursor:pointer">Ver los ${e.con_error} con error</summary><ul class="list-clean" style="margin:6px 0 0">${e.errores.map(x => `<li><a href="/sdr/#/lead/${x.id}"><b>${esc(x.empresa)}</b></a>${x.contacto ? ' · ' + esc(x.contacto) : ''} <span class="muted chico">· ${esc(x.brevo_error)}</span></li>`).join('')}</ul></details>` : ''}
+  </div>`;
+  const $b = $c.querySelector('[data-brevo-sync]'); if ($b) $b.addEventListener('click', async () => {
+    $b.disabled = true; $b.textContent = 'Sincronizando…';
+    try { const r = await tbApi('brevo/contactos/sincronizar', { method: 'POST', body: { limite: 200 } }); tbAvisar(`${r.hechos} contactos sincronizados${r.errores ? ', ' + r.errores + ' con error' : ''}.`); }
+    catch (err) { tbAvisar(err.message, 'error'); }
+    await pintarBrevoContactos();
+  });
+}
 async function renderBrevo(params = new URLSearchParams((location.hash.split('?')[1] || ''))) {
   h(`<h1>Brevo</h1><p class="muted">Leyendo los deals de Brevo y del Sandler…</p>`);
   let c;
   try {
     const est = await fetch('/sdr/api/brevo/estado').then(x => x.json());
-    if (!est.activo) { h(`<h1>Brevo</h1><div class="card"><p>Falta la llave de Brevo. En Render → Environment agrega <code>BREVO_API_KEY</code> (Brevo → SMTP &amp; API → API keys, una llave de solo lectura basta) y vuelve a desplegar.</p><p class="muted chico">Con la llave, esta pestaña cruza los deals del Sandler con los del CRM de Brevo: cuáles faltan en cada lado y qué etapas no cuadran. La ficha del lead y el detalle del deal muestran el deal de Brevo.</p></div>`); return; }
+    if (!est.activo) { h(`<h1>Brevo</h1><div class="card"><p>Falta la llave de Brevo. En Render → Environment agrega <code>BREVO_API_KEY</code> (Brevo → SMTP &amp; API → API keys, la llave necesita permiso de escritura sobre contactos: la app crea los leads de Angie como contactos) y vuelve a desplegar.</p><p class="muted chico">Con la llave, esta pestaña cruza los deals del Sandler con los del CRM de Brevo: cuáles faltan en cada lado y qué etapas no cuadran. La ficha del lead y el detalle del deal muestran el deal de Brevo.</p></div>`); return; }
     c = await fetch('/sdr/api/brevo/chequeo' + (params.get('forzar') ? '?forzar=1' : '')).then(async x => { const j = await x.json(); if (!x.ok) throw new Error(j.error || x.status); return j; });
   } catch (e) { h(`<h1>Brevo</h1><div class="card" style="border-left:4px solid var(--bad)">No se pudo leer Brevo: ${esc(e.message)}</div>`); return; }
   const r = c.resumen;
@@ -2104,6 +2129,7 @@ async function renderBrevo(params = new URLSearchParams((location.hash.split('?'
     ${c.solo_sandler.length ? `<div class="card"><h2>Solo en el Sandler <span class="muted chico" style="font-weight:400">${c.solo_sandler.length} abiertos · falta crearlos en Brevo o cerrarlos aquí</span></h2>${tabla(c.solo_sandler.map(d => `<tr><td>${sandlerCol(d)}</td><td class="muted chico">${d.creado ? 'creado ' + new Date(d.creado).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }) : ''}</td></tr>`), ['Deal', ''])}</div>` : ''}
     ${c.solo_brevo.length ? `<div class="card"><div class="split"><h2 style="margin:0">Solo en Brevo <span class="muted chico" style="font-weight:400">${c.solo_brevo.length} abiertos · no tienen demo en el Sandler</span></h2><button class="btn ghost btn-sm" data-brevo-importar-todos title="Crea en el Sandler un deal por cada uno, en la etapa equivalente, sin transcripción (demos de antes de la plataforma)">Crear los ${c.solo_brevo.length} en el Sandler</button></div>${tabla(c.solo_brevo.map(b => `<tr><td>${brevoCol(b)}</td><td style="white-space:nowrap"><button class="btn ghost btn-sm" data-brevo-importar="${esc(b.id)}" title="Crea el deal en el Sandler en la etapa equivalente, con empresa, contacto y correo de Brevo; queda enlazado por id">Crear en el Sandler</button></td></tr>`), ['Deal', ''])}</div>` : ''}
     <details class="card" style="margin-top:12px"><summary class="muted" style="cursor:pointer">Cuadran (${sinDif.length})</summary>${sinDif.length ? tabla(sinDif.map(p => `<tr><td>${sandlerCol(p.sandler)}</td><td>${brevoCol(p.brevo)}</td><td class="muted chico">por ${p.por}</td></tr>`), ['Sandler', 'Brevo', '']) : '<p class="muted chico">Ninguno todavía.</p>'}</details>
+    <div id="brevo-contactos"></div>
     <p class="muted chico">Se emparejan por el id de Brevo (los importados), por el correo del lead de Angie (el contacto del deal en Brevo) y si no, por la empresa (nombre sin S.A.S., tildes ni mayúsculas, o el dominio del correo). Los cerrados en los dos lados no se listan. Nada de esto escribe en Brevo; "Crear en el Sandler" sí crea el deal aquí.</p>`);
   const importar = async ids => {
     const usuario = (() => { try { return localStorage.getItem('sdr_usuario') || ''; } catch (_) { return ''; } })();
@@ -2120,6 +2146,7 @@ async function renderBrevo(params = new URLSearchParams((location.hash.split('?'
     location.hash = '#/brevo?forzar=1&t=' + Date.now();
   };
   el.querySelectorAll('[data-brevo-importar]').forEach(b => b.addEventListener('click', () => { b.disabled = true; b.textContent = 'Creando…'; importar([b.dataset.brevoImportar]); }));
+  pintarBrevoContactos();
   const $todos = el.querySelector('[data-brevo-importar-todos]');
   if ($todos) $todos.addEventListener('click', () => { if (window.confirm(`¿Crear ${c.solo_brevo.length} deals en el Sandler? Quedan en la etapa equivalente, sin transcripción, enlazados a Brevo.`)) { $todos.disabled = true; importar(c.solo_brevo.map(b => b.id)); } });
 }

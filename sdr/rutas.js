@@ -82,7 +82,11 @@ function rutas({ db, config, anthropic = null }) {
       };
     }],
     // Brevo (el CRM de Luisa): el cruce completo y el deal de Brevo de un lead o un deal del Sandler.
-    ['get', '/api/brevo/estado', async () => ({ activo: require('./brevo').activo(process.env) })],
+    ['get', '/api/brevo/estado', async () => ({ activo: require('./brevo').activo(process.env), contactos: require('./brevo_contactos').activo(config, process.env) })],
+    // Contactos de Angie en Brevo (sdr/brevo_contactos.js): estado, sincronizar ahora, un lead.
+    ['get', '/api/brevo/contactos', async () => { sinDb(); return require('./brevo_contactos').estado(db, config, process.env); }],
+    ['post', '/api/brevo/contactos/sincronizar', async ({ body }) => { sinDb(); return require('./brevo_contactos').correrPendientes(db, config, process.env, { limite: Math.min(500, Number((body || {}).limite) || 200) }); }],
+    ['post', '/api/leads/:id/brevo', async ({ params }) => { sinDb(); return require('./brevo_contactos').sincronizarLead(db, config, process.env, params.id); }],
     ['get', '/api/brevo/chequeo', async ({ query }) => { sinDb(); return require('./brevo').chequeo(db, config, process.env, { forzar: query.forzar === '1' }); }],
     ['post', '/api/brevo/importar', async ({ body }) => {
       sinDb();

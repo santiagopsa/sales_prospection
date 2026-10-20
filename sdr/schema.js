@@ -317,6 +317,16 @@ const MIGRACIONES = [
   // contexto: el párrafo que la rúbrica le da al modelo antes de las reglas (v2: cómo es una llamada
   // en frío y cuándo cabe preguntar). Las rúbricas sin contexto (v1) lo dejan en NULL.
   `ALTER TABLE ${T.rubricas} ADD COLUMN IF NOT EXISTS contexto TEXT`,
+
+  // ---- M11 · Contactos en Brevo ------------------------------------------------------------
+  // Cada lead de Angie se crea (o actualiza) como contacto en Brevo (sdr/brevo_contactos.js), para que
+  // ella haga automatizaciones allá sin volver a crearlos. brevo_id: el id del contacto; brevo_at:
+  // cuándo se sincronizó por última vez (se vuelve a mandar si updated_at es posterior); brevo_error:
+  // por qué no se pudo; brevo_intento_at: cuándo se intentó (para no reintentar cada minuto).
+  `ALTER TABLE ${T.leads} ADD COLUMN IF NOT EXISTS brevo_id BIGINT`,
+  `ALTER TABLE ${T.leads} ADD COLUMN IF NOT EXISTS brevo_at TIMESTAMPTZ`,
+  `ALTER TABLE ${T.leads} ADD COLUMN IF NOT EXISTS brevo_error TEXT`,
+  `ALTER TABLE ${T.leads} ADD COLUMN IF NOT EXISTS brevo_intento_at TIMESTAMPTZ`,
 ];
 
 async function initSchema(db, log = console) {

@@ -467,6 +467,25 @@ conexión si el lead no ha aceptado y mensaje si ya aceptó, así los registros 
 funcionando. Los textos viven en `LINKEDIN` de `config.js`. Semana e Historial cuentan envíos y, aparte,
 conexiones aceptadas (✓): lo único que mide si LinkedIn sirve.
 
+## Contactos de Angie en Brevo (en segundo plano)
+
+Cada lead de la app (cargado por lista, agregado desde Marcar o editado) se crea o actualiza como contacto
+en Brevo, para que Angie arme automatizaciones allá sin volver a crearlos. `sdr/brevo_contactos.js`,
+reglas en `BREVO.contactos` de `config.js`; el job del pipeline manda `por_tanda` (40) leads por minuto:
+
+- Van a la lista `lista` ("Prospección PeakU AI", se crea si no existe dentro de la carpeta `carpeta`) con
+  FIRSTNAME, LASTNAME, SMS y los atributos de PeakU (`atributos`, se crean si no existen): EMPRESA, CARGO,
+  CIUDAD, ETAPA_PEAKU, FUENTE_PEAKU, LISTA_PEAKU, SDR_PEAKU y LEAD_PEAKU (el link a la ficha).
+- Un lead que cambia en la app (`updated_at`: etapa, datos) se vuelve a mandar; el id de Brevo queda en
+  `leads.brevo_id`. Sin correo ni teléfono no se puede crear (Brevo exige un identificador): queda en
+  `brevo_error` y se reintenta a mano desde la ficha ("Crear ahora").
+- Los que pidieron no ser contactados o están en lista negra se mandan **bloqueados** para correo y SMS y
+  fuera de la lista, para que una automatización no les escriba por error.
+- Ventas → Brevo muestra cuántos están, cuántos faltan y los que fallaron, con "Sincronizar ahora"; la
+  ficha del lead muestra el link al contacto. `node sdr/cli.js brevo-contactos [--sincronizar N]`.
+- La `BREVO_API_KEY` de Render tiene que poder **escribir contactos** (una llave de solo lectura no sirve
+  para esto; para el cruce de deals sí bastaba).
+
 ## Embudo de la ejecutiva (Sandler Coach → Embudo)
 
 `/#/embudo`: todos los deals del Sandler (de la SDR y de otros canales) en columnas:

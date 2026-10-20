@@ -177,7 +177,7 @@ async function transcripcionDeLlamada(db, callId, config = require('../config'))
 // Trabajador en el servidor: revisa cada PIPELINE_INTERVALO_S si hay pendientes. Sin
 // DEEPGRAM_API_KEY no arranca (y lo dice una vez). Devuelve el temporizador para poder pararlo.
 function iniciar(db, config, env = process.env, log = console) {
-  if (!env.DEEPGRAM_API_KEY && !env.GOOGLE_CALENDAR_KEY_FILE && !env.GOOGLE_CALENDAR_KEY && !env.ANTHROPIC_API_KEY && !env.CALENDLY_TOKEN) { log.log('[sdr/pipeline] sin DEEPGRAM_API_KEY ni llave de calendario: nada que hacer en segundo plano'); return null; }
+  if (!env.DEEPGRAM_API_KEY && !env.GOOGLE_CALENDAR_KEY_FILE && !env.GOOGLE_CALENDAR_KEY && !env.ANTHROPIC_API_KEY && !env.CALENDLY_TOKEN && !env.BREVO_API_KEY) { log.log('[sdr/pipeline] sin DEEPGRAM_API_KEY ni llave de calendario ni de Brevo: nada que hacer en segundo plano'); return null; }
   if (!env.DEEPGRAM_API_KEY) log.log('[sdr/pipeline] sin DEEPGRAM_API_KEY: las llamadas quedan en "pendiente" hasta que la pongas');
   let enCurso = false, ultimaCalendly = 0;
   const tick = async () => {
@@ -200,6 +200,9 @@ function iniciar(db, config, env = process.env, log = console) {
         const k = await require('../calendly').sincronizar(db, config, env, { log });
         if (k.nuevas || k.canceladas || k.movidas || k.sin_lead) log.log(`[sdr/calendly] ${k.nuevas} nuevas, ${k.movidas} movidas, ${k.canceladas} canceladas, ${k.sin_lead} sin lead`);
       }
+      // Contactos de Angie en Brevo: los leads nuevos o cambiados, de a BREVO.contactos.por_tanda.
+      const bc = await require('../brevo_contactos').correrPendientes(db, config, env, { log });
+      if (bc.hechos || bc.errores) log.log(`[sdr/brevo] contactos: ${bc.hechos} sincronizados, ${bc.errores} con error`);
     } catch (e) { log.error('[sdr/pipeline]', e.message); }
     finally { enCurso = false; }
   };

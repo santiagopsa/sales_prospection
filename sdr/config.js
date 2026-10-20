@@ -606,6 +606,29 @@ module.exports = {
     cache_min: 10,
     // Enlace al deal en Brevo ({id} se reemplaza).
     url_deal: 'https://app.brevo.com/crm/deals/{id}',
+
+    // Qué mueve: los contactos de Angie en Brevo. Cada lead (cargado por lista, agregado desde Marcar
+    // o editado) se crea o actualiza como contacto en Brevo en segundo plano (sdr/brevo_contactos.js),
+    // en la lista `lista` (se crea si no existe, dentro de la carpeta `carpeta`), con los atributos de
+    // abajo (se crean si no existen) para que Angie arme automatizaciones allá sin volver a crearlos.
+    // Un lead cambia en la app → se vuelve a mandar (updated_at). Los leads que pidieron no ser
+    // contactados o están en lista negra se mandan BLOQUEADOS para correo y SMS y fuera de la lista:
+    // así una automatización de Brevo no les escribe por error.
+    //   por_tanda: cuántos leads se mandan por pasada del job (cada minuto). reintento_min: cuánto se
+    //   espera para reintentar uno que falló. telefono_con_mas: el SMS va "+57300…" (true) o "57300…".
+    // Ver el efecto: node sdr/cli.js brevo-contactos        (estado y últimos errores)
+    //                node sdr/cli.js brevo-contactos --sincronizar 50
+    contactos: {
+      activo: true,
+      lista: 'Prospección PeakU AI',
+      carpeta: 'PeakU AI',
+      lista_id: null,
+      atributos: { EMPRESA: 'text', CARGO: 'text', CIUDAD: 'text', ETAPA_PEAKU: 'text', FUENTE_PEAKU: 'text', LEAD_PEAKU: 'text', SDR_PEAKU: 'text', LISTA_PEAKU: 'text' },
+      por_tanda: 40,
+      reintento_min: 60,
+      telefono_con_mas: true,
+      url_contacto: 'https://app.brevo.com/contact/index/{id}',
+    },
   },
 
   // ---------------------------------------------------------------------------
