@@ -2621,7 +2621,15 @@ function embCotizacion(id) {
 
 const embBuscar = id => { for (const k of Object.keys(embDatos.columnas)) { const x = embDatos.columnas[k].find(z => z.deal_id === id); if (x) return x; } return null; };
 async function embRecargar() { const y = window.scrollY, sx = (el.querySelector('.emb-tablero') || {}).scrollLeft || 0; await renderEmbudo(); window.scrollTo(0, y); const t = el.querySelector('.emb-tablero'); if (t) t.scrollLeft = sx; }
-function embModal(html) { const m = document.getElementById('emb-modal'); m.innerHTML = `<div class="emb-velo"><div class="emb-dialogo card">${html}</div></div>`; m.querySelector('[data-cerrar]').addEventListener('click', () => { m.innerHTML = ''; }); return m; }
+// El contenedor del diálogo vive en el embudo; en las otras vistas (Pruebas, detalle del deal) se crea
+// al vuelo, colgado del body, para que los mismos diálogos funcionen desde cualquier pantalla.
+function embModal(html) {
+  let m = document.getElementById('emb-modal');
+  if (!m) { m = document.createElement('div'); m.id = 'emb-modal'; document.body.appendChild(m); }
+  m.innerHTML = `<div class="emb-velo"><div class="emb-dialogo card">${html}</div></div>`;
+  m.querySelector('[data-cerrar]').addEventListener('click', () => { m.innerHTML = ''; });
+  return m;
+}
 
 async function embMover(id, etapa) {
   const x = embBuscar(id); if (!x) return;
