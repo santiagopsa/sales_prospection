@@ -256,7 +256,8 @@ main:has(.emb-tablero) { max-width: 1400px; }
 .emb-pie { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 .emb-pie .muted { margin-right: auto; }
 .emb-mover { font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--muted); max-width: 110px; }
-.emb-velo { position: fixed; inset: 0; background: rgba(15,23,42,.35); display: flex; align-items: center; justify-content: center; z-index: 40; padding: 16px; }
+.emb-velo { position: fixed; inset: 0; background: rgba(15,23,42,.35); display: flex; align-items: center; justify-content: center; z-index: 70; padding: 16px; overflow: auto; }
+.emb-dialogo { max-height: calc(100vh - 32px); overflow: auto; }
 .emb-dialogo { width: 100%; max-width: 480px; margin: 0; }
 .emb-dialogo select, .emb-dialogo input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; box-sizing: border-box; }
 .emb-pie .muted { white-space: nowrap; }
