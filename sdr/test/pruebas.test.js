@@ -185,13 +185,29 @@ test('pruebas: cuáles se convierten, y lo que Wei tiene en prueba', { skip: !ur
   await F.arrancar(db, base, { dealId: noVa, usuario: 'Luisa', ahora: new Date('2026-10-01T15:00:00Z'), env: {}, ficha: { champion_nombre: 'X', criterio: 'y', fuera_de_alcance: true } });
   await F.decidir(db, base, { dealId: noVa, tipo: 'no', nota: 'Perfiles fuera de alcance', usuario: 'Luisa', ahora, env: {} });
   assert.strictEqual((await db.query(`SELECT outcome FROM public.deals WHERE id = $1`, [noVa])).rows[0].outcome, 'lost');
+  // Arrancar la ficha de un deal que ya avanzó (interesado) o se cerró no lo devuelve a prueba ni lo reabre.
+  const avanzado = await deal('Kenner');
+  await mover(avanzado, 'propuesta', '2026-09-10T14:00:00Z', { tipo: 'prueba' }); await mover(avanzado, 'interesado', '2026-10-01T14:00:00Z');
+  const av = await F.arrancar(db, base, { dealId: avanzado, usuario: 'Luisa', ahora, env: {}, ficha: { champion_nombre: 'Por confirmar', criterio: 'c', nota: 'El gerente estaba en China', inicio: '2026-09-10' } });
+  assert.strictEqual(av.movido, false);
+  assert.strictEqual((await db.query(`SELECT etapa_embudo FROM public.deals WHERE id = $1`, [avanzado])).rows[0].etapa_embudo, 'interesado');
+  assert.strictEqual(av.prueba.nota, 'El gerente estaba en China');
+  const perdidoYa = await deal('Auro');
+  await mover(perdidoYa, 'perdido', '2026-10-01T14:00:00Z', { motivo: 'Lead sin valor (no calificaba)' });
+  await F.arrancar(db, base, { dealId: perdidoYa, usuario: 'Luisa', ahora, env: {}, ficha: { champion_nombre: 'x', criterio: 'y', fuera_de_alcance: true, inicio: '2026-09-01' } });
+  const pz = (await db.query(`SELECT outcome, prueba_at FROM public.deals WHERE id = $1`, [perdidoYa])).rows[0];
+  assert.strictEqual(pz.outcome, 'lost'); assert.ok(pz.prueba_at, 'queda anotado que fue prueba');
+  const dn = await F.decidir(db, base, { dealId: perdidoYa, tipo: 'no', nota: 'Perfiles fuera de alcance', usuario: 'Luisa', ahora, env: {} });
+  assert.ok(dn.avisos.some(a => /Ya estaba perdido/.test(a)));
+  assert.strictEqual((await db.query(`SELECT outcome_reason FROM public.deals WHERE id = $1`, [perdidoYa])).rows[0].outcome_reason, 'Lead sin valor (no calificaba)', 'el motivo original se respeta');
+
   // El resumen de pruebas trae el esquema: con ficha, decididas, champions que trajeron al jefe, por decisión.
   t = await Em.tablero(db, base, { ahora });
   const es = t.pruebas.esquema;
-  assert.strictEqual(es.con_ficha, 3);
-  assert.deepStrictEqual(es.con_decision, { n: 3, de: 3, pct: 100 });
+  assert.strictEqual(es.con_ficha, 5);
+  assert.deepStrictEqual(es.con_decision, { n: 4, de: 5, pct: 80 });
   assert.deepStrictEqual(es.champion_trajo_jefe, { n: 1, de: 2, pct: 50 });
-  assert.deepStrictEqual(es.por_decision, { otro_ano: 1, consumo: 1, no: 1 });
+  assert.deepStrictEqual(es.por_decision, { otro_ano: 1, consumo: 1, no: 2 });
   assert.strictEqual(es.sin_ficha, 2, 'rappi y quieta siguen en prueba sin ficha');
   const cardCimpa = Object.values(t.columnas).flat().find(x => x.deal_id === sinDemo);
   assert.strictEqual(cardCimpa.prueba.champion, 'Marian Ruiz');

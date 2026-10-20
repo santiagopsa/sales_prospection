@@ -85,7 +85,7 @@ async function arrancar(db, config, { dealId, ficha = {}, usuario, ahora = new D
   const prueba = {
     ...(previa || {}),
     vacante_url: limpiar(ficha.vacante_url, 300), vacante_id: vacanteId(ficha.vacante_url), cargo: limpiar(ficha.cargo, 120),
-    champion, decisor, criterio, fuera_de_alcance: fueraDeAlcance,
+    champion, decisor, criterio, fuera_de_alcance: fueraDeAlcance, nota: limpiar(ficha.nota, 1000),
     inicio, resultados_fecha: resultadosFecha, resultados_hora: r.hora, checkin_fecha: checkinFecha,
     arrancada_at: ahora.toISOString(), arrancada_por: usuario,
   };
@@ -117,12 +117,16 @@ async function arrancar(db, config, { dealId, ficha = {}, usuario, ahora = new D
   } else prueba.checkin_compromiso_id = null;
 
   await guardar(db, dealId, prueba);
-  // El deal queda en "Prueba gratis" si no estaba (deja prueba_at).
+  // El deal queda en "Prueba gratis" si estaba antes (sin calificar o calificado). Uno que ya avanzó
+  // (cotización, interesados) o se cerró no se devuelve ni se reabre: solo se le anota desde cuándo
+  // fue prueba (prueba_at), para que cuente en "Pruebas gratis".
   const etapa = Em().etapaDe(config, d);
   let movido = false;
-  if (!(etapa === 'propuesta' && d.propuesta_tipo === 'prueba')) {
+  if (['sin_calificar', 'calificado'].includes(etapa)) {
     await Em().mover(db, config, { dealId, etapa: 'propuesta', tipo: 'prueba', usuario, ahora });
     movido = true;
+  } else if (!d.prueba_at) {
+    await db.query(`UPDATE public.deals SET prueba_at = $2 WHERE id = $1`, [dealId, new Date(inicio + 'T12:00:00-05:00').toISOString()]);
   }
   // Calendario, mejor esfuerzo (red), fuera de lo anterior.
   const calendario = [];
@@ -266,17 +270,21 @@ async function decidir(db, config, { dealId, tipo, fecha, nota, championTraeJefe
   const empresa = d.company || (lead && lead.empresa) || `deal #${dealId}`;
   let compromisoId = null;
   const motivoBase = `Prueba gratis: ${r.decisiones[tipo]}${prueba.decision.nota ? ' — ' + prueba.decision.nota : ''}`;
+  const etapaActual = Em().etapaDe(config, d);
   if (tipo === 'plan' || tipo === 'consumo') {
-    let prods = Array.isArray(productos) ? productos.filter(Boolean) : [];
-    if (!prods.length) { let ops = []; try { ops = P.deEmpresa(await P.operacionEnPrueba(db), d.company); } catch (_) {} prods = productosPorDefecto(config, ops); }
-    await Em().mover(db, config, { dealId, etapa: 'ganado', motivo: `Piloto validó la solución — ${motivoBase}`, productos: prods, usuario, ahora });
-    avisos.push(`Ganado (${r.decisiones[tipo]}).`);
+    if (etapaActual === 'ganado') avisos.push('Ya estaba ganado; queda la decisión de la prueba.');
+    else {
+      let prods = Array.isArray(productos) ? productos.filter(Boolean) : [];
+      if (!prods.length) { let ops = []; try { ops = P.deEmpresa(await P.operacionEnPrueba(db), d.company); } catch (_) {} prods = productosPorDefecto(config, ops); }
+      await Em().mover(db, config, { dealId, etapa: 'ganado', motivo: `Piloto validó la solución — ${motivoBase}`, productos: prods, usuario, ahora });
+      avisos.push(`Ganado (${r.decisiones[tipo]}).`);
+    }
   } else if (tipo === 'no') {
-    await Em().mover(db, config, { dealId, etapa: 'perdido', motivo: motivoBase, usuario, ahora });
-    avisos.push('Perdido, con el motivo de la prueba.');
+    if (etapaActual === 'perdido') avisos.push('Ya estaba perdido; queda la decisión de la prueba.');
+    else { await Em().mover(db, config, { dealId, etapa: 'perdido', motivo: motivoBase, usuario, ahora }); avisos.push('Perdido, con el motivo de la prueba.'); }
   } else {
     // Otro año: interesado, con fecha límite de decisión y compromiso de retomar antes del comité.
-    await Em().mover(db, config, { dealId, etapa: 'interesado', usuario, ahora });
+    if (etapaActual !== 'interesado') await Em().mover(db, config, { dealId, etapa: 'interesado', usuario, ahora });
     await db.query(`UPDATE public.deals SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object('fechaLimiteDecision', $2::text) WHERE id = $1`, [dealId, fechaLimite]);
     const retomar = tiempo.aDiaHabil(tiempo.sumarDias(fechaLimite, -r.retomarDiasAntes));
     const eje = ejecutivaDe(config);
@@ -343,7 +351,7 @@ function resumenFicha(config, prueba, ahora = new Date()) {
   const hoy = tiempo.fechaBogota(ahora);
   return {
     tiene_ficha: true, champion: prueba.champion ? prueba.champion.nombre : null, decisor: prueba.decisor ? prueba.decisor.quien : null,
-    criterio: prueba.criterio, dia: diaDe(config, prueba, ahora), dias_total: reglas(config).diasHabiles,
+    criterio: prueba.criterio, nota: prueba.nota || null, dia: diaDe(config, prueba, ahora), dias_total: reglas(config).diasHabiles,
     resultados_fecha: prueba.resultados_fecha, vencida: !!(prueba.resultados_fecha && !prueba.decision && hoy > prueba.resultados_fecha),
     con_numeros: !!prueba.numeros, con_pagina: !!(prueba.pagina && prueba.pagina.texto),
     champion_trae_jefe: prueba.champion_trae_jefe ?? null,

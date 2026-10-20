@@ -2791,12 +2791,12 @@ async function renderPruebas() {
       <td><span class="pill ${E.cls}">${esc(E.tx)}</span></td>
       <td>${f.tiene_ficha ? `${esc(f.champion || '—')}${f.champion_trae_jefe === true ? ' <span class="pill good" title="Trae al jefe a la reunión de resultados">trae al jefe</span>' : f.champion_trae_jefe === false ? ' <span class="pill warn">no trae al jefe</span>' : ''}${f.decisor ? `<div class="muted chico">decide: ${esc(f.decisor)}</div>` : ''}` : '<span class="muted">—</span>'}</td>
       <td>${f.tiene_ficha ? (f.decision ? `<b>${esc(f.decision.label)}</b>${f.decision.fecha ? `<div class="muted chico">${embFechaDecision(f.decision.fecha)}</div>` : ''}` : f.vencida ? `<b class="emb-quieta">resultados vencidos</b><div class="muted chico">era el ${embFechaCorta(f.resultados_fecha)}</div>` : `día ${f.dia} de ${f.dias_total}<div class="muted chico">resultados ${embFechaCorta(f.resultados_fecha)}</div>`) : `<span class="muted">${x.dias_en_prueba != null ? x.dias_en_prueba + ' d en prueba' : ''}${x.quieta ? ' · <b class="emb-quieta">quieta</b>' : ''}</span>`}</td>
-      <td class="muted chico">${x.operacion.length ? x.operacion.map(o => esc(embOperacion(o))).join('<br>') : '—'}</td>
+      <td class="muted chico">${f.nota ? `<div>${esc(f.nota)}</div>` : ''}${x.operacion.length ? x.operacion.map(o => esc(embOperacion(o))).join('<br>') : (f.nota ? '' : '—')}</td>
       <td>${falta(x) ? `<span class="chico">${esc(falta(x))}</span>` : (f.decision ? '<span class="muted chico">cerrada</span>' : '')}${!f.tiene_ficha && x.estado === 'prueba' ? ` <button type="button" class="btn btn-sm" data-prueba-arrancar="${x.deal_id}">Arrancar</button>` : ''}</td>
     </tr>`;
   };
   const abiertas = p.pruebas.filter(x => !['ganado', 'perdido'].includes(x.estado)), cerradas = p.pruebas.filter(x => ['ganado', 'perdido'].includes(x.estado));
-  const tabla = filas => `<div class="tabla-env"><table class="wl-tabla"><thead><tr><th>Empresa</th><th>Estado</th><th>Champion</th><th>Prueba</th><th>Wei en Operaciones</th><th>Qué falta</th></tr></thead><tbody>${filas.map(fila).join('')}</tbody></table></div>`;
+  const tabla = filas => `<div class="tabla-env"><table class="wl-tabla"><thead><tr><th>Empresa</th><th>Estado</th><th>Champion</th><th>Prueba</th><th>Nota · Wei en Operaciones</th><th>Qué falta</th></tr></thead><tbody>${filas.map(fila).join('')}</tbody></table></div>`;
   h(`
     <div class="split"><div><h1>Pruebas</h1><p class="muted" style="margin:0">La prueba es para el reclutador (el champion); el decisor entra a la decisión, no a la prueba. Arranque → día N → números y página → decisión. Reglas en PRUEBA de sdr/config.js.</p></div>
       <a class="btn ghost btn-sm" href="#/embudo">Embudo</a></div>
@@ -2842,6 +2842,7 @@ function pruebaFichaHtml(f) {
       <label>¿Qué le pediría ese jefe para decir que sí?</label><input data-f="decisor_que_pide" value="${esc(dz.que_pide || '')}" placeholder="Ej. que la terna llegue en menos de una semana" />
       <label>La plata</label><div class="chips" style="margin:0">${Object.entries(PRUEBA_PLATA).map(([k, l]) => `<label class="chip" style="padding:6px 10px;display:inline-flex;gap:6px;align-items:center"><input type="radio" name="pr-plata" value="${k}" ${(dz.plata || 'no_sabe') === k ? 'checked' : ''} style="margin:0"> ${l}</label>`).join('')}</div>
     </details>
+    <label>Nota <span class="muted">(cómo va, qué dijeron)</span></label><input data-f="nota" value="${esc(p.nota || '')}" placeholder="Ej. les fue muy bien, negociando para 2027" />
     <label class="chip" style="margin-top:10px;padding:6px 10px;display:inline-flex;gap:6px;align-items:center"><input type="checkbox" data-f="fuera_de_alcance" ${p.fuera_de_alcance ? 'checked' : ''} style="margin:0"> Los perfiles están fuera de nuestro alcance (mejor no arrancar)</label>
     <div class="pr-dos" style="margin-top:8px"><div><label>Arranca el</label><input type="date" data-f="inicio" value="${esc(p.inicio || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }))}" /></div>
       <div class="muted chico" style="align-self:end;padding-bottom:8px">La reunión de resultados queda a ${f.dias_total} días hábiles como compromiso de ${esc(prUsuario())}${f.reglas && f.reglas.checkinDia ? `, con check-in el día ${f.reglas.checkinDia}` : ''}. Ahí el champion trae al jefe, o no.</div></div>
@@ -2908,6 +2909,7 @@ async function pintarPrueba(dealId) {
         <div><b>Vacante:</b> ${esc(p.cargo || '—')}${p.vacante_url ? ` · <a href="${esc(p.vacante_url)}" target="_blank" rel="noopener">ver en peaku.co</a>` : ''}</div>
         <div><b>Criterio de éxito:</b> ${esc(p.criterio)}</div>
         <div><b>Decisor:</b> ${esc((p.decisor || {}).quien || 'no se sabe')}${(p.decisor || {}).cuando ? ' · presupuesto: ' + esc(p.decisor.cuando) : ''}${(p.decisor || {}).que_pide ? ' · pediría: ' + esc(p.decisor.que_pide) : ''} · plata ${esc((PRUEBA_PLATA[(p.decisor || {}).plata] || 'no se sabe').toLowerCase())}</div>
+        ${p.nota ? `<div><b>Nota:</b> ${esc(p.nota)}</div>` : ''}
         <div><b>Fechas:</b> arrancó ${prFecha(p.inicio)}${p.checkin_fecha ? ' · check-in ' + prFecha(p.checkin_fecha) : ''} · resultados ${prFecha(p.resultados_fecha)} ${esc(p.resultados_hora || '')}</div>
         ${f.operacion && f.operacion.length ? `<div><b>Wei en Operaciones:</b> ${f.operacion.map(o => esc(embOperacion(o))).join(' · ')}</div>` : ''}
         <div style="margin-top:8px"><button class="btn ghost btn-sm" data-pr-editar>Editar la ficha</button></div></div>`
