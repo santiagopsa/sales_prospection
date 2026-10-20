@@ -192,6 +192,8 @@ test('pruebas: cuáles se convierten, y lo que Wei tiene en prueba', { skip: !ur
   assert.strictEqual(av.movido, false);
   assert.strictEqual((await db.query(`SELECT etapa_embudo FROM public.deals WHERE id = $1`, [avanzado])).rows[0].etapa_embudo, 'interesado');
   assert.strictEqual(av.prueba.nota, 'El gerente estaba en China');
+  assert.strictEqual(av.prueba.compromiso_id, null, 'prueba pasada: sin compromisos vencidos en el calendario');
+  assert.ok(av.avisos.some(a => /ya pasó/.test(a)));
   const perdidoYa = await deal('Auro');
   await mover(perdidoYa, 'perdido', '2026-10-01T14:00:00Z', { motivo: 'Lead sin valor (no calificaba)' });
   await F.arrancar(db, base, { dealId: perdidoYa, usuario: 'Luisa', ahora, env: {}, ficha: { champion_nombre: 'x', criterio: 'y', fuera_de_alcance: true, inicio: '2026-09-01' } });

@@ -103,18 +103,25 @@ async function arrancar(db, config, { dealId, ficha = {}, usuario, ahora = new D
     const u = await db.query(`UPDATE ${T.tasks} SET estado = 'omitida', done_at = NOW() WHERE id = $1 AND estado = 'pendiente' RETURNING id`, [id]);
     if (u.rows.length) omitidos.push(id);
   }
-  const t = await C().insertar(db, config, {
-    leadId: lead ? lead.id : null, tipo: 'reunion', titulo: `Resultados de la prueba · ${empresa}`, canal: 'llamada',
-    fecha: resultadosFecha, hora: r.hora, nota: `${notaFicha}\nEl champion trae al jefe (o no): ahí se decide plan, consumo, no u otro año.`, usuario: quienAtiende, creadoPor: usuario,
-  });
-  prueba.compromiso_id = t.id; creados.push(t.id);
-  if (checkinFecha) {
+  // Una prueba que se registra después de pasada (arranque viejo) no crea compromisos vencidos en el
+  // calendario: queda la ficha con "resultados vencidos" para registrar números y decisión.
+  const hoy = tiempo.fechaBogota(ahora);
+  const pasada = resultadosFecha < hoy;
+  prueba.compromiso_id = null; prueba.checkin_compromiso_id = null;
+  if (!pasada) {
+    const t = await C().insertar(db, config, {
+      leadId: lead ? lead.id : null, tipo: 'reunion', titulo: `Resultados de la prueba · ${empresa}`, canal: 'llamada',
+      fecha: resultadosFecha, hora: r.hora, nota: `${notaFicha}\nEl champion trae al jefe (o no): ahí se decide plan, consumo, no u otro año.`, usuario: quienAtiende, creadoPor: usuario,
+    });
+    prueba.compromiso_id = t.id; creados.push(t.id);
+  }
+  if (checkinFecha && !pasada && checkinFecha >= hoy) {
     const ck = await C().insertar(db, config, {
       leadId: lead ? lead.id : null, tipo: 'seguimiento', titulo: `Check-in de la prueba · ${empresa}`, canal: 'llamada',
       fecha: checkinFecha, hora: r.hora, nota: `¿Cómo va la prueba? ¿Ya vio candidatos? ¿Qué le falta para llevárselo a ${decisor.quien || 'su jefe'}?`, usuario: quienAtiende, creadoPor: usuario,
     });
     prueba.checkin_compromiso_id = ck.id; creados.push(ck.id);
-  } else prueba.checkin_compromiso_id = null;
+  }
 
   await guardar(db, dealId, prueba);
   // El deal queda en "Prueba gratis" si estaba antes (sin calificar o calificado). Uno que ya avanzó
@@ -132,8 +139,10 @@ async function arrancar(db, config, { dealId, ficha = {}, usuario, ahora = new D
   const calendario = [];
   for (const id of omitidos) await C().sincronizar(db, config, env, id, 'borrar');
   for (const id of creados) calendario.push(await C().sincronizar(db, config, env, id, 'crear'));
-  const avisos = [`Reunión de resultados el ${resultadosFecha} a las ${r.hora}${eje ? ' (compromiso de ' + eje.nombre + ')' : ''}.`];
-  if (checkinFecha) avisos.push(`Check-in el ${checkinFecha}.`);
+  const avisos = pasada
+    ? [`La fecha de resultados (${resultadosFecha}) ya pasó: no se crean compromisos; registra los números y la decisión.`]
+    : [`Reunión de resultados el ${resultadosFecha} a las ${r.hora}${eje ? ' (compromiso de ' + eje.nombre + ')' : ''}.`];
+  if (checkinFecha && !pasada && checkinFecha >= hoy) avisos.push(`Check-in el ${checkinFecha}.`);
   if (fueraDeAlcance) avisos.push('Marcaste perfiles fuera de alcance: considera no arrancar la prueba y cerrarla como "no califica".');
   return { deal_id: dealId, prueba, movido, avisos, calendario };
 }
