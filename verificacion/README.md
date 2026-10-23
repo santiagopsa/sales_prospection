@@ -157,6 +157,8 @@ python3 verificacion/test/e2e_repregunta.py  # falta indagar → programar → t
 node verificacion/test/feedback.test.js      # lo que dice el cliente: lectura contra el nivel, ajustes permitidos, guía, acierto
 PG_PRUEBA="host=/tmp/pgt port=5499 user=postgres" node verificacion/test/feedback_pg.test.js  # pegar y seguir, análisis en segundo plano, aplicar ajustes, reintentar
 python3 verificacion/test/e2e_feedback.py    # "No avanzó" → pegar → ajuste arriba en el tablero → aplicar → vuelve a la guía
+node verificacion/test/levantamiento.test.js  # levantamiento con la transcripción, el JD o los dos, por la ruta real
+python3 verificacion/test/e2e_levantamiento_mixto.py  # "Los dos: JD y reunión" en la pantalla de levantamiento
 python3 verificacion/test/e2e_nombre.py    # el lápiz junto al nombre, en sesión y sobre el acta
 python3 verificacion/test/e2e_empleo.py    # se verifica el último empleo declarado y no otro
 python3 verificacion/test/e2e_tablero.py   # el pulso, la cola, la meta, cerrar/reabrir, candidatos por vacante y el buscador
@@ -426,6 +428,19 @@ Todo el prompt del levantamiento está en `prompts.js`, separado de la lógica. 
 
 - **La regla de anclaje.** Todo requisito extraído debe tener cita textual; si el cliente no dijo cuántos años exige, no se inventa un número; lo ambiguo se reporta en `vacios_del_levantamiento` en vez de resolverlo por su cuenta.
 - **Qué cuenta como excluyente.** Solo lo innegociable. Lo que se valida con un documento (título, certificación, visa) se aparta, porque eso no es trabajo de la entrevista. Máximo 5, porque una sesión de 25 minutos no alcanza para más.
+
+### El JD y la reunión, juntos
+
+Pasó con Neduga: el JD ya estaba y la reunión de levantamiento fue solo de habilidades blandas. Con una sola caja había que elegir qué fuente perder. Ahora la pantalla tiene tres opciones: **Transcripción de reunión**, **Job description** y **Los dos: JD y reunión**. Con la tercera aparece una caja para el JD, aparte de la de la reunión, y la reunión puede ser corta.
+
+En el prompt van en dos bloques delimitados (`INICIO_DEL_JD` / `INICIO_DE_LA_REUNION`) con las reglas de cómo combinarlas:
+- Son complementarias: que la reunión no mencione un requisito del JD no lo descarta.
+- Lo dicho en la reunión pesa más que lo escrito; una contradicción va a `vacios_del_levantamiento`.
+- Los excluyentes salen de lo obligatorio en cualquiera de las dos.
+- El perfil de conducta sale sobre todo de la reunión. Las habilidades blandas van ahí, no a los excluyentes.
+- Cada cita empieza con `[JD]` o `[Reunión]`.
+
+La vacante guarda las dos fuentes rotuladas en `source_text`, con `source_type = 'mixto'`. La regla está en `prompts.js · fuentesLevantamiento`: si en "los dos" falta una, se trata como la otra.
 
 Costo: entre 0,05 y 0,20 USD por levantamiento según el largo. Las sesiones no consumen IA.
 

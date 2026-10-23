@@ -10,7 +10,7 @@
 // No toca deals ni wishlist: sus tablas viven en el schema "verificacion".
 const express = require('express');
 const path = require('path');
-const { buildFeedbackPrompt, buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt, leerTraduccion } = require('./prompts');
+const { fuentesLevantamiento, buildFeedbackPrompt, buildIntakePrompt, buildCvPrompt, buildTranscriptPrompt, buildTranslatePrompt, leerTraduccion } = require('./prompts');
 const REPREGUNTA_MIN_CHARS = 150;
 const { LVLTXT, MAX_REQ, clean, esCierre, semaforo, estadoTranscripcion, estadoIdentidad, bloqueos, tipoDocumento, integrityHash, reportCode, conciliarEmpleo, estadisticas, estadoTablero, normalizarRepregunta, combinarRepregunta, pulsoVacante, pulsoVacantes, indicadoresSemana, MOTIVOS_DESCARTE, RESULTADOS_CLIENTE } = require('./rules');
 const didit = require('./didit');
@@ -296,14 +296,16 @@ function router({ pool = null, anthropic = null, model = 'claude-opus-4-8' } = {
   r.post('/api/intake/analyze', async (req, res) => {
     try {
       if (!anthropic) return res.status(500).json({ error: 'ANTHROPIC_API_KEY no configurada' });
-      const { sourceText, sourceType, companyHint, roleHint, recruiter } = req.body || {};
-      if (!sourceText || sourceText.trim().length < 200) {
-        return res.status(400).json({ error: 'El texto está vacío o es muy corto (mínimo 200 caracteres).' });
-      }
-      const out = await pedirJson(buildIntakePrompt(sourceText, { sourceType, companyHint, roleHint, recruiter }),
-                                  { etiqueta: 'levantamiento', maxTokens: 8000 });
+      const { companyHint, roleHint, recruiter } = req.body || {};
+      // La transcripción, el JD o los dos (prompts.js · fuentesLevantamiento).
+      const f = fuentesLevantamiento(req.body || {});
+      if (f.error) return res.status(400).json({ error: f.error });
+      const out = await pedirJson(
+        buildIntakePrompt(f.tipo === 'mixto' ? f.reunion : f.texto, { sourceType: f.tipo, jdText: f.jd, companyHint, roleHint, recruiter }),
+        { etiqueta: 'levantamiento', maxTokens: 8000 });
       if (out.error) return res.status(502).json(out);
       const parsed = out.datos;
+      parsed._fuente = { tipo: f.tipo, texto: f.texto };
       parsed._usage = out.usage;
       parsed._model = model;
       res.json(parsed);

@@ -138,10 +138,39 @@
     <div class="setup">
       <button class="back" data-home type="button">← Volver</button>
       <h1>Cargar el levantamiento</h1>
-      <p class="lede">Sube la transcripción de la reunión con el cliente o el job description que te envió. Claude extrae la empresa, la vacante y los requisitos excluyentes — tú los revisas antes de guardar.</p>
+      <p class="lede">Sube la transcripción de la reunión con el cliente, el job description que te envió, o los dos. Claude extrae la empresa, la vacante y los requisitos excluyentes — tú los revisas antes de guardar.</p>
 
       <div class="fset">
-        <div class="fttl">El archivo</div>
+        <div class="fttl">Qué tienes del cliente</div>
+        <div class="segs" id="srcType">
+          <button class="seg sel" data-src="transcript" type="button">Transcripción de reunión</button>
+          <button class="seg" data-src="jd" type="button">Job description</button>
+          <button class="seg" data-src="mixto" type="button">Los dos: JD y reunión</button>
+        </div>
+        <p class="hint" id="srcHint" style="margin:10px 0 0">La transcripción de la reunión de levantamiento con el cliente.</p>
+      </div>
+
+      <!-- Con "Los dos", el JD va en su propia caja: es común que la reunión no repita lo que ya
+           estaba escrito y se dedique a lo que el JD no dice (habilidades blandas, contexto). -->
+      <div class="fset" id="jdSet" hidden>
+        <div class="fttl">El job description</div>
+        <div class="drop" id="jdDrop">
+          <input type="file" id="jdFile" accept=".txt,.md,.docx,.pdf" hidden>
+          <div class="dropin">
+            <div class="dropic">↑</div>
+            <div>
+              <b id="jdDropTitle">Arrastra el JD aquí o haz clic para elegirlo</b>
+              <span id="jdDropSub">Word (.docx), PDF o texto plano</span>
+            </div>
+          </div>
+        </div>
+        <div class="or">o pega el texto</div>
+        <div class="f"><textarea id="jdText" class="big" placeholder="Pega aquí el job description que envió el cliente."></textarea></div>
+        <div class="charc" id="jdCharc">0 caracteres</div>
+      </div>
+
+      <div class="fset">
+        <div class="fttl" id="srcTitulo">El archivo</div>
         <div class="drop" id="drop">
           <input type="file" id="file" accept=".txt,.md,.vtt,.srt,.docx,.pdf,.csv,.json" hidden>
           <div class="dropin">
@@ -165,10 +194,6 @@
         </div>
         <div class="frow one">
           <div class="f"><label for="hRec">Reclutador a cargo</label><input id="hRec" placeholder="Tu nombre"></div>
-        </div>
-        <div class="segs" id="srcType">
-          <button class="seg sel" data-src="transcript" type="button">Transcripción de reunión</button>
-          <button class="seg" data-src="jd" type="button">Job description</button>
         </div>
       </div>
 

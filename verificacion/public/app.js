@@ -1787,26 +1787,37 @@ function rechazosGuia(lista, titulo){
 
 /* ===================== levantamiento ===================== */
 function initIntake(){
-  const drop=$('#drop'), file=$('#file'), src=$('#srcText');
+  const src=$('#srcText'), jd=$('#jdText');
+  const modo = () => document.querySelector('#srcType .seg.sel').dataset.src;
 
+  // Con "Los dos" basta con que entre las dos cajas haya material: la reunión puede ser corta
+  // (solo habilidades blandas) porque lo técnico ya estaba en el JD.
   const refresh = () => {
-    const n = src.value.trim().length;
+    const n = src.value.trim().length, nj = jd.value.trim().length;
     $('#charc').textContent = n.toLocaleString('es-CO') + ' caracteres';
-    $('#btnAnalizar').disabled = n < 200;
+    $('#jdCharc').textContent = nj.toLocaleString('es-CO') + ' caracteres';
+    $('#btnAnalizar').disabled = modo() === 'mixto' ? (n + nj < 200 || !n || !nj) : n < 200;
   };
   src.addEventListener('input', refresh);
+  jd.addEventListener('input', refresh);
 
-  drop.addEventListener('click', () => file.click());
-  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => {
-    e.preventDefault(); drop.classList.add('over');
-  }));
-  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => {
-    e.preventDefault(); drop.classList.remove('over');
-  }));
-  drop.addEventListener('drop', e => { if(e.dataTransfer.files[0]) leerArchivo(e.dataTransfer.files[0]); });
-  file.addEventListener('change', e => { if(e.target.files[0]) leerArchivo(e.target.files[0]); });
+  // Una caja de archivo: el arrastre, el clic y la lectura del archivo a su textarea.
+  const caja = (dropSel, fileSel, ta, titulo, sub) => {
+    const drop = $(dropSel), file = $(fileSel);
+    drop.addEventListener('click', () => file.click());
+    ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => {
+      e.preventDefault(); drop.classList.add('over');
+    }));
+    ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => {
+      e.preventDefault(); drop.classList.remove('over');
+    }));
+    drop.addEventListener('drop', e => { if(e.dataTransfer.files[0]) leerArchivo(e.dataTransfer.files[0], ta, drop, titulo, sub); });
+    file.addEventListener('change', e => { if(e.target.files[0]) leerArchivo(e.target.files[0], ta, drop, titulo, sub); });
+  };
+  caja('#drop', '#file', src, '#dropTitle', '#dropSub');
+  caja('#jdDrop', '#jdFile', jd, '#jdDropTitle', '#jdDropSub');
 
-  async function leerArchivo(f){
+  async function leerArchivo(f, ta, drop, titulo, sub){
     if(f.size > 9*1024*1024) return toast('El archivo pesa más de 9 MB. Pega el texto en su lugar.');
     overlay(true, 'Leyendo el archivo…', f.name);
     try{
@@ -1817,20 +1828,34 @@ function initIntake(){
         r.readAsDataURL(f);
       });
       const out = await api('/api/extract-text', {method:'POST', body:{filename:f.name, dataBase64:b64}});
-      src.value = out.text;
+      ta.value = out.text;
       refresh();
       drop.classList.add('has');
-      $('#dropTitle').textContent = f.name;
-      $('#dropSub').textContent = out.chars.toLocaleString('es-CO') + ' caracteres leídos · haz clic para cambiar el archivo';
+      $(titulo).textContent = f.name;
+      $(sub).textContent = out.chars.toLocaleString('es-CO') + ' caracteres leídos · haz clic para cambiar el archivo';
       toast('Archivo leído');
     }catch(e){
       toast(e.message);
     }finally{ overlay(false); }
   }
 
-  document.querySelectorAll('#srcType .seg').forEach(b => b.addEventListener('click', () => {
-    document.querySelectorAll('#srcType .seg').forEach(x => x.classList.toggle('sel', x===b));
-  }));
+  const MODOS = {
+    transcript: {hint: 'La transcripción de la reunión de levantamiento con el cliente.', titulo: 'El archivo',
+                 ph: 'Pega aquí la transcripción de la reunión de levantamiento.'},
+    jd:         {hint: 'El job description que envió el cliente por escrito.', titulo: 'El archivo',
+                 ph: 'Pega aquí el job description que envió el cliente.'},
+    mixto:      {hint: 'Cuando ya estaba el JD y la reunión se dedicó a otra cosa —por ejemplo, solo a habilidades blandas—. Lo técnico sale del JD; lo que el cliente dijo en la reunión pesa más y arma el perfil de conducta.',
+                 titulo: 'La transcripción de la reunión', ph: 'Pega aquí la transcripción de la reunión de levantamiento.'},
+  };
+  const ponerModo = m => {
+    document.querySelectorAll('#srcType .seg').forEach(x => x.classList.toggle('sel', x.dataset.src === m));
+    $('#srcHint').textContent = MODOS[m].hint;
+    $('#srcTitulo').textContent = MODOS[m].titulo;
+    src.placeholder = MODOS[m].ph;
+    $('#jdSet').hidden = m !== 'mixto';
+    refresh();
+  };
+  document.querySelectorAll('#srcType .seg').forEach(b => b.addEventListener('click', () => ponerModo(b.dataset.src)));
 
   $('#btnAnalizar').addEventListener('click', analizar);
   refresh();
@@ -1839,19 +1864,23 @@ function initIntake(){
 async function analizar(){
   const sourceText = $('#srcText').value.trim();
   const sourceType = document.querySelector('#srcType .seg.sel').dataset.src;
+  const jdText = sourceType === 'mixto' ? $('#jdText').value.trim() : '';
   overlay(true, 'Leyendo el levantamiento…', 'Claude está identificando los requisitos excluyentes. Esto toma entre 20 y 40 segundos.');
   const caja = $('#intakeErr');
   caja.style.display = 'none';
   try{
     const out = await api('/api/intake/analyze', {method:'POST', body:{
-      sourceText, sourceType,
+      sourceText, sourceType, jdText,
       companyHint: $('#hEmp').value.trim(),
       roleHint: $('#hRol').value.trim(),
       recruiter: $('#hRec').value.trim(),
     }});
     X = out;
-    X._sourceText = sourceText;
-    X._sourceType = sourceType;
+    // Lo que se guarda con la vacante lo arma el servidor: con las dos fuentes, el JD y la
+    // reunión juntos y rotulados.
+    X._sourceText = (out._fuente && out._fuente.texto) || sourceText;
+    X._sourceType = (out._fuente && out._fuente.tipo) || sourceType;
+    delete X._fuente;
     X._recruiter = $('#hRec').value.trim();
     if(!Array.isArray(X.excluyentes)) X.excluyentes = [];
     X.excluyentes = X.excluyentes.slice(0,5);

@@ -9,7 +9,7 @@
 // Ninguna de las otras pruebas lo veía: el stub no llama a Claude, así que el flujo pasaba
 // en verde de punta a punta con el prompt vacío por dentro.
 const assert = require('assert');
-const { buildIntakePrompt, buildCvPrompt, buildTranslatePrompt, buildTranscriptPrompt, buildFeedbackPrompt } = require('../prompts');
+const { buildIntakePrompt, buildCvPrompt, buildTranslatePrompt, buildTranscriptPrompt, buildFeedbackPrompt, fuentesLevantamiento } = require('../prompts');
 
 let n = 0;
 const t = (nombre, fn) => { fn(); n++; console.log('  ✓', nombre); };
@@ -167,6 +167,34 @@ t('lo que el cliente rechazó entra al análisis solo para indagar, nunca para b
   assert.ok(/LO QUE EL CLIENTE YA RECHAZÓ/.test(p) && p.includes('Flojo en hojas de ruta') && p.includes('(requisito 1)'));
   assert.ok(/NUNCA bajes un nivel por esto/.test(p));
   assert.ok(!/LO QUE EL CLIENTE YA RECHAZÓ/.test(buildTranscriptPrompt('t', { requisitos: [{ text: 'x' }] })));
+});
+
+t('el levantamiento acepta la transcripción, el JD o los dos', () => {
+  const jd = 'Requisitos obligatorios: 5 años en SAP PP, rollouts en producción. '.repeat(4);
+  const reunion = 'Cliente: lo que más nos importa es que aguante la presión del cierre.';
+  const f = fuentesLevantamiento({ sourceType: 'mixto', sourceText: reunion, jdText: jd });
+  assert.strictEqual(f.tipo, 'mixto');
+  assert.ok(f.texto.indexOf('=== JOB DESCRIPTION ===') === 0 && f.texto.includes('=== TRANSCRIPCIÓN DE LA REUNIÓN ===') && f.texto.includes(reunion));
+  // Una reunión corta vale: lo técnico ya está en el JD.
+  assert.ok(reunion.length < 200 && !f.error);
+  // En "los dos" con una sola caja llena, se trata como esa sola.
+  assert.strictEqual(fuentesLevantamiento({ sourceType: 'mixto', sourceText: '', jdText: jd }).tipo, 'jd');
+  assert.ok(fuentesLevantamiento({ sourceType: 'mixto', sourceText: '', jdText: '' }).error);
+  assert.ok(fuentesLevantamiento({ sourceType: 'mixto', sourceText: 'corta', jdText: 'corto' }).error);
+  assert.ok(fuentesLevantamiento({ sourceType: 'jd', sourceText: 'corto' }).error);
+  assert.strictEqual(fuentesLevantamiento({ sourceType: 'transcript', sourceText: 'x'.repeat(250) }).tipo, 'transcript');
+});
+
+t('con las dos fuentes, el prompt las separa y dice cómo combinarlas', () => {
+  const p = buildIntakePrompt('Cliente: buscamos alguien que aguante la presión.', { sourceType: 'mixto', jdText: 'JD: SAP PP obligatorio.' });
+  assert.ok(/<<<INICIO_DEL_JD\nJD: SAP PP obligatorio\.\nFIN_DEL_JD>>>/.test(p), 'el JD no va en su bloque');
+  assert.ok(/<<<INICIO_DE_LA_REUNION\nCliente: buscamos/.test(p), 'la reunión no va en su bloque');
+  assert.ok(/NO\s+lo descarta/.test(p) && /gana la reunión/.test(p) && /PERFIL DE CONDUCTA sale sobre todo de la reunión/.test(p));
+  assert.ok(/"\[JD\] …" o\s+"\[Reunión\] …"/.test(p), 'no pide marcar la fuente de cada cita');
+  assert.ok(!/INICIO_DEL_TEXTO/.test(p));
+  // Con una sola fuente, el prompt es el de siempre.
+  const q = buildIntakePrompt('x'.repeat(300), { sourceType: 'jd' });
+  assert.ok(/INICIO_DEL_TEXTO/.test(q) && !/COMBINAN/.test(q) && /un JOB DESCRIPTION/.test(q));
 });
 
 console.log(`\n${n} pruebas · los prompts no pierden su entrada`);

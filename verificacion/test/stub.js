@@ -25,6 +25,8 @@ const OPS = require('../ops');
 const OPS_STORE = OPS.crearOps({ semilla: process.env.OPS_SEMILLA === '1' });
 const db = { companies:[], vacancies:[], requirements:[], sessions:[], ratings:[], feedback:[], seq:1 };
 const FB = require('../feedback');
+const { fuentesLevantamiento } = require('../prompts');
+let stubUltimoLevantamiento = null;
 function fbListar(vid = null){
   return db.feedback.filter(f=>!vid || f.vacancy_id===vid).map(f=>{
     const s = db.sessions.find(x=>x.id===f.session_id) || {}, v = db.vacancies.find(x=>x.id===f.vacancy_id) || {};
@@ -161,7 +163,9 @@ const server = http.createServer(async (req, res) => {
 
   if(p === '/api/intake/analyze' && m==='POST'){
     const b = await body(req);
-    if(!b.sourceText || b.sourceText.trim().length < 200) return json(res,400,{error:'texto muy corto'});
+    const fu = fuentesLevantamiento(b);
+    if(fu.error) return json(res,400,{error:fu.error});
+    b.sourceText = fu.texto;
     // Para probar el camino de error sin llamar a Claude: mismos cuerpos que el servidor real.
     if(b.sourceText.includes('__TRUNCADO__')) return json(res,502,{
       error:'La respuesta de Claude se cortó por longitud. Prueba con un texto más corto, o quitando las partes que no describen el cargo.',
@@ -169,8 +173,14 @@ const server = http.createServer(async (req, res) => {
     if(b.sourceText.includes('__ILEGIBLE__')) return json(res,502,{
       error:'Claude no devolvió un JSON que se pueda leer. Vuelve a intentarlo; si se repite, revisa que el texto sea el levantamiento o el job description y no otra cosa.',
       motivo:'ilegible', raw:'Lo siento, no puedo procesar este texto porque parece un contrato y no un job description.'});
-    return json(res,200,JSON.parse(JSON.stringify(FAKE)));
+    // Con las dos fuentes, el perfil de conducta sale de la reunión: así lo devolvería Claude.
+    const fake = JSON.parse(JSON.stringify(FAKE));
+    if(fu.tipo === 'mixto' && Array.isArray(fake.perfil_conducta)) fake.perfil_conducta.forEach(x => { x.evidencia_cita = '[Reunión] ' + (x.evidencia_cita || ''); });
+    if(fu.tipo === 'mixto') (fake.excluyentes || []).forEach(x => { x.evidencia_cita = '[JD] ' + (x.evidencia_cita || ''); });
+    stubUltimoLevantamiento = {tipo: fu.tipo, jd: fu.jd || '', reunion: fu.reunion || ''};
+    return json(res,200,{...fake, _fuente:{tipo:fu.tipo, texto:fu.texto}});
   }
+  if(p === '/api/__ultimo_levantamiento' && m==='GET') return json(res,200,stubUltimoLevantamiento);
 
   if(p === '/api/vacancies' && m==='POST'){
     const b = await body(req);
@@ -188,6 +198,7 @@ const server = http.createServer(async (req, res) => {
       ingles_requerido: !!(b.ingles && b.ingles.requerido), ingles_nivel: clean(b.ingles && b.ingles.nivel),
       ingles_uso: clean(b.ingles && b.ingles.uso), ingles_cita: clean(b.ingles && b.ingles.evidencia_cita),
       perfil: Array.isArray(b.perfil) ? b.perfil : [], ai_raw: b.aiRaw || null,
+      source_type: clean(b.sourceType) || null, source_text: clean(b.sourceText) || null,
       created_at:new Date().toISOString()};
     db.vacancies.push(v);
     reqs.forEach((r,i)=>db.requirements.push({id:nid(), vacancy_id:v.id, ord:i, text:clean(r.requisito),

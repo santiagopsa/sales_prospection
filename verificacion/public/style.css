@@ -146,7 +146,8 @@ input,textarea,select{font:inherit;color:inherit}
 .f textarea.big{min-height:150px}
 .f input::placeholder,.f textarea::placeholder{color:var(--ink3)}
 
-.segs{display:flex;gap:8px;margin-top:11px}
+.segs{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
+#srcType .seg{min-width:150px}
 .seg{flex:1;border:1.5px solid var(--line2);border-radius:8px;padding:9px 12px;font-size:13px;font-weight:600;
   color:var(--ink2);text-align:center;transition:.13s}
 .seg:hover{border-color:var(--acc)}
