@@ -2872,7 +2872,7 @@ async function pruebaArrancar(dealId, { alTerminar = null } = {}) {
   });
 }
 
-function pruebaNumerosHtml(n = {}) {
+function pruebaNumerosHtml(n = {}, seg = {}) {
   const v = k => (n[k] == null ? '' : n[k]);
   return `<div class="pr-numeros">
     <div class="pr-cuatro">
@@ -2888,6 +2888,14 @@ function pruebaNumerosHtml(n = {}) {
     <div class="pr-dos">
       <div><label>¿Se cumplió el criterio de éxito?</label><select data-n="criterio_cumplido"><option value="" ${n.criterio_cumplido == null ? 'selected' : ''}>—</option><option value="1" ${n.criterio_cumplido === true ? 'selected' : ''}>Sí</option><option value="0" ${n.criterio_cumplido === false ? 'selected' : ''}>No</option></select></div>
       <div><label>Nota</label><input data-n="nota" value="${esc(n.nota || '')}" placeholder="Lo que valga la pena que diga la página" /></div>
+    </div>
+    <div class="pr-seguimiento" style="margin-top:10px">
+      <div class="pr-dos" style="grid-template-columns:1fr auto;align-items:end">
+        <label style="margin:0">Transcripción de la llamada de seguimiento <span class="muted">(la de después de la prueba: cómo le fue al reclutador)</span></label>
+        <div><label>Fecha</label><input type="date" data-n="seguimiento_fecha" value="${esc(seg.fecha || '')}" /></div>
+      </div>
+      <textarea data-n="transcripcion_seguimiento" style="min-height:${seg.transcripcion ? 160 : 90}px;width:100%;font-size:12.5px;line-height:1.45" placeholder="Pega aquí la transcripción (Meet, Fireflies, WhatsApp…). Claude cita al cliente con sus palabras sobre cómo le fue y toma de aquí los números que no registraste.">${esc(seg.transcripcion || '')}</textarea>
+      <div class="muted chico" style="margin-top:3px">${seg.transcripcion ? `Guardada ${seg.at ? new Date(seg.at).toLocaleString('es-CO') : ''}${seg.por ? ' por ' + esc(seg.por) : ''} · ${seg.chars || seg.transcripcion.length} caracteres. Si la borras y guardas, la página deja de usarla.` : 'Opcional. Con la transcripción sola ya se puede redactar la página, aunque no hayas puesto números.'}</div>
     </div>
   </div>`;
 }
@@ -2914,13 +2922,13 @@ async function pintarPrueba(dealId) {
         ${f.operacion && f.operacion.length ? `<div><b>Wei en Operaciones:</b> ${f.operacion.map(o => esc(embOperacion(o))).join(' · ')}</div>` : ''}
         <div style="margin-top:8px"><button class="btn ghost btn-sm" data-pr-editar>Editar la ficha</button></div></div>`
       : `<p class="muted chico" style="margin:0 0 8px">El deal está en Prueba gratis pero sin ficha: no hay champion, criterio ni fecha de resultados.</p><button class="btn" data-pr-editar>▶ Arrancar la prueba</button>`)}
-    ${p ? paso(2, 'Resultados en números', !!p.numeros, !p.numeros && !dec, `<p class="muted chico" style="margin:0 0 8px">Lo que el cliente podrá defender en su comité. Si Wei lo tiene en Operaciones, ya aparece arriba.</p>${pruebaNumerosHtml(p.numeros || {})}<div class="btn-row" style="justify-content:flex-start;margin-top:8px"><button class="btn secondary btn-sm" data-pr-numeros>Guardar números</button>${p.numeros ? `<span class="muted chico">guardados ${new Date(p.numeros.at).toLocaleString('es-CO')}</span>` : ''}</div>`) : ''}
-    ${p ? paso(3, 'Página de resultados (para que el champion la reenvíe a su jefe)', !!(p.pagina && p.pagina.texto), !!p.numeros && !(p.pagina && p.pagina.texto) && !dec, p.pagina && p.pagina.texto
+    ${p ? paso(2, 'Resultados: números y llamada de seguimiento', !!(p.numeros || f.con_seguimiento), !(p.numeros || f.con_seguimiento) && !dec, `<p class="muted chico" style="margin:0 0 8px">Lo que el cliente podrá defender en su comité. Si Wei lo tiene en Operaciones, ya aparece arriba.</p>${pruebaNumerosHtml(p.numeros || {}, p.seguimiento || {})}<div class="btn-row" style="justify-content:flex-start;margin-top:8px"><button class="btn secondary btn-sm" data-pr-numeros>Guardar resultados</button>${p.numeros ? `<span class="muted chico">guardados ${new Date(p.numeros.at).toLocaleString('es-CO')}</span>` : ''}</div>`) : ''}
+    ${p ? paso(3, 'Página de resultados (para que el champion la reenvíe a su jefe)', !!(p.pagina && p.pagina.texto), !!(p.numeros || f.con_seguimiento) && !(p.pagina && p.pagina.texto) && !dec, p.pagina && p.pagina.texto
       ? `<textarea data-pr-pagina style="min-height:220px;width:100%;font-size:13.5px;line-height:1.5">${esc(p.pagina.texto)}</textarea>
-         <div class="muted chico" style="margin:4px 0 8px">Redactada ${p.pagina.redactada_at ? new Date(p.pagina.redactada_at).toLocaleString('es-CO') : ''}${p.pagina.editada_at ? ' · editada a mano ' + new Date(p.pagina.editada_at).toLocaleString('es-CO') : ''}${f.con_demo ? ' · con la transcripción del demo' : ' · este deal no tiene demo: sin citas del cliente'}</div>
+         <div class="muted chico" style="margin:4px 0 8px">Redactada ${p.pagina.redactada_at ? new Date(p.pagina.redactada_at).toLocaleString('es-CO') : ''}${p.pagina.editada_at ? ' · editada a mano ' + new Date(p.pagina.editada_at).toLocaleString('es-CO') : ''}${f.con_demo ? ' · con la transcripción del demo' : ' · este deal no tiene demo'}${p.pagina.con_seguimiento ? ' · con la llamada de seguimiento' : f.con_seguimiento ? ' · <b>sin la llamada de seguimiento que guardaste después: vuelve a redactar para que la use</b>' : ''}</div>
          <div class="btn-row" style="justify-content:flex-start"><button class="btn secondary btn-sm" data-pr-guardar>Guardar mis cambios</button><button class="btn ghost btn-sm" data-pr-copiar>Copiar</button></div>
          <div style="margin-top:10px"><label>Pedirle ajustes a Claude <span class="muted">(sobre esta versión)</span></label><div class="pr-dos" style="grid-template-columns:1fr auto"><input data-pr-instr placeholder="Ej. más corta, quita lo de Magneto, menciona que ya contrataron a uno" /><button class="btn btn-sm" data-pr-redactar>✦ Volver a redactar</button></div></div>`
-      : `<p class="muted chico" style="margin:0 0 8px">Claude la escribe con el criterio, los números, lo que el cliente dijo en el demo${f.con_demo ? ' (cita al cliente con sus palabras)' : ''} y el siguiente paso. Tú la ajustas antes de mandarla.</p><button class="btn" data-pr-redactar ${p.numeros ? '' : 'disabled title="Primero guarda los números"'}>✦ Redactar la página</button>`) : ''}
+      : `<p class="muted chico" style="margin:0 0 8px">Claude la escribe con el criterio, los números, lo que el cliente dijo en el demo${f.con_demo ? ' (cita al cliente con sus palabras)' : ''}${f.con_seguimiento ? ' y en la llamada de seguimiento (cómo le fue)' : ''} y el siguiente paso. Tú la ajustas antes de mandarla.</p><button class="btn" data-pr-redactar ${p.numeros || f.con_seguimiento ? '' : 'disabled title="Primero guarda los números o la transcripción de la llamada de seguimiento"'}>✦ Redactar la página</button>`) : ''}
     ${p ? paso(4, 'Decisión', !!dec, !!(p.pagina && p.pagina.texto) && !dec, dec
       ? `<div class="pr-resumen"><div><b>${esc(dec.label)}</b>${dec.fecha ? ' · fecha límite ' + prFecha(dec.fecha) : ''}${dec.nota ? ' · ' + esc(dec.nota) : ''}</div><div class="muted chico">${p.champion_trae_jefe === true ? 'El champion trajo al jefe.' : p.champion_trae_jefe === false ? 'El champion no trajo al jefe.' : ''} Decidido ${new Date(dec.at).toLocaleString('es-CO')}${dec.por ? ' por ' + esc(dec.por) : ''}.</div></div>`
       : `<label>¿El champion trae al jefe a la reunión de resultados?</label><div class="chips" style="margin:0 0 8px"><label class="chip" style="padding:6px 10px"><input type="radio" name="pr-jefe" value="1" style="margin:0 6px 0 0">Sí, con fecha</label><label class="chip" style="padding:6px 10px"><input type="radio" name="pr-jefe" value="0" style="margin:0 6px 0 0">No ("yo lo muevo internamente")</label></div>
@@ -2934,7 +2942,7 @@ async function pintarPrueba(dealId) {
   const u = prUsuario();
   const $ed = $c.querySelector('[data-pr-editar]'); if ($ed) $ed.addEventListener('click', () => pruebaArrancar(dealId, { alTerminar: recargar }));
   const $num = $c.querySelector('[data-pr-numeros]'); if ($num) $num.addEventListener('click', async () => {
-    try { await tbApi(`embudo/${dealId}/prueba/resultados`, { method: 'POST', body: { ...pruebaLeerNumeros($c.querySelector('.pr-numeros')), usuario: u } }); tbAvisar('Números guardados.'); await recargar(); } catch (e) { tbAvisar(e.message, 'error'); }
+    try { await tbApi(`embudo/${dealId}/prueba/resultados`, { method: 'POST', body: { ...pruebaLeerNumeros($c.querySelector('.pr-numeros')), usuario: u } }); tbAvisar('Resultados guardados.'); await recargar(); } catch (e) { tbAvisar(e.message, 'error'); }
   });
   const $red = $c.querySelector('[data-pr-redactar]'); if ($red) $red.addEventListener('click', async () => {
     const $i = $c.querySelector('[data-pr-instr]'); const instrucciones = $i ? $i.value.trim() : '';

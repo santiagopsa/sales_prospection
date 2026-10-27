@@ -235,6 +235,7 @@ async function main() {
           console.log(`  Decisor: ${(pr.decisor || {}).quien || 'no se sabe'} · presupuesto: ${(pr.decisor || {}).cuando || '—'} · plata: ${(pr.decisor || {}).plata}`);
           console.log(`  Arrancó ${pr.inicio} · check-in ${pr.checkin_fecha || '—'} · resultados ${pr.resultados_fecha} ${pr.resultados_hora} · hoy es el día ${f.dia}${f.vencida ? ' · RESULTADOS VENCIDOS' : ''}`);
           if (pr.numeros) console.log(`  Números: ${JSON.stringify(pr.numeros)}`);
+          if (pr.seguimiento && pr.seguimiento.transcripcion) console.log(`  Llamada de seguimiento: ${pr.seguimiento.chars} caracteres${pr.seguimiento.fecha ? ' · ' + pr.seguimiento.fecha : ''} · guardada ${new Date(pr.seguimiento.at).toLocaleString('es-CO')}${pr.seguimiento.por ? ' por ' + pr.seguimiento.por : ''}`);
           if (pr.pagina && pr.pagina.texto) console.log(`  Página (${pr.pagina.texto.split(/\s+/).length} palabras${pr.pagina.editada_at ? ', editada' : ''}):\n    ${pr.pagina.texto.replace(/\n/g, '\n    ')}`);
           console.log(`  Champion trae al jefe: ${pr.champion_trae_jefe == null ? 'sin respuesta' : pr.champion_trae_jefe ? 'sí' : 'no'}`);
           if (pr.decision) console.log(`  Decisión: ${pr.decision.label}${pr.decision.fecha ? ' · ' + pr.decision.fecha : ''}${pr.decision.nota ? ' · ' + pr.decision.nota : ''}`);

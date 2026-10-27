@@ -162,6 +162,37 @@ test('pruebas: cuáles se convierten, y lo que Wei tiene en prueba', { skip: !ur
   assert.match(claude.ultimo.user, /TRANSCRIPCIÓN DEL DEMO/);
   assert.match(claude.ultimo.user, /transcripción recortada/);
   assert.ok(claude.ultimo.user.length < 20000);
+  assert.doesNotMatch(claude.ultimo.user, /LLAMADA DE SEGUIMIENTO/);
+  // Llamada de seguimiento (después de la prueba): se guarda con los números, entra al prompt como la
+  // voz del cliente sobre cómo le fue, y con ella sola ya se puede redactar.
+  const seguimiento = 'LUISA: ¿cómo les fue?\nCLIENTE: la terna llegó en cuatro días y entrevistamos a dos; uno ya está en oferta. ' + 'y'.repeat(20000);
+  const rs = await F.registrarResultados(db, base, { dealId: conDemo, numeros: { presentados: 5, contratados: 1, transcripcion_seguimiento: seguimiento, seguimiento_fecha: '2026-10-15' }, usuario: 'Luisa' });
+  assert.deepStrictEqual([rs.seguimiento.chars, rs.seguimiento.fecha], [seguimiento.length, '2026-10-15']);
+  const fs = await F.ficha(db, base, conDemo);
+  assert.strictEqual(fs.con_seguimiento, true);
+  assert.strictEqual(F.resumenFicha(base, fs.prueba).con_seguimiento, true);
+  const claudeFalso = { messages: { create: async ({ system, messages }) => { claude.ultimo = { system, user: messages[0].content }; return { content: [{ type: 'text', text: 'Página de prueba con más de ochenta caracteres para pasar la validación mínima del texto.' }] }; } } };
+  const pgs = await F.redactarPagina(db, base, claudeFalso, { dealId: conDemo, usuario: 'Luisa' });
+  assert.strictEqual(pgs.pagina.con_seguimiento, true);
+  assert.match(claude.ultimo.user, /TRANSCRIPCIÓN DE LA LLAMADA DE SEGUIMIENTO \(DESPUÉS de la prueba, 2026-10-15/);
+  assert.match(claude.ultimo.user, /la terna llegó en cuatro días/);
+  assert.match(claude.ultimo.system, /DESPUÉS de la prueba, en la llamada de seguimiento/);
+  assert.match(claude.ultimo.system, /según nos contó/);
+  assert.ok(claude.ultimo.user.length < 36000, 'las dos transcripciones recortadas');
+  // Sin números pero con la llamada: se puede redactar. Borrarla (cadena vacía) la quita; sin mandarla, se conserva.
+  const soloLlamada = await deal('Solo Llamada', {});
+  await mover(soloLlamada, 'propuesta', '2026-10-01T14:00:00Z', { tipo: 'prueba' });
+  await F.arrancar(db, base, { dealId: soloLlamada, usuario: 'Luisa', ahora: new Date('2026-10-01T15:00:00Z'), env: {}, ficha: { champion_nombre: 'Pepe', criterio: 'Terna en 5 días' } });
+  await assert.rejects(F.redactarPagina(db, base, claudeFalso, { dealId: soloLlamada, usuario: 'Luisa' }), /llamada de seguimiento/);
+  await F.registrarResultados(db, base, { dealId: soloLlamada, numeros: { transcripcion_seguimiento: 'CLIENTE: nos sirvió, contratamos a uno.' }, usuario: 'Luisa' });
+  await F.redactarPagina(db, base, claudeFalso, { dealId: soloLlamada, usuario: 'Luisa' });
+  assert.match(claude.ultimo.user, /contratamos a uno/);
+  assert.match(claude.ultimo.user, /\(sin números todavía\)/);
+  await F.registrarResultados(db, base, { dealId: soloLlamada, numeros: { presentados: 3 }, usuario: 'Luisa' });
+  assert.strictEqual((await F.ficha(db, base, soloLlamada)).con_seguimiento, true, 'sin mandarla se conserva');
+  await F.registrarResultados(db, base, { dealId: soloLlamada, numeros: { presentados: 3, transcripcion_seguimiento: '' }, usuario: 'Luisa' });
+  assert.strictEqual((await F.ficha(db, base, soloLlamada)).con_seguimiento, false, 'vacía la borra');
+  await assert.rejects(F.registrarResultados(db, base, { dealId: soloLlamada, numeros: { transcripcion_seguimiento: '' }, usuario: 'Luisa' }), /al menos un número/);
   // Decisión: "otro año" exige fecha; deja interesado + fecha límite + compromiso de retomar; cierra la reunión de resultados.
   await assert.rejects(F.decidir(db, base, { dealId: conDemo, tipo: 'otro_ano', usuario: 'Luisa' }), /fecha/);
   await assert.rejects(F.decidir(db, base, { dealId: conDemo, tipo: 'nada', usuario: 'Luisa' }), /Elige la decisión/);
@@ -206,8 +237,8 @@ test('pruebas: cuáles se convierten, y lo que Wei tiene en prueba', { skip: !ur
   // El resumen de pruebas trae el esquema: con ficha, decididas, champions que trajeron al jefe, por decisión.
   t = await Em.tablero(db, base, { ahora });
   const es = t.pruebas.esquema;
-  assert.strictEqual(es.con_ficha, 5);
-  assert.deepStrictEqual(es.con_decision, { n: 4, de: 5, pct: 80 });
+  assert.strictEqual(es.con_ficha, 6, 'incluye "Solo Llamada" (ficha con llamada de seguimiento, sin decisión)');
+  assert.deepStrictEqual(es.con_decision, { n: 4, de: 6, pct: 67 });
   assert.deepStrictEqual(es.champion_trajo_jefe, { n: 1, de: 2, pct: 50 });
   assert.deepStrictEqual(es.por_decision, { otro_ano: 1, consumo: 1, no: 2 });
   assert.strictEqual(es.sin_ficha, 2, 'rappi y quieta siguen en prueba sin ficha');

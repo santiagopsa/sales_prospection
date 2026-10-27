@@ -170,7 +170,9 @@ module.exports = {
   //   decisiones: las salidas posibles de la prueba y su etiqueta. plan y consumo cierran el deal como
   //     ganado; no lo cierra como perdido; otro_ano lo deja en interesados con fecha límite.
   //   pagina: cómo redacta Claude la página de resultados (modelo null = ANALYZE_MODEL; palabras tope;
-  //     transcript_max_chars = cuánto del demo se le pasa para que cite al cliente con sus palabras).
+  //     transcript_max_chars = cuánto del demo se le pasa para que cite al cliente con sus palabras;
+  //     seguimiento_max_chars = cuánto de la llamada de seguimiento, la de después de la prueba, se le
+  //     pasa: de ahí salen las citas del cliente sobre cómo le fue y los números que la ejecutiva no anotó).
   // Ver el efecto: node sdr/cli.js prueba <deal_id>
   PRUEBA: {
     dias_habiles: 10,
@@ -184,7 +186,7 @@ module.exports = {
       otro_ano: 'Presupuesto del otro año (con fecha)',
       no: 'No',
     },
-    pagina: { modelo: null, max_palabras: 250, transcript_max_chars: 14000 },
+    pagina: { modelo: null, max_palabras: 250, transcript_max_chars: 14000, seguimiento_max_chars: 14000 },
   },
 
   // ---------------------------------------------------------------------------

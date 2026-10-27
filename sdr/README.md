@@ -598,10 +598,16 @@ herramienta no); el **decisor** no entra a la prueba, entra a la **decisión**. 
 2. **Durante**: la tarjeta del embudo dice "Prueba · día N de 10 · champion …"; vencida la fecha sin
    decisión, "resultados vencidos". Lo de Wei en Operaciones se pega solo.
 3. **Resultados**: los números (presentados, entrevistados, días a la 1.ª terna, contratados, pruebas
-   usadas, contra qué, criterio cumplido) y la **página de resultados**, que redacta Claude para que el
-   champion la reenvíe a su jefe: criterio, números, lo que el cliente dijo que le dolía en el demo (cita
-   sus palabras si hay transcripción: se le pasan hasta `pagina.transcript_max_chars`), y el siguiente paso
-   con las dos salidas. Luisa la edita a mano (se guarda) o le pide ajustes a Claude sobre esa versión.
+   usadas, contra qué, criterio cumplido) y la **transcripción de la llamada de seguimiento**, la que la
+   ejecutiva hace después de la prueba para oír cómo le fue al reclutador (se pega en el mismo bloque, con
+   su fecha; con ella sola ya se puede redactar, sin números). Con eso Claude escribe la **página de
+   resultados** para que el champion la reenvíe a su jefe: criterio, números, lo que el cliente dijo que le
+   dolía en el demo (cita sus palabras si hay transcripción: se le pasan hasta `pagina.transcript_max_chars`)
+   y, si hay llamada de seguimiento, lo que dijo **después** de la prueba (una cita suya sobre cómo le fue;
+   los números que Luisa no registró pero el cliente dijo, atribuidos a él; y lo que salió mal, sin
+   esconderlo; hasta `pagina.seguimiento_max_chars`), y el siguiente paso con las dos salidas. Si la
+   transcripción se guarda después de redactar, la tarjeta avisa que hay que volver a redactar. Luisa la
+   edita a mano (se guarda) o le pide ajustes a Claude sobre esa versión.
 4. **Decisión**: ¿el champion trae al jefe? (sí/no: la prueba real de si es champion) y una de cuatro
    salidas (`PRUEBA.decisiones`): plan y consumo → **ganado** con producto; no → **perdido** con motivo;
    presupuesto del otro año → **interesados** con `fechaLimiteDecision` (mes o día del comité, obligatorio)

@@ -30,7 +30,7 @@ function reglas(config) {
     criterio: p.criterio_por_defecto || 'Terna de {cargo} en 5 días hábiles',
     retomarDiasAntes: Number(p.retomar_dias_antes) || 7,
     decisiones: p.decisiones || { plan: 'Plan', consumo: 'Por consumo', otro_ano: 'Presupuesto del otro año', no: 'No' },
-    pagina: { modelo: (p.pagina || {}).modelo || null, maxPalabras: Number((p.pagina || {}).max_palabras) || 250, transcriptMax: Number((p.pagina || {}).transcript_max_chars) || 14000 },
+    pagina: { modelo: (p.pagina || {}).modelo || null, maxPalabras: Number((p.pagina || {}).max_palabras) || 250, transcriptMax: Number((p.pagina || {}).transcript_max_chars) || 14000, seguimientoMax: Number((p.pagina || {}).seguimiento_max_chars) || 14000 },
   };
 }
 const PLATA = ['este_ano', 'otro_ano', 'no_sabe'];
@@ -148,8 +148,13 @@ async function arrancar(db, config, { dealId, ficha = {}, usuario, ahora = new D
 }
 
 // ---- 3 · Resultados -------------------------------------------------------------------------
+// Los números de la prueba y, si la hubo, la transcripción de la llamada de seguimiento (la que la
+// ejecutiva hace DESPUÉS de la prueba para oír cómo le fue al reclutador). Esa transcripción es la voz
+// del cliente sobre los resultados: la página la cita, y si trae números que la ejecutiva no registró,
+// Claude los toma de ahí. Con la transcripción sola (sin números) ya se puede redactar.
 
 const num = v => (v === '' || v == null ? null : Number.isFinite(Number(v)) ? Number(v) : null);
+const SEGUIMIENTO_GUARDADO_MAX = 60000;   // lo que se guarda en el deal; al prompt entra pagina.seguimiento_max_chars
 
 async function registrarResultados(db, config, { dealId, numeros = {}, usuario, ahora = new Date() }) {
   dealId = Number(dealId);
@@ -163,10 +168,26 @@ async function registrarResultados(db, config, { dealId, numeros = {}, usuario, 
     comparado_con: limpiar(numeros.comparado_con, 160), criterio_cumplido: numeros.criterio_cumplido == null || numeros.criterio_cumplido === '' ? null : !!numeros.criterio_cumplido,
     nota: limpiar(numeros.nota, 1000), at: ahora.toISOString(), por: usuario,
   };
-  if (n.presentados == null && n.entrevistados == null && n.contratados == null && !n.nota) throw error(400, 'Pon al menos un número de la prueba (candidatos presentados, entrevistados o contratados) o una nota.');
+  // Transcripción de la llamada de seguimiento: undefined = no la mandaron (se conserva la que había);
+  // '' = la borraron.
+  let seguimiento = prueba.seguimiento || null;
+  if (numeros.transcripcion_seguimiento !== undefined) {
+    const t = String(numeros.transcripcion_seguimiento || '').replace(/\r\n/g, '\n').trim();
+    seguimiento = t ? { transcripcion: t.slice(0, SEGUIMIENTO_GUARDADO_MAX), chars: t.length, at: ahora.toISOString(), por: usuario, fecha: limpiar(numeros.seguimiento_fecha, 10) || null } : null;
+  }
+  if (n.presentados == null && n.entrevistados == null && n.contratados == null && !n.nota && !seguimiento) throw error(400, 'Pon al menos un número de la prueba (candidatos presentados, entrevistados o contratados), una nota, o la transcripción de la llamada de seguimiento.');
   prueba.numeros = n;
+  prueba.seguimiento = seguimiento;
   await guardar(db, dealId, prueba);
-  return { deal_id: dealId, numeros: n };
+  return { deal_id: dealId, numeros: n, seguimiento: seguimiento && { chars: seguimiento.chars, at: seguimiento.at, fecha: seguimiento.fecha } };
+}
+
+// La llamada de seguimiento, recortada para el prompt.
+function contextoSeguimiento(config, prueba = {}) {
+  const r = reglas(config);
+  const t = String((prueba.seguimiento || {}).transcripcion || '').trim();
+  const transcript = t.length > r.pagina.seguimientoMax ? t.slice(0, r.pagina.seguimientoMax) + '\n[… transcripción recortada …]' : t;
+  return { transcript, con_seguimiento: t.length > 0, fecha: (prueba.seguimiento || {}).fecha || null };
 }
 
 // Lo que el cliente dijo en el demo, para que la página hable con sus palabras.
@@ -182,6 +203,7 @@ function promptPagina(config, { d, prueba, lead, operacion, instrucciones, anter
   const r = reglas(config);
   const data = d.data || {};
   const { pedido, transcript } = contextoDemo(config, data);
+  const seg = contextoSeguimiento(config, prueba);
   const n = prueba.numeros || {};
   const numeros = [
     n.presentados != null && `Candidatos presentados: ${n.presentados}`, n.entrevistados != null && `Entrevistados por el cliente: ${n.entrevistados}`,
@@ -198,8 +220,9 @@ PARA QUIÉN ES: la recibe el reclutador que hizo la prueba (el champion), pero e
 CÓMO SE ESCRIBE:
 - En español de Colombia, trato de usted, sin adjetivos de vendedor ("increíble", "líder", "innovador"). Hechos y números.
 - Máximo ${r.pagina.maxPalabras} palabras. Texto plano, sin markdown, sin viñetas con asteriscos; párrafos cortos y, si sirve, líneas tipo "Candidatos presentados: 6".
-- Estructura: (1) qué se probó y con qué vacante, en una línea; (2) el criterio de éxito que se acordó y si se cumplió; (3) los resultados en números; (4) lo que el cliente dijo que le dolía antes de la prueba, con sus propias palabras si la transcripción las tiene (una cita corta, entre comillas, de lo que dijo el cliente, nunca de lo que dijo la ejecutiva), y cómo quedó frente a eso; (5) el siguiente paso propuesto en una frase, con las dos salidas (plan o por consumo) sin precios, y la reunión de 20 minutos con el jefe.
-- Si un número no existe, no lo inventes ni pongas un marcador: omite esa línea.
+- Estructura: (1) qué se probó y con qué vacante, en una línea; (2) el criterio de éxito que se acordó y si se cumplió; (3) los resultados en números; (4) lo que el cliente dijo que le dolía antes de la prueba, con sus propias palabras si la transcripción del demo las tiene (una cita corta, entre comillas, de lo que dijo el cliente, nunca de lo que dijo la ejecutiva), y cómo quedó frente a eso${seg.con_seguimiento ? ': aquí pesa más lo que el cliente dijo DESPUÉS de la prueba, en la llamada de seguimiento (una cita corta suya sobre cómo le fue, qué le sirvió y qué le faltó; si dijo algo que el jefe debería oír, esa es la cita)' : ''}; (5) el siguiente paso propuesto en una frase, con las dos salidas (plan o por consumo) sin precios, y la reunión de 20 minutos con el jefe.
+- Si un número no existe, no lo inventes ni pongas un marcador: omite esa línea.${seg.con_seguimiento ? ' Si la ejecutiva no registró un número pero el cliente lo dijo en la llamada de seguimiento (cuántos entrevistó, a quién contrató, cuánto se demoró), úsalo y atribúyelo al cliente ("según nos contó…").' : ''}
+- Si en la llamada de seguimiento el cliente mencionó algo que salió mal, no lo escondas: una línea honesta con lo que se corrige vale más ante el jefe que una página perfecta.
 - No menciones que es un texto para reenviar ni que lo escribió una IA. No pongas asunto de correo, saludo largo ni firma: empieza por el contenido.`;
   const user = `EMPRESA: ${d.company || (lead && lead.empresa) || ''}
 CHAMPION (reclutador que hizo la prueba): ${prueba.champion ? `${prueba.champion.nombre}${prueba.champion.cargo ? ', ' + prueba.champion.cargo : ''}` : '—'}
@@ -214,7 +237,8 @@ ${ops ? `\nLO QUE OPERACIONES TIENE DE ESTA EMPRESA:\n${ops}` : ''}
 
 LO QUE EL CLIENTE PIDIÓ Y CONTÓ EN EL DEMO (antes de la prueba):
 ${pedido || '(sin demo registrado)'}
-${transcript ? `\nTRANSCRIPCIÓN DEL DEMO (para citar al cliente con sus palabras; EJECUTIVA es Peaku, lo demás es el cliente):\n${transcript}` : ''}
+${transcript ? `\nTRANSCRIPCIÓN DEL DEMO (antes de la prueba; para citar al cliente con sus palabras; EJECUTIVA es Peaku, lo demás es el cliente):\n${transcript}` : ''}
+${seg.transcript ? `\nTRANSCRIPCIÓN DE LA LLAMADA DE SEGUIMIENTO (DESPUÉS de la prueba${seg.fecha ? ', ' + seg.fecha : ''}; lo que el cliente dijo de cómo le fue; la ejecutiva es Peaku, lo demás es el cliente):\n${seg.transcript}` : ''}
 ${anterior ? `\nVERSIÓN ANTERIOR DE LA PÁGINA (la ejecutiva quiere cambios sobre esta):\n${anterior}` : ''}
 ${instrucciones ? `\nAJUSTES QUE PIDE LA EJECUTIVA (obligatorios):\n${instrucciones}` : ''}
 
@@ -230,7 +254,7 @@ async function redactarPagina(db, config, anthropic, { dealId, usuario, instrucc
   const d = await leerDeal(db, dealId);
   const prueba = (d.data || {}).prueba;
   if (!prueba || !prueba.inicio) throw error(409, 'La prueba no tiene ficha de arranque.');
-  if (!prueba.numeros) throw error(409, 'Registra primero los números de la prueba: sin ellos la página no tiene nada que decir.');
+  if (!prueba.numeros && !(prueba.seguimiento && prueba.seguimiento.transcripcion)) throw error(409, 'Registra primero los números de la prueba (o pega la transcripción de la llamada de seguimiento): sin eso la página no tiene nada que decir.');
   const lead = await leadDe(db, dealId);
   let operacion = [];
   try { operacion = P.deEmpresa(await P.operacionEnPrueba(db), d.company); } catch (_) { operacion = []; }
@@ -239,7 +263,7 @@ async function redactarPagina(db, config, anthropic, { dealId, usuario, instrucc
   const msg = await anthropic.messages.create({ model: r.pagina.modelo || process.env.ANALYZE_MODEL || 'claude-opus-4-8', max_tokens: 1500, system, messages: [{ role: 'user', content: user }] });
   const texto = ((msg.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n') || '').trim();
   if (texto.length < 80) throw error(502, 'La IA devolvió una página vacía. Intenta de nuevo.');
-  prueba.pagina = { texto, redactada_at: ahora.toISOString(), modelo: msg.model || null, instrucciones: limpiar(instrucciones, 1500), editada_at: null, editada_por: null };
+  prueba.pagina = { texto, redactada_at: ahora.toISOString(), modelo: msg.model || null, instrucciones: limpiar(instrucciones, 1500), editada_at: null, editada_por: null, con_seguimiento: !!(prueba.seguimiento && prueba.seguimiento.transcripcion) };
   await guardar(db, dealId, prueba);
   return { deal_id: dealId, pagina: prueba.pagina };
 }
@@ -350,7 +374,7 @@ async function ficha(db, config, dealId, { ahora = new Date() } = {}) {
     prueba, dia, dias_total: r.diasHabiles,
     vencida: !!(prueba && prueba.resultados_fecha && !prueba.decision && hoy > prueba.resultados_fecha),
     resultados_hoy: !!(prueba && prueba.resultados_fecha === hoy && !prueba.decision),
-    operacion, con_demo: demo.con_demo, pedido_chars: demo.pedido.length, sugerido, reglas: { ...r, decisiones: r.decisiones, productos: (config.EMBUDO || {}).productos || [] },
+    operacion, con_demo: demo.con_demo, pedido_chars: demo.pedido.length, con_seguimiento: !!(prueba && prueba.seguimiento && prueba.seguimiento.transcripcion), sugerido, reglas: { ...r, decisiones: r.decisiones, productos: (config.EMBUDO || {}).productos || [] },
   };
 }
 
@@ -362,10 +386,10 @@ function resumenFicha(config, prueba, ahora = new Date()) {
     tiene_ficha: true, champion: prueba.champion ? prueba.champion.nombre : null, decisor: prueba.decisor ? prueba.decisor.quien : null,
     criterio: prueba.criterio, nota: prueba.nota || null, dia: diaDe(config, prueba, ahora), dias_total: reglas(config).diasHabiles,
     resultados_fecha: prueba.resultados_fecha, vencida: !!(prueba.resultados_fecha && !prueba.decision && hoy > prueba.resultados_fecha),
-    con_numeros: !!prueba.numeros, con_pagina: !!(prueba.pagina && prueba.pagina.texto),
+    con_numeros: !!prueba.numeros, con_seguimiento: !!(prueba.seguimiento && prueba.seguimiento.transcripcion), con_pagina: !!(prueba.pagina && prueba.pagina.texto),
     champion_trae_jefe: prueba.champion_trae_jefe ?? null,
     decision: prueba.decision ? { tipo: prueba.decision.tipo, label: prueba.decision.label, fecha: prueba.decision.fecha } : null,
   };
 }
 
-module.exports = { reglas, arrancar, registrarResultados, redactarPagina, guardarPagina, decidir, ficha, resumenFicha, diaDe, promptPagina, contextoDemo };
+module.exports = { reglas, arrancar, registrarResultados, redactarPagina, guardarPagina, decidir, ficha, resumenFicha, diaDe, promptPagina, contextoDemo, contextoSeguimiento };
