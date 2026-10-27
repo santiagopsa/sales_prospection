@@ -383,10 +383,47 @@ Los contactos que ya estaban en la app también quedan en la lista, sin duplicar
 - **Cola del día**: los leads de una lista de prioridad alta suman `LISTAS.puntos` (100) mientras la
   lista tenga menos de `LISTAS.dias_caliente` días (14) y no esté cerrada: van primero, con la etiqueta
   🔥 de la lista. Después compiten igual que el resto. `node sdr/cli.js cola` muestra el desglose.
-- **Marcar → Listas** (panel derecho): las listas activas con su avance (por tocar, en curso,
-  reuniones). Al entrar a una se ven sus contactos en orden de trabajo (por tocar en el orden del
-  archivo, luego en curso) y "▶ Trabajar esta lista": desde ahí el botón "Siguiente de la lista" de la
-  ficha sigue dentro de esa lista hasta "salir". También se cambia la prioridad o se cierra la lista.
+- **Marcar → Listas** (panel derecho): las listas activas con cuántos **faltan** por tocar y su
+  **calidad** (abajo). Al entrar a una se ven sus contactos en orden de trabajo (por tocar en el orden
+  del archivo, luego en curso) y "▶ Trabajar esta lista": desde ahí el botón "Siguiente de la lista" de
+  la ficha sigue dentro de esa lista hasta "salir". También se cambia la prioridad o se cierra la lista.
+
+### Calidad de cada lista: cuánto rinde y por qué
+
+La idea es que al ver una lista buena se sepa qué repetir al pedir la siguiente, y al ver una floja
+qué no volver a cargar. Para cada lista se cuentan, desde el día en que llegó, los leads **tocados**,
+los que tuvieron **conversación** y los que **agendaron** (toque de reunión agendada o etapa de
+reunión). La nota sale de reuniones sobre tocados (`sdr/calidad_lista.js`, reglas en
+`LISTAS.calificacion`):
+
+- **Buena** desde `reunion.buena` (8 %), o desde `reunion.regular` si además la conversación pasa
+  de `conversacion.buena` (25 %). **Regular** desde `reunion.regular` (4 %) o `conversacion.regular`
+  (15 %). **Floja** por debajo. **Muy pronto** con menos de `minimo_tocados` (15) tocados: se ve la
+  composición pero no se juzga.
+- El **por qué** se arma con lo que la lista traía y con lo que pasó, cada línea a favor (✓), en
+  contra (✗) o dato (·): cargo del contacto (TH con mando: jefe, gerente, director de talento humano o
+  selección; reclutadores; TH sin mando; fuera de TH; sin cargo), celulares vs fijos vs sin teléfono,
+  tamaño de empresa (`tamano`, [20, 500] empleados, con el dato de Apollo), **calidad de los números**
+  (de los leads llamados, cuántos dieron señal de vida —contestó la persona, recepción o buzón— y
+  cuántos no existen o no son de la persona: operador "número inválido" o descartados por datos
+  malos sin haber contestado nunca; `numeros_vivos_min` 60 %, `numeros_malos_max` 15 %, desde
+  `minimo_llamados` leads llamados), descartes por razón (los 2 más frecuentes, si son al menos 3 y
+  10 % de los tocados) y, con 5 conversaciones o más, cuántas conversaciones hacen falta por reunión
+  (si se conversa pero no se agenda, el problema es a quién se llama, no el teléfono).
+- Las tasas de cada lista se muestran junto a las de todas las listas activas (el ancla).
+- Las expresiones que clasifican el cargo (`cargo_th`, `cargo_decisor`, `cargo_seleccion`) son
+  huecos: en `null` usan las de `sdr/calidad_lista.js`.
+
+Del análisis del 27-oct (6 listas, 379 tocados): la lista de Apollo con 99 % de jefes/gerentes de TH
+dio 11 % de reunión por tocado y 64 % de números con señal de vida; las listas "Leads" con 23–31 % de
+cargos con mando y un tercio sin cargo dieron 2–7 % y 29–45 % de números vivos. Los números que no
+existen fueron pocos en todas (3–4 %).
+
+```
+node sdr/cli.js listas                      # tabla: nota, faltan, tocados, conv, reuniones, tasas, resumen
+node sdr/cli.js listas --lista 6            # el por qué completo de una lista, con su composición
+node sdr/cli.js listas --set LISTAS.calificacion.reunion.buena=0.1
+```
 
 ## PeakU AI: la capa de plataforma
 

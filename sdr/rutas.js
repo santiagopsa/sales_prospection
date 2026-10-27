@@ -39,7 +39,7 @@ function rutas({ db, config, anthropic = null }) {
       verTranscripcion: config.VER_TRANSCRIPCION || [],
       tiposCompromiso: Object.entries(config.TIPOS_COMPROMISO || {}).map(([id, t]) => ({ id, label: t.label, canal: t.canal, descripcion: t.descripcion })),
       calendarioActivo: cal.activo(process.env),
-      listas: { origenes: (config.LISTAS || {}).origenes || [], altaPorDefecto: (config.LISTAS || {}).alta_por_defecto || [], diasCaliente: (config.LISTAS || {}).dias_caliente || 14 },
+      listas: { origenes: (config.LISTAS || {}).origenes || [], altaPorDefecto: (config.LISTAS || {}).alta_por_defecto || [], diasCaliente: (config.LISTAS || {}).dias_caliente || 14, calificacion: { reunion_buena: require('./calidad_lista').reglas(config).reunion.buena, minimo_tocados: require('./calidad_lista').reglas(config).minimoTocados } },
       calendly: require('./calendly').activo(config) ? { url: config.CALENDLY.url, origen: new URL(config.CALENDLY.url).origin, ejecutiva: config.CALENDLY.ejecutiva, permitirManual: !!config.CALENDLY.permitir_manual, horaDeCalendly: !!require('./calendly').token(process.env), mensaje: config.CALENDLY.mensaje || '', sincronizar_min: config.CALENDLY.sincronizar_min || 10 } : null,
     })],
     // Toque de Angie: llamada (con resultado obligatorio) o WhatsApp / correo / LinkedIn de un clic.

@@ -85,11 +85,42 @@ module.exports = {
   // `origenes`: quién puede mandar una lista (se elige al cargar). Las de `alta_por_defecto` salen
   // marcadas como prioridad alta (se puede cambiar al cargar y después, en Marcar → Listas).
   // Ver el efecto: node sdr/cli.js cola --set LISTAS.puntos=0 (sin prioridad por lista)
+  // Qué mueve (calificacion): cómo se califica cada lista en Marcar → Listas con lo que ya se vio.
+  //   La nota sale de reuniones / tocados (y conversaciones / tocados): "buena" desde reunion.buena,
+  //   "regular" desde reunion.regular (o desde conversacion.regular), "floja" por debajo, y "muy
+  //   pronto" con menos de minimo_tocados tocados. El por qué se arma con la composición de la lista:
+  //   celulares_min (fracción mínima de celulares para contarlo a favor), perfil_th_min (fracción
+  //   con cargo de TH o selección), sin_cargo_max (fracción de leads sin cargo que se tolera), tamano
+  //   (rango de empleados que mejor agenda; del análisis del 27-oct: <50 y 200–999 rinden, 50–199 flojea,
+  //   >1000 casi no hay muestra) y las expresiones regulares que clasifican el cargo (cargo_th,
+  //   cargo_decisor, cargo_seleccion; sin tildes ni mayúsculas).
+  //   Umbrales de partida (27-oct, 379 tocados): lista #1 Apollo 11 % reunión / 32 % conversación;
+  //   promedio 7 % / 24 %; lista #6 2 % / 12 %.
+  // Ver el efecto: node sdr/cli.js listas --set LISTAS.calificacion.reunion.buena=0.1
   LISTAS: {
     dias_caliente: 14,
     puntos: 100,
     origenes: ['Luisa', 'Apollo', 'Santiago', 'Otro'],
     alta_por_defecto: ['Luisa'],
+    calificacion: {
+      minimo_tocados: 15,
+      reunion: { buena: 0.08, regular: 0.04 },
+      conversacion: { buena: 0.25, regular: 0.15 },
+      celulares_min: 0.5,
+      perfil_th_min: 0.7,
+      sin_cargo_max: 0.1,
+      tamano: [20, 500],
+      // Números: de los leads llamados, fracción mínima que contesta alguien (persona, recepción o
+      // buzón) para contarlo a favor, y fracción máxima de números que no existen o no son de la
+      // persona (operador: número inválido; o descartado por datos malos) antes de marcarlo en contra.
+      // Se mira desde minimo_llamados leads llamados.
+      numeros_vivos_min: 0.6,
+      numeros_malos_max: 0.15,
+      minimo_llamados: 10,
+      cargo_th: null,          // null = la expresión por defecto de sdr/calidad_lista.js
+      cargo_decisor: null,
+      cargo_seleccion: null,
+    },
   },
 
   // ---------------------------------------------------------------------------

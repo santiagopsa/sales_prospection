@@ -7,6 +7,7 @@
 //   node sdr/cli.js proyeccion                                  plan de la silla vs real, mes a mes (reglas PROYECCION)
 //   node sdr/cli.js embudo                                      deals por etapa del embudo de la ejecutiva (reglas EMBUDO)
 //   node sdr/cli.js pruebas                                     pruebas gratis: cuáles pasan a cotización y a cliente, y lo que Wei tiene en prueba
+//   node sdr/cli.js listas [--lista ID]                        calidad de cada lista: faltan, tocados, conversaciones, reuniones, nota y por qué (reglas LISTAS.calificacion)
 //   node sdr/cli.js reciclaje [--aplicar]                       qué saldría de la cola hoy (secuencias vencidas, huérfanos, sin teléfono); --aplicar lo hace
 //   node sdr/cli.js brevo-contactos [--sincronizar N]             contactos de Angie en Brevo: estado, errores; --sincronizar manda N leads ya
 //   node sdr/cli.js prueba <deal_id>                            la ficha de una prueba: champion, criterio, fechas, números, página y decisión (reglas PRUEBA)
@@ -183,6 +184,27 @@ async function main() {
         if (e.con_ficha) console.log(`  Esquema: ${e.con_ficha} con ficha (${e.sin_ficha} en prueba sin arrancar, ${e.vencidas} con resultados vencidos) · con decisión ${p(e.con_decision.pct)} (${Object.entries(e.por_decision).map(([k, n]) => n + ' ' + k).join(', ') || 'ninguna'}) · champions que trajeron al jefe ${p(e.champion_trajo_jefe.pct)} (${e.champion_trajo_jefe.n} de ${e.champion_trajo_jefe.de})\n`);
         for (const x of r.pruebas) console.log(`  ${pad(x.estado, 12)}${pad(x.empresa, 32)}${x.dias_en_prueba != null ? x.dias_en_prueba + ' d en prueba' : ''}${x.quieta ? ' · QUIETA' : ''}${x.ficha && x.ficha.tiene_ficha ? ` · ficha: ${x.ficha.decision ? x.ficha.decision.label : 'día ' + x.ficha.dia + ' de ' + x.ficha.dias_total}${x.ficha.champion ? ', champion ' + x.ficha.champion : ''}` : x.estado === 'prueba' ? ' · SIN FICHA' : ''}${x.operacion.length ? ' · Wei: ' + x.operacion.map(o => `${o.producto} ${o.cargo} (${o.estado})`).join(', ') : ''}`);
         if (r.sin_deal.length) { console.log('\n  En prueba con Wei, sin deal en prueba:'); for (const s of r.sin_deal) console.log(`    ${pad(s.empresa, 32)}${s.deal ? `deal #${s.deal.deal_id} en ${s.deal.etapa}` : 'sin deal abierto'}`); }
+      }
+    } else if (cmd === 'listas') {
+      const Li = require('./listas');
+      if (args.lista) {
+        const d = await Li.detalle(db, config, args.lista);
+        const c = d.calidad;
+        console.log(`\n#${d.id} ${d.nombre}${d.origen ? ' · ' + d.origen : ''} · ${d.total} contactos · faltan ${d.por_tocar} · ${c.etiqueta} (${Math.round(c.tasa_reunion * 100)} % reunión, ${Math.round(c.tasa_conversacion * 100)} % conversación sobre ${c.tocados} tocados)`);
+        console.log(`  ${c.resumen}`);
+        for (const r of c.razones) console.log(`  ${r.signo} ${r.texto}`);
+        console.log(`  cargos: ${JSON.stringify(d.perfil.cargo)} · teléfonos: ${JSON.stringify(d.perfil.telefono)} · números: ${JSON.stringify(d.perfil.numeros)} · tamaño: ${JSON.stringify(d.perfil.tamano)} · descartes: ${JSON.stringify(d.perfil.descartes)}`);
+      } else {
+        const ls = await Li.listar(db, config);
+        const pr = ls.promedio || {};
+        console.log(`\nListas activas: ${ls.length} · todas: ${pr.tocados || 0} tocados, ${pr.conversaciones || 0} conversaciones, ${pr.reuniones || 0} reuniones (${Math.round((pr.tasa_reunion || 0) * 100)} % reunión por tocado) · reglas: ${JSON.stringify(config.LISTAS.calificacion)}\n`);
+        console.log(`  ${pad('#', 5)}${pad('nota', 11)}${pad('faltan', 8)}${pad('tocados', 9)}${pad('conv', 6)}${pad('reun', 6)}${pad('%reun', 7)}${pad('%conv', 7)}lista`);
+        for (const x of ls) {
+          const c = x.calidad;
+          console.log(`  ${pad(x.id, 5)}${pad(c.etiqueta, 11)}${pad(x.por_tocar, 8)}${pad(x.tocados, 9)}${pad(x.conversaciones, 6)}${pad(x.reuniones, 6)}${pad(Math.round(c.tasa_reunion * 100) + ' %', 7)}${pad(Math.round(c.tasa_conversacion * 100) + ' %', 7)}${x.nombre}${x.origen ? ' · ' + x.origen : ''}`);
+          console.log(`  ${' '.repeat(5)}${c.resumen}`);
+        }
+        console.log(`\n  Detalle con el por qué: node sdr/cli.js listas --lista ID`);
       }
     } else if (cmd === 'reciclaje') {
       const r = await require('./reciclaje').correr(db, config, { simular: !args.aplicar });

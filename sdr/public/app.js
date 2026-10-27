@@ -1802,14 +1802,33 @@
   const ESTADO_EN_LISTA = { por_tocar: ['Por tocar', 'hoy'], en_curso: ['En curso', 'llamada'], reunion: ['Reunión', 'whatsapp'], pausa: ['En pausa', 'pausa'], descartado: ['Descartado', 'vencida'] };
   const hrefLead = x => `#/lead/${x.id}${x.telefono ? '?llamar=1' : ''}`;
 
+  // Calidad de la lista: nota con sus números (reuniones / tocados). Lo que faltan por tocar va aparte.
+  const porc = x => `${Math.round((x || 0) * 100)} %`;
+  function chipCalidad(c, { conTasas = true } = {}) {
+    if (!c) return '';
+    const t = conTasas && c.nota !== 'pronto' ? ` · ${porc(c.tasa_reunion)} reunión · ${porc(c.tasa_conversacion)} conversación` : '';
+    return `<span class="chip calidad ${c.nota}" title="${esc(c.resumen || '')}">${esc(c.etiqueta)}${t}</span>`;
+  }
   function tarjetaLista(x, activa) {
-    const pct = n => (x.total ? (n / x.total) * 100 : 0);
-    return `<a class="lista-card ${x.caliente ? 'caliente' : ''} ${x.cerrada_ms ? 'cerrada' : ''} ${activa ? 'activa' : ''}" href="#/marcar?lista=${x.id}">
+    const c = x.calidad || {};
+    return `<a class="lista-card ${x.caliente ? 'caliente' : ''} ${x.cerrada_ms ? 'cerrada' : ''} ${activa ? 'activa' : ''} calidad-${c.nota || ''}" href="#/marcar?lista=${x.id}">
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><b>${esc(x.nombre)}</b>${x.caliente ? `<span class="chip fuego" title="Prioridad alta: sus leads van primero en la cola">🔥 ${plural(x.dias_restantes, 'día', 'días')}</span>` : x.cerrada_ms ? '<span class="chip hoy">cerrada</span>' : ''}</div>
       <div class="suave pequeno">${x.origen ? esc(x.origen) + ' · ' : ''}${fecha(x.created_ms)} · ${plural(x.total, 'contacto', 'contactos')}${activa ? ' · <b>trabajándola</b>' : ''}</div>
-      <div class="avance"><i class="r" style="width:${pct(x.reuniones)}%"></i><i class="c" style="width:${pct(x.en_curso)}%"></i><i class="d" style="width:${pct(x.descartados + (x.en_pausa || 0))}%"></i></div>
-      <div class="suave pequeno"><b>${x.por_tocar}</b> por tocar · ${x.en_curso} en curso · <b>${x.reuniones}</b> ${x.reuniones === 1 ? 'reunión' : 'reuniones'}${x.tocados_hoy ? ` · ${x.tocados_hoy} hoy` : ''}</div>
+      <div class="lista-cifras">
+        <div class="faltan"><b>${x.por_tocar}</b><span>faltan</span></div>
+        <div class="rinde">${chipCalidad(c, { conTasas: false })}
+          <div class="suave pequeno">${x.tocados} tocados · ${x.conversaciones} ${x.conversaciones === 1 ? 'conversación' : 'conversaciones'} · <b>${x.reuniones}</b> ${x.reuniones === 1 ? 'reunión' : 'reuniones'}${c.nota && c.nota !== 'pronto' ? ` · <b>${porc(c.tasa_reunion)}</b>` : ''}</div>
+          ${c.resumen ? `<div class="suave pequeno porque">${esc(c.resumen)}</div>` : ''}
+        </div>
+      </div>
     </a>`;
+  }
+  function porQueLista(c) {
+    if (!c || !c.razones || !c.razones.length) return '';
+    const signo = { '+': '✓', '-': '✗', '·': '·' };
+    return `<div class="lista-porque"><div class="suave pequeno" style="font-weight:600">Por qué</div>
+      ${c.resumen ? `<p>${esc(c.resumen)}</p>` : ''}
+      <ul>${c.razones.map(r => `<li class="s${r.signo === '+' ? 'mas' : r.signo === '-' ? 'menos' : 'dato'}"><i>${signo[r.signo] || '·'}</i>${esc(r.texto)}</li>`).join('')}</ul></div>`;
   }
 
   async function pintarListas(params) {
@@ -1819,9 +1838,10 @@
     try {
       if (!id) {
         const ls = await api('listas');
-        $p.innerHTML = `<h2>Listas <span class="suave pequeno">${ls.filter(x => x.caliente).length} con prioridad</span></h2>
+        const tot = ls.reduce((a, x) => ({ t: a.t + (x.tocados || 0), r: a.r + (x.reuniones || 0), f: a.f + (x.por_tocar || 0) }), { t: 0, r: 0, f: 0 });
+        $p.innerHTML = `<h2>Listas <span class="suave pequeno">${plural(tot.f, 'lead falta', 'leads faltan')}${tot.t ? ` · ${porc(tot.r / tot.t)} reunión por tocado` : ''}</span></h2>
           ${ls.length ? ls.map(x => tarjetaLista(x, String(x.id) === listaActiva())).join('') : '<p class="suave">Todavía no hay listas. Cada archivo que se carga en <a href="#/importar">Cargar</a> es una lista.</p>'}
-          <p class="suave pequeno" style="margin:6px 0 0">🔥 = prioridad alta: van primero en la Cola del día mientras estén frescas. Entra a una para trabajarla en orden.</p>`;
+          <p class="suave pequeno" style="margin:6px 0 0">La nota sale de reuniones sobre tocados (buena desde ${porc(((meta.listas || {}).calificacion || {}).reunion_buena || 0.08)}). Entra a una lista para ver por qué rinde o no, y trabajarla en orden. 🔥 = prioridad alta: van primero en la Cola.</p>`;
         return;
       }
       const d = await api('listas/' + encodeURIComponent(id));
@@ -1830,7 +1850,13 @@
       $p.innerHTML = `<div class="suave pequeno"><a href="#/marcar?todas=1">← Todas las listas</a></div>
         <h2 style="margin-top:6px">${esc(d.nombre)}</h2>
         <div class="suave pequeno">${d.origen ? 'De ' + esc(d.origen) + ' · ' : ''}cargada ${fecha(d.created_ms)}${d.caliente ? ` · <span class="chip fuego">🔥 prioridad alta · ${plural(d.dias_restantes, 'día', 'días')}</span>` : d.cerrada_ms ? ' · cerrada' : d.prioridad === 'alta' ? ' · prioridad alta (ya no está fresca)' : ''}</div>
-        <div class="suave pequeno" style="margin-top:4px"><b>${d.por_tocar}</b> por tocar · ${d.en_curso} en curso · <b>${d.reuniones}</b> reuniones · ${d.descartados} descartados${d.en_pausa ? ` · ${d.en_pausa} en pausa` : ''}</div>
+        <div class="lista-cifras" style="margin-top:8px">
+          <div class="faltan"><b>${d.por_tocar}</b><span>faltan</span></div>
+          <div class="rinde">${chipCalidad(d.calidad)}
+            <div class="suave pequeno" style="margin-top:4px"><b>${d.tocados}</b> tocados · ${d.conversaciones} ${d.conversaciones === 1 ? 'conversación' : 'conversaciones'} · <b>${d.reuniones}</b> ${d.reuniones === 1 ? 'reunión' : 'reuniones'} · ${d.descartados} descartados${d.en_pausa ? ` · ${d.en_pausa} en pausa` : ''}${d.tocados_hoy ? ` · ${d.tocados_hoy} hoy` : ''}</div>
+          </div>
+        </div>
+        ${porQueLista(d.calidad)}
         <div class="acciones" style="margin:10px 0 6px;flex-wrap:wrap">
           ${sig ? `<a class="btn primario" id="trabajar" href="${hrefLead(sig)}">${activa ? '▶ Seguir' : '▶ Trabajar esta lista'}</a>` : '<span class="suave">Nada pendiente hoy en esta lista ✔</span>'}
           ${activa ? '<button class="btn chico" id="salir-lista">Salir de la lista</button>' : ''}

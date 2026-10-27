@@ -359,9 +359,27 @@ a.chip.fuego:hover { text-decoration: none; background: #ffe4cc; }
 .lista-card.activa { border-color: var(--azul-osc); background: #f0fbff; }
 .lista-card.caliente { border-left: 4px solid #ea580c; }
 .lista-card.cerrada { opacity: .6; }
-.lista-card .avance { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin: 6px 0 4px; display: flex; }
-.lista-card .avance i { display: block; height: 100%; }
-.lista-card .avance .r { background: var(--verde); } .lista-card .avance .c { background: var(--azul); } .lista-card .avance .d { background: #cbd5e1; }
+/* Cifras de la lista: cuántas faltan (grande) y la calidad con sus números */
+.lista-cifras { display: flex; gap: 12px; align-items: flex-start; margin-top: 8px; }
+.lista-cifras .faltan { min-width: 56px; text-align: center; background: var(--panel-2); border-radius: 8px; padding: 6px 8px; }
+.lista-cifras .faltan b { display: block; font-size: 22px; line-height: 1.1; }
+.lista-cifras .faltan span { font-size: 11px; color: var(--suave); text-transform: uppercase; letter-spacing: .04em; }
+.lista-cifras .rinde { flex: 1; min-width: 0; }
+.lista-cifras .porque { margin-top: 3px; }
+.chip.calidad { font-weight: 600; }
+.chip.calidad.buena { background: #dcfce7; color: #166534; }
+.chip.calidad.regular { background: #fef3c7; color: #92400e; }
+.chip.calidad.floja { background: #fee2e2; color: #991b1b; }
+.chip.calidad.pronto { background: var(--panel-2); color: var(--suave); }
+.lista-card.calidad-buena { border-left: 4px solid var(--verde); }
+.lista-card.calidad-floja { border-left: 4px solid var(--mal); }
+.lista-card.caliente { border-left: 4px solid #ea580c; }
+.lista-porque { margin: 10px 0 4px; padding: 8px 10px; background: var(--panel-2); border-radius: 8px; font-size: 13px; }
+.lista-porque p { margin: 2px 0 6px; }
+.lista-porque ul { list-style: none; margin: 0; padding: 0; }
+.lista-porque li { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; color: var(--texto); }
+.lista-porque li i { font-style: normal; font-weight: 700; width: 14px; flex: none; }
+.lista-porque li.smas i { color: var(--verde); } .lista-porque li.smenos i { color: var(--mal); } .lista-porque li.sdato i { color: var(--suave); }
 .lista-leads { list-style: none; margin: 8px 0 0; padding: 0; max-height: 60vh; overflow: auto; }
 .lista-leads li { display: flex; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--linea); font-size: 13px; }
 .lista-leads li:last-child { border-bottom: 0; }
