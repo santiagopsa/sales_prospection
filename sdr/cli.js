@@ -7,6 +7,7 @@
 //   node sdr/cli.js proyeccion                                  plan de la silla vs real, mes a mes (reglas PROYECCION)
 //   node sdr/cli.js embudo                                      deals por etapa del embudo de la ejecutiva (reglas EMBUDO)
 //   node sdr/cli.js pruebas                                     pruebas gratis: cuáles pasan a cotización y a cliente, y lo que Wei tiene en prueba
+//   node sdr/cli.js reciclaje [--aplicar]                       qué saldría de la cola hoy (secuencias vencidas, huérfanos, sin teléfono); --aplicar lo hace
 //   node sdr/cli.js brevo-contactos [--sincronizar N]             contactos de Angie en Brevo: estado, errores; --sincronizar manda N leads ya
 //   node sdr/cli.js prueba <deal_id>                            la ficha de una prueba: champion, criterio, fechas, números, página y decisión (reglas PRUEBA)
 //   node sdr/cli.js invitados <lead_id>                         reunión del lead: formulario de Calendly, invitados y si aceptaron (Google)
@@ -183,6 +184,11 @@ async function main() {
         for (const x of r.pruebas) console.log(`  ${pad(x.estado, 12)}${pad(x.empresa, 32)}${x.dias_en_prueba != null ? x.dias_en_prueba + ' d en prueba' : ''}${x.quieta ? ' · QUIETA' : ''}${x.ficha && x.ficha.tiene_ficha ? ` · ficha: ${x.ficha.decision ? x.ficha.decision.label : 'día ' + x.ficha.dia + ' de ' + x.ficha.dias_total}${x.ficha.champion ? ', champion ' + x.ficha.champion : ''}` : x.estado === 'prueba' ? ' · SIN FICHA' : ''}${x.operacion.length ? ' · Wei: ' + x.operacion.map(o => `${o.producto} ${o.cargo} (${o.estado})`).join(', ') : ''}`);
         if (r.sin_deal.length) { console.log('\n  En prueba con Wei, sin deal en prueba:'); for (const s of r.sin_deal) console.log(`    ${pad(s.empresa, 32)}${s.deal ? `deal #${s.deal.deal_id} en ${s.deal.etapa}` : 'sin deal abierto'}`); }
       }
+    } else if (cmd === 'reciclaje') {
+      const r = await require('./reciclaje').correr(db, config, { simular: !args.aplicar });
+      console.log(`\nReciclaje ${r.simulado ? '(simulación, nada cambió; --aplicar para hacerlo)' : 'aplicado'} · reglas: ${JSON.stringify(config.RECICLAJE)} · AL_AGOTAR_SECUENCIA=${config.AL_AGOTAR_SECUENCIA}`);
+      console.log(`  ${r.secuencias_omitidas} toques de secuencia vencidos (${r.leads_con_secuencia_omitida} leads) · ${r.huerfanos_pausados} en conversación sin próximo toque → pausa · ${r.huerfanos_descartados} sin respuesta → descartados · ${r.sin_telefono} sin teléfono → datos_malos`);
+      for (const d of r.detalle) console.log(`    #${d.lead_id} ${d.empresa} (${d.etapa}) → ${d.accion}`);
     } else if (cmd === 'brevo-contactos') {
       const BC = require('./brevo_contactos');
       if (args.sincronizar) {

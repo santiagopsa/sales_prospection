@@ -450,6 +450,25 @@ empresa…* (`POST /api/deals/:id/demo/mover`) pasa el demo a un deal nuevo (o a
 descarta) y el deal de origen vuelve a ser la ficha del SDR, pendiente de demo. El lead de la SDR se
 re-enlaza solo al deal que tenga el demo de la misma empresa.
 
+## Reciclaje: que los leads se acaben (y haya que alimentar)
+
+Del análisis del 27-oct: con poco lead nuevo, la cola se llenó de cuartos y quintos intentos y de segundas
+conversaciones con gente que ya había dicho "mándame la info"; esas dan una reunión por semana. `RECICLAJE`
+en `config.js` y `sdr/reciclaje.js` sacan de la cola lo que ya no va a dar más:
+
+- **Conversaciones sin avance** (`conversaciones_max`, 2): a la segunda conversación sin reunión y sin
+  compromiso con fecha, el lead se pausa `pausa_meses` (razón `sin_avance`, automática) en vez de volver
+  a la cola a los 3 días. Con un compromiso pactado ("¿Quedaste en algo?", que ahora se guarda antes del
+  toque) o con "Pidió información" (trae fecha) no se pausa.
+- **Secuencias vencidas** (`secuencia_vencida_dias`, 7): un toque de secuencia atrasado más de eso se
+  omite, solo en leads ya tocados; a los que nunca se ha llamado no se les toca nada (son el pozo). Si al
+  lead no le queda nada, se agota: `AL_AGOTAR_SECUENCIA` ahora es `descartar` (sin_respuesta).
+- **Huérfanos con historia**: en conversación → pausa `sin_avance`; en nuevo/contactado → descartado.
+- **Sin teléfono** y sin toques → `datos_malos` (no se puede llamar; siguen en Brevo para correo).
+
+Corre al arrancar y una vez al día. `node sdr/cli.js reciclaje` muestra qué haría hoy sin cambiar nada;
+`--aplicar` lo hace. Un lead descartado o en pausa se puede reactivar desde su ficha.
+
 ## LinkedIn en dos pasos (ficha del lead → 💼 LinkedIn)
 
 La app no envía nada por LinkedIn: no hay API de mensajería para cuentas de personas y automatizarlo

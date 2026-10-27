@@ -314,7 +314,32 @@ module.exports = {
   //   'huerfano'  → el lead queda sin próximo toque y aparece en el indicador (Angie decide).
   //   'descartar' → pasa a descartado con razón "sin_respuesta" automáticamente.
   // Ver el efecto: node sdr/cli.js resultado no_contesto --paso 9
-  AL_AGOTAR_SECUENCIA: 'huerfano',
+  AL_AGOTAR_SECUENCIA: 'descartar',
+
+  // ---------------------------------------------------------------------------
+  // Reciclaje: que los leads se acaben (y haya que alimentar), en vez de dar vueltas en la cola
+  // ---------------------------------------------------------------------------
+  // Del análisis del 27-oct: con poco lead nuevo, la cola se llenó de 4.º y 5.º intentos y de
+  // segundas conversaciones con gente que ya había dicho "mándame la info"; esas dan una reunión por
+  // semana. Estas reglas sacan al lead de la cola cuando ya no va a dar más, para que la jornada sea
+  // lead nuevo y se note cuando falta lista. sdr/reciclaje.js; se aplica al registrar toques, al
+  // arrancar y una vez al día.
+  //   conversaciones_max: a la n-ésima conversación sin reunión y sin compromiso con fecha, el lead
+  //     se pausa `pausa_meses` (razón sin_avance). Con compromiso o "pidió información" (que trae
+  //     fecha) no se pausa. null = sin tope (como antes: se vuelve a llamar cada TRAS_CONVERSACION).
+  //   secuencia_vencida_dias: un toque de secuencia atrasado más de esto ya no vale: se omite. Si al
+  //     lead no le queda nada y ya se le marcó, se agota (AL_AGOTAR_SECUENCIA). Los leads a los que
+  //     nunca se ha llamado no se tocan: son el pozo, no reciclaje.
+  //   sin_telefono: true = un lead sin teléfono y sin toques sale de la cola como datos_malos (no se
+  //     puede llamar; sigue en Brevo para correo).
+  // Ver el efecto: node sdr/cli.js reciclaje            (qué haría hoy, sin cambiar nada)
+  //                node sdr/cli.js reciclaje --aplicar
+  RECICLAJE: {
+    conversaciones_max: 2,
+    pausa_meses: 3,
+    secuencia_vencida_dias: 7,
+    sin_telefono: true,
+  },
 
   // Qué mueve: un compromiso con fecha (seguimiento, enviar algo, otra tarea) manda sobre la
   // secuencia. true: mientras el compromiso esté pendiente el lead no sale en la cola de toques
@@ -340,6 +365,7 @@ module.exports = {
     ya_tiene_proveedor: 6,
     no_es_decisor: null,
     otro: null,
+    sin_avance: 3,
   },
   // Qué mueve: las opciones de meses que muestra el diálogo (además de "No, descartar").
   OPCIONES_REINTENTO_MESES: [1, 3, 6],

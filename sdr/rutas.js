@@ -31,7 +31,7 @@ function rutas({ db, config, anthropic = null }) {
       resultadosLinkedin: D.RESULTADOS_LINKEDIN,
       linkedin: { notaConexion: (config.LINKEDIN || {}).nota_conexion || '', mensaje: (config.LINKEDIN || {}).mensaje || '', notaMaxChars: (config.LINKEDIN || {}).nota_max_chars || 300, mensajeDiasTrasAceptar: Number((config.LINKEDIN || {}).mensaje_dias_tras_aceptar) || 0 },
       pideInfo: { guion: (config.PIDE_INFO || {}).guion || [], exigirLlamadaPactada: (config.PIDE_INFO || {}).exigir_llamada_pactada !== false, correoMismoDia: (config.PIDE_INFO || {}).correo_mismo_dia !== false },
-      razones: D.RAZONES_DESCARTE.filter(r => r !== 'sin_respuesta' && r !== 'lista_negra').map(r => ({ id: r, label: D.RAZON_LABEL[r], definitiva: D.RAZONES_DEFINITIVAS.includes(r), reintento: (config.REINTENTO_POR_RAZON || {})[r] || null })),
+      razones: D.RAZONES_DESCARTE.filter(r => !D.RAZONES_AUTOMATICAS.includes(r)).map(r => ({ id: r, label: D.RAZON_LABEL[r], definitiva: D.RAZONES_DEFINITIVAS.includes(r), reintento: (config.REINTENTO_POR_RAZON || {})[r] || null })),
       razonLabel: D.RAZON_LABEL,
       reintentoMeses: config.OPCIONES_REINTENTO_MESES || [1, 3, 6],
       usuarios: (config.USUARIOS || []).map(u => ({ nombre: u.nombre, rol: u.rol })),

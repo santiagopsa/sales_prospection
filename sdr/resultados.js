@@ -47,6 +47,14 @@ async function omitirPendientes(c, leadId, todo = false) {
   return r.rows.filter(t => t.tipo !== 'secuencia').map(t => t.id);
 }
 
+// Conversaciones anteriores del lead (sin contar el toque actual).
+async function conversacionesPrevias(c, leadId, toqueId) {
+  const r = await c.query(
+    `SELECT COUNT(*)::int AS n FROM ${T.touches} WHERE lead_id = $1 AND id <> $2 AND resultado IN (SELECT jsonb_array_elements_text($3::jsonb))`,
+    [leadId, toqueId, JSON.stringify(D.RESULTADOS_CON_CONVERSACION)]);
+  return r.rows[0].n;
+}
+
 // ¿El prospecto ya aceptó la conexión de LinkedIn? (último toque de LinkedIn con ese resultado)
 async function aceptoLinkedin(c, leadId) {
   const r = await c.query(`SELECT 1 FROM ${T.touches} WHERE lead_id = $1 AND resultado = 'linkedin_acepto' LIMIT 1`, [leadId]);
@@ -284,9 +292,22 @@ async function registrarToque(db, config, {
       if (s.resultado === 'pausado') await c.query(`UPDATE ${T.touches} SET detalle = COALESCE(detalle, '{}'::jsonb) || $2::jsonb WHERE id = $1`, [toque.id, JSON.stringify({ pausado_hasta: pausadoHasta, meses })]);
     } else if (resultado === 'conversacion') {
       await omitirPendientes(c, leadId);
-      const tc = config.TRAS_CONVERSACION;
-      proxima = await programar(c, config, leadId, tc.canal, tc.dias, ahora);
       if (nueva) await cambiarEtapa(c, leadId, nueva);
+      // Reciclaje: a la n-ésima conversación sin reunión y sin compromiso con fecha, el lead se pausa
+      // en vez de volver a la cola a los 3 días (RECICLAJE.conversaciones_max).
+      const rc = config.RECICLAJE || {};
+      const previas = await conversacionesPrevias(c, leadId, toque.id);
+      const conCompromiso = (await c.query(`SELECT 1 FROM ${T.tasks} WHERE lead_id = $1 AND estado = 'pendiente' AND tipo <> 'secuencia' LIMIT 1`, [leadId])).rows.length > 0;
+      if (rc.conversaciones_max && previas + 1 >= rc.conversaciones_max && !conCompromiso) {
+        const leadAhora = await leerLead(c, leadId);
+        const s = await sacarDeCola(c, config, leadAhora, { razon: 'sin_avance', meses: Number(rc.pausa_meses) || 3, nota, usuario, ahora });
+        proxima = s.proxima; pausadoHasta = s.pausado_hasta;
+        await c.query(`UPDATE ${T.touches} SET detalle = COALESCE(detalle, '{}'::jsonb) || $2::jsonb WHERE id = $1`, [toque.id, JSON.stringify({ pausado_hasta: pausadoHasta, conversaciones: previas + 1 })]);
+        avisos.push(`Es la ${previas + 1}.ª conversación sin reunión: el lead sale de la cola hasta el ${tiempo.fechaBogota(new Date(pausadoHasta))}. Si quedaste en algo con fecha, regístralo como compromiso o como "Pidió información" y vuelve a entrar.`);
+      } else {
+        const tc = config.TRAS_CONVERSACION;
+        proxima = await programar(c, config, leadId, tc.canal, tc.dias, ahora);
+      }
     } else if (resultado === 'pide_info') {
       // Objeción "mándame la información": la secuencia se detiene y el siguiente paso es la llamada
       // que Angie pactó ("¿va o no va?"), como compromiso con hora (va al calendario). Si además hay
@@ -404,6 +425,19 @@ async function sincronizarCompromisos(db, config, env, r, usuario) {
   for (const id of r.compromisosOmitidos || []) await C.sincronizar(db, config, env, id, 'borrar');
   if (r.compromiso_hecho) await C.sincronizar(db, config, env, r.compromiso_hecho, 'borrar');
   delete r.compromisosOmitidos;
+}
+
+// Reciclaje (sdr/reciclaje.js): un lead en conversación sin próximo toque se pausa `meses` con razón
+// sin_avance, dejando rastro en el historial.
+async function pausarPorReciclaje(db, config, leadId, { meses, ahora = new Date(), nota = null, usuario = null }) {
+  return enTransaccion(db, async c => {
+    const lead = await leerLead(c, Number(leadId));
+    const s = await sacarDeCola(c, config, lead, { razon: 'sin_avance', meses: Number(meses) || 3, nota, usuario, ahora });
+    await c.query(
+      `INSERT INTO ${T.touches} (lead_id, canal, resultado, razon_descarte, nota, detalle, usuario, created_at) VALUES ($1, 'ejecutiva', 'pausado', 'sin_avance', $2, $3, $4, $5)`,
+      [lead.id, nota, JSON.stringify({ pausado_hasta: s.pausado_hasta, meses: Number(meses) || 3, reciclaje: true }), usuario, ahora.toISOString()]);
+    return s;
+  });
 }
 
 // Acciones de la ejecutiva comercial sobre un lead con reunión: realizada, no-show, calificado.
@@ -606,4 +640,4 @@ async function agregarAListaNegra(db, config, { telefono, email, empresa, domini
   });
 }
 
-module.exports = { corteMeta, sqlMarcacionMeta, corteAplica, registrarToque, registrarEjecutiva, crearDeal, cambiarEtapa, leerLead, reagendarReunion, agregarAListaNegra, sacarDeCola, mesesReintento, actividadDelDia, siguienteEtapa, enTransaccion, usuarioValido, usuariosSdr, filtroUsuario, paramUsuario, aplicarTopeLlamadas, aplicarTopeLlamadasATodos, llamadasSinConversacion };
+module.exports = { corteMeta, sqlMarcacionMeta, corteAplica, registrarToque, registrarEjecutiva, crearDeal, cambiarEtapa, leerLead, reagendarReunion, agregarAListaNegra, sacarDeCola, mesesReintento, actividadDelDia, siguienteEtapa, enTransaccion, usuarioValido, usuariosSdr, filtroUsuario, paramUsuario, aplicarTopeLlamadas, aplicarTopeLlamadasATodos, llamadasSinConversacion, pausarPorReciclaje };

@@ -200,6 +200,8 @@ function iniciar(db, config, env = process.env, log = console) {
         const k = await require('../calendly').sincronizar(db, config, env, { log });
         if (k.nuevas || k.canceladas || k.movidas || k.sin_lead) log.log(`[sdr/calendly] ${k.nuevas} nuevas, ${k.movidas} movidas, ${k.canceladas} canceladas, ${k.sin_lead} sin lead`);
       }
+      // Reciclaje: una pasada al día (sdr/reciclaje.js).
+      await require('../reciclaje').jobDiario(db, config, { log }).catch(e => log.error('[sdr/reciclaje]', e.message));
       // Contactos de Angie en Brevo: los leads nuevos o cambiados, de a BREVO.contactos.por_tanda.
       const bc = await require('../brevo_contactos').correrPendientes(db, config, env, { log });
       if (bc.hechos || bc.errores) log.log(`[sdr/brevo] contactos: ${bc.hechos} sincronizados, ${bc.errores} con error`);

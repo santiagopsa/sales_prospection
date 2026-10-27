@@ -1754,13 +1754,16 @@
       }
       $frm.querySelector('button[type=submit]').disabled = true;
       try {
+        // El compromiso que quedó pactado en la llamada va ANTES del toque: con un compromiso con fecha
+        // el lead no se pausa por reciclaje (RECICLAJE.conversaciones_max) y la secuencia se corre a esa fecha.
+        const avisosCompromiso = [];
+        if (f.get('c_titulo') && f.get('c_fecha') && resultado !== 'descartado' && resultado !== 'pide_info') {
+          try { const rc = await api('tareas', { method: 'POST', body: { lead_id: l.id, tipo: f.get('c_tipo') || 'seguimiento', titulo: f.get('c_titulo'), fecha: f.get('c_fecha'), hora: f.get('c_hora') || null } }); avisosCompromiso.push(rc.calendario && rc.calendario.ok ? 'Compromiso anotado y en el calendario.' : 'Compromiso anotado.'); }
+          catch (err) { avisosCompromiso.push('El compromiso no se guardó: ' + err.message); }
+        } else if (f.get('c_titulo') && !f.get('c_fecha')) avisosCompromiso.push('El compromiso no se guardó: faltó la fecha.');
         const r = await api(ruta, { method: 'POST', body });
         delete reservasEnLlamada[l.id];
-        // El compromiso que quedó pactado en la llamada, si lo llenó.
-        if (f.get('c_titulo') && f.get('c_fecha') && resultado !== 'descartado' && resultado !== 'pide_info') {
-          try { const rc = await api('tareas', { method: 'POST', body: { lead_id: l.id, tipo: f.get('c_tipo') || 'seguimiento', titulo: f.get('c_titulo'), fecha: f.get('c_fecha'), hora: f.get('c_hora') || null } }); (r.avisos = r.avisos || []).push(rc.calendario && rc.calendario.ok ? 'Compromiso anotado y en el calendario.' : 'Compromiso anotado.'); }
-          catch (err) { (r.avisos = r.avisos || []).push('El compromiso no se guardó: ' + err.message); }
-        } else if (f.get('c_titulo') && !f.get('c_fecha')) (r.avisos = r.avisos || []).push('El compromiso no se guardó: faltó la fecha.');
+        (r.avisos = r.avisos || []).push(...avisosCompromiso);
         $modal.innerHTML = '';
         const partes = [`Registrado. Etapa: ${etiqueta(meta.etapas, r.etapa)}.`];
         if (r.proxima) partes.push(`Próximo toque: ${etiqueta(meta.canales, r.proxima.canal)} el ${fecha(new Date(r.proxima.due_at).getTime())}.`);

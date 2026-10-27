@@ -10,7 +10,8 @@ test('motor de resultados', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async
   const { consultarCola } = require('../cola');
   const { registrarToque, registrarEjecutiva, siguienteEtapa, agregarAListaNegra } = require('../resultados');
   const L = require('../leads');
-  const base = require('../config');
+  // El motor se prueba con la secuencia agotada en 'huerfano' (el caso 'descartar', hoy el de producción, se prueba aparte).
+  const base = { ...require('../config'), AL_AGOTAR_SECUENCIA: 'huerfano' };
   const tiempo = require('../tiempo');
   const db = conectar(url);
   const silencio = { log() {}, error: console.error };

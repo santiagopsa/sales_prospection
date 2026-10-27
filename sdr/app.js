@@ -49,6 +49,9 @@ async function arrancar(pool, config = baseConfig) {
   require('./resultados').aplicarTopeLlamadasATodos(pool, config)
     .then(r => { if (r.cambiados) console.log(`[sdr] tope de llamadas aplicado: ${r.cambiados} leads siguen por otro canal (de ${r.revisados} revisados)`); })
     .catch(e => console.error('[sdr] tope de llamadas:', e.message));
+  // Reciclaje: secuencias vencidas, huérfanos con historia y leads sin teléfono salen de la cola (una
+  // vez al día; aquí la primera pasada).
+  require('./reciclaje').jobDiario(pool, config).catch(e => console.error('[sdr/reciclaje]', e.message));
   const P = require('./pipeline');
   P.revisarTodas(pool, config).then(r => { if (r.pendientes) console.log(`[sdr/pipeline] ${r.pendientes} llamadas quedaron pendientes de transcribir`); }).catch(e => console.error('[sdr/pipeline] revisar:', e.message));
   P.iniciar(pool, config, process.env);
