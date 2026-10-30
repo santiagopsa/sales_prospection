@@ -57,9 +57,12 @@ async function recibirWebhook(db, env, headers, body, config = require('../confi
   const fecha = x => (x && !isNaN(Date.parse(x))) ? new Date(x).toISOString() : null;
   const duracion = Number.isFinite(Number(b.duracion_s)) ? Math.max(0, Math.round(Number(b.duracion_s))) : null;
   const r = await db.query(
-    `INSERT INTO ${T.calls} (uuid, lead_id, origen, telefono, started_at, answered_at, ended_at, duracion_s, vox_call_id, vox_estado, record_url, pipeline_status, vox_codigo, vox_motivo, vox_intentos)
-     VALUES ($1, $2, 'voximplant', $3, $4, $5, $6, $7, $8, $9, $10, 'pendiente_resultado', $11, $12, $13)
+    `INSERT INTO ${T.calls} (uuid, lead_id, origen, telefono, started_at, answered_at, ended_at, duracion_s, vox_call_id, vox_estado, record_url, pipeline_status, vox_codigo, vox_motivo, vox_intentos, vox_tono, vox_colgo, marcando_s)
+     VALUES ($1, $2, 'voximplant', $3, $4, $5, $6, $7, $8, $9, $10, 'pendiente_resultado', $11, $12, $13, $14, $15, $16)
      ON CONFLICT (uuid) DO UPDATE SET
+       vox_tono = COALESCE(EXCLUDED.vox_tono, ${T.calls}.vox_tono),
+       vox_colgo = COALESCE(EXCLUDED.vox_colgo, ${T.calls}.vox_colgo),
+       marcando_s = COALESCE(EXCLUDED.marcando_s, ${T.calls}.marcando_s),
        vox_codigo = COALESCE(EXCLUDED.vox_codigo, ${T.calls}.vox_codigo),
        vox_motivo = COALESCE(EXCLUDED.vox_motivo, ${T.calls}.vox_motivo),
        vox_intentos = COALESCE(EXCLUDED.vox_intentos, ${T.calls}.vox_intentos),
@@ -74,7 +77,9 @@ async function recibirWebhook(db, env, headers, body, config = require('../confi
        updated_at = NOW()
      RETURNING id, touch_id`,
     [String(b.uuid), leadId, b.telefono || null, fecha(b.started_at), fecha(b.answered_at), fecha(b.ended_at), duracion, b.vox_call_id || null, b.estado || null, b.record_url || null,
-     b.codigo != null ? String(b.codigo) : null, b.motivo || null, Number.isInteger(Number(b.intentos)) && b.intentos != null ? Number(b.intentos) : null]);
+     b.codigo != null ? String(b.codigo) : null, b.motivo || null, Number.isInteger(Number(b.intentos)) && b.intentos != null ? Number(b.intentos) : null,
+     ['operador', 'local', 'ninguno'].includes(b.tono) ? b.tono : null, ['angie', 'prospecto', 'operador', 'escenario'].includes(b.colgo) ? b.colgo : null,
+     Number.isFinite(Number(b.marcando_s)) && b.marcando_s != null ? Math.max(0, Math.round(Number(b.marcando_s))) : null]);
   const estado = await require('../pipeline').revisarLlamada(db, config, r.rows[0].id);
   return { ok: true, call_id: r.rows[0].id, pipeline: estado };
 }

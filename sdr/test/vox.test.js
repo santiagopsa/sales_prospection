@@ -42,6 +42,15 @@ test('escenario: incrusta caller id, aviso y webhook, y es JS válido', () => {
   assert.ok(s2.includes('angie.answer()'));
   assert.ok(s2.includes('sendMessage'));
   assert.ok(s2.includes(cfg.MENSAJES_LLAMADA.numero_invalido.slice(0, 20)));
+  // Tono local cuando el operador no manda nada, y quién colgó / cuánto marcó en el webhook.
+  const s3 = generarEscenario({ callerId: '+57', webhookUrl: 'u', secreto: 's', aviso: '', voz: cfg.VOZ_AVISO, tonoLocalTrasS: cfg.LLAMADA_TONO_LOCAL_TRAS_S, tonoLocalPais: cfg.LLAMADA_TONO_LOCAL_PAIS });
+  new (require('vm').Script)(s3);
+  assert.ok(s3.includes('const TONO_LOCAL_TRAS_MS = 2000'));
+  assert.ok(s3.includes('angie.playProgressTone(TONO_LOCAL_PAIS)'));
+  assert.ok(s3.includes("terminar('cancelada', 'angie')"));
+  assert.ok(s3.includes("terminar('colgada', 'prospecto')"));
+  assert.ok(s3.includes('marcando_s'));
+  assert.ok(generarEscenario({ callerId: '+57', webhookUrl: 'u', secreto: 's', aviso: '', voz: cfg.VOZ_AVISO, tonoLocalTrasS: 0 }).includes('const TONO_LOCAL_TRAS_MS = 0'), '0 = sin tono local');
 });
 
 test('escenario: el teclado de Angie llega como DTMF al prospecto', () => {
@@ -196,5 +205,19 @@ test('webhook contra Postgres', { skip: !process.env.SDR_TEST_DATABASE_URL && 's
   assert.ok((await L.fallosDeMarcacion(db))[0].revisado_ms);
   // La llamada fallida no entra al pipeline de audio ni cuenta como resultado.
   assert.strictEqual(c3.pipeline_status, 'no_aplica');
+  // Angie colgó a los 4 s sin tono del operador (fijo 601): queda quién colgó, el tono y los segundos.
+  await vox.recibirWebhook(db, ENV, { 'x-sdr-secret': 's3cr3t' }, { uuid: 'u4', lead_id: lead.id, telefono: '+576012923426', estado: 'cancelada', colgo: 'angie', tono: 'local', marcando_s: 4, intentos: 1, vox_call_id: 'sess-4', started_at: '2026-10-27T19:52:28Z', ended_at: '2026-10-27T19:52:35Z' });
+  await vox.recibirWebhook(db, ENV, { 'x-sdr-secret': 's3cr3t' }, { uuid: 'u5', lead_id: lead.id, telefono: '+573001112233', estado: 'cancelada', colgo: 'angie', tono: 'operador', intentos: 1, vox_call_id: 'sess-5', started_at: '2026-10-27T20:00:00Z', ended_at: '2026-10-27T20:00:31Z' });
+  await vox.recibirWebhook(db, ENV, { 'x-sdr-secret': 's3cr3t' }, { uuid: 'u6', lead_id: lead.id, telefono: '+576012923426', estado: 'cancelada', colgo: 'marciano', tono: 'raro', marcando_s: 'x', started_at: '2026-10-28T14:20:50Z' });
+  const c4 = (await db.query(`SELECT * FROM sdr.calls WHERE uuid='u4'`)).rows[0];
+  assert.deepStrictEqual([c4.vox_colgo, c4.vox_tono, c4.marcando_s], ['angie', 'local', 4]);
+  const c6 = (await db.query(`SELECT * FROM sdr.calls WHERE uuid='u6'`)).rows[0];
+  assert.deepStrictEqual([c6.vox_colgo, c6.vox_tono, c6.marcando_s], [null, null, null], 'valores desconocidos no se guardan');
+  const reg = await L.registroLlamadas(db, { desde: '2026-10-27', hasta: '2026-10-28', tipo: 'fijo' });
+  assert.deepStrictEqual(reg.map(x => x.uuid), ['u6', 'u4'], 'solo fijos, en el rango, más reciente primero');
+  assert.strictEqual(reg[1].vox_call_id, 'sess-4'); assert.strictEqual(reg[1].started_utc, '2026-10-27T19:52:28.000Z'); assert.strictEqual(reg[1].tipo, 'fijo');
+  const regCel = await L.registroLlamadas(db, { desde: '2026-10-27', hasta: '2026-10-27', tipo: 'cel' });
+  assert.strictEqual(regCel.length, 1); assert.strictEqual(regCel[0].marcando_s, 31, 'sin marcando_s del escenario se calcula de las horas');
+  assert.ok((await L.registroLlamadas(db, {})).length >= 5, 'todas');
   db.end();
 });

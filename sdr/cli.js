@@ -7,6 +7,7 @@
 //   node sdr/cli.js proyeccion                                  plan de la silla vs real, mes a mes (reglas PROYECCION)
 //   node sdr/cli.js embudo                                      deals por etapa del embudo de la ejecutiva (reglas EMBUDO)
 //   node sdr/cli.js pruebas                                     pruebas gratis: cuáles pasan a cotización y a cliente, y lo que Wei tiene en prueba
+//   node sdr/cli.js llamadas [--desde 2026-10-27] [--hasta 2026-10-29] [--fijos|--celulares] [--csv archivo]  registro de llamadas por Voximplant (ID de sesión, quién colgó, tono, segundos marcando) para el operador
 //   node sdr/cli.js listas [--lista ID]                        calidad de cada lista: faltan, tocados, conversaciones, reuniones, nota y por qué (reglas LISTAS.calificacion)
 //   node sdr/cli.js reciclaje [--aplicar]                       qué saldría de la cola hoy (secuencias vencidas, huérfanos, sin teléfono); --aplicar lo hace
 //   node sdr/cli.js brevo-contactos [--sincronizar N]             contactos de Angie en Brevo: estado, errores; --sincronizar manda N leads ya
@@ -115,7 +116,7 @@ async function main() {
   }
   if (cmd === 'vox:escenario') {
     const { generarEscenario } = require('./vox/escenario');
-    console.log(generarEscenario({ callerId: '+57XXXXXXXXXX', webhookUrl: (config.PUBLIC_URL_POR_DEFECTO || '') + '/sdr/api/vox/webhook', secreto: '(secreto)', aviso: config.AVISO_GRABACION, voz: config.VOZ_AVISO, avisoATodos: config.AVISO_TAMBIEN_A_ANGIE, reintentos: config.LLAMADA_REINTENTOS, codigosReintento: config.LLAMADA_REINTENTAR_CODIGOS, pausaReintentoS: config.LLAMADA_PAUSA_REINTENTO_S, mensajes: config.MENSAJES_LLAMADA }));
+    console.log(generarEscenario({ callerId: '+57XXXXXXXXXX', webhookUrl: (config.PUBLIC_URL_POR_DEFECTO || '') + '/sdr/api/vox/webhook', secreto: '(secreto)', aviso: config.AVISO_GRABACION, voz: config.VOZ_AVISO, avisoATodos: config.AVISO_TAMBIEN_A_ANGIE, reintentos: config.LLAMADA_REINTENTOS, codigosReintento: config.LLAMADA_REINTENTAR_CODIGOS, pausaReintentoS: config.LLAMADA_PAUSA_REINTENTO_S, mensajes: config.MENSAJES_LLAMADA, tonoLocalTrasS: config.LLAMADA_TONO_LOCAL_TRAS_S, tonoLocalPais: config.LLAMADA_TONO_LOCAL_PAIS }));
     return;
   }
 
@@ -184,6 +185,23 @@ async function main() {
         if (e.con_ficha) console.log(`  Esquema: ${e.con_ficha} con ficha (${e.sin_ficha} en prueba sin arrancar, ${e.vencidas} con resultados vencidos) · con decisión ${p(e.con_decision.pct)} (${Object.entries(e.por_decision).map(([k, n]) => n + ' ' + k).join(', ') || 'ninguna'}) · champions que trajeron al jefe ${p(e.champion_trajo_jefe.pct)} (${e.champion_trajo_jefe.n} de ${e.champion_trajo_jefe.de})\n`);
         for (const x of r.pruebas) console.log(`  ${pad(x.estado, 12)}${pad(x.empresa, 32)}${x.dias_en_prueba != null ? x.dias_en_prueba + ' d en prueba' : ''}${x.quieta ? ' · QUIETA' : ''}${x.ficha && x.ficha.tiene_ficha ? ` · ficha: ${x.ficha.decision ? x.ficha.decision.label : 'día ' + x.ficha.dia + ' de ' + x.ficha.dias_total}${x.ficha.champion ? ', champion ' + x.ficha.champion : ''}` : x.estado === 'prueba' ? ' · SIN FICHA' : ''}${x.operacion.length ? ' · Wei: ' + x.operacion.map(o => `${o.producto} ${o.cargo} (${o.estado})`).join(', ') : ''}`);
         if (r.sin_deal.length) { console.log('\n  En prueba con Wei, sin deal en prueba:'); for (const s of r.sin_deal) console.log(`    ${pad(s.empresa, 32)}${s.deal ? `deal #${s.deal.deal_id} en ${s.deal.etapa}` : 'sin deal abierto'}`); }
+      }
+    } else if (cmd === 'llamadas') {
+      const L = require('./leads');
+      const desde = args.desde || new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
+      const filas = await L.registroLlamadas(db, { desde, hasta: args.hasta, tipo: args.fijos ? 'fijo' : args.celulares ? 'cel' : 'todas' });
+      const hb = ms => ms ? new Date(ms).toLocaleString('es-CO', { timeZone: 'America/Bogota', hour12: false }) : '';
+      const porEstado = {};
+      for (const f of filas) { const k = `${f.tipo} · ${f.vox_estado || '-'} · colgó ${f.vox_colgo || '?'} · tono ${f.vox_tono || '?'}`; porEstado[k] = (porEstado[k] || 0) + 1; }
+      console.log(`\nLlamadas por Voximplant desde ${desde}${args.hasta ? ' hasta ' + args.hasta : ''}${args.fijos ? ' · solo fijos' : args.celulares ? ' · solo celulares' : ''}: ${filas.length}`);
+      for (const [k, n] of Object.entries(porEstado).sort((a, b) => b[1] - a[1])) console.log(`  ${pad(n, 5)}${k}`);
+      console.log(`\n  ${pad('hora Bogotá', 20)}${pad('UTC', 21)}${pad('número', 15)}${pad('estado', 16)}${pad('colgó', 10)}${pad('tono', 9)}${pad('marc s', 7)}${pad('dur s', 6)}${pad('cód', 5)}${pad('sesión Voximplant', 34)}empresa`);
+      for (const f of filas) console.log(`  ${pad(hb(f.started_ms), 20)}${pad(f.started_utc ? f.started_utc.replace('T', ' ').slice(0, 19) + 'Z' : '', 21)}${pad(f.telefono, 15)}${pad(f.vox_estado || '', 16)}${pad(f.vox_colgo || '', 10)}${pad(f.vox_tono || '', 9)}${pad(f.marcando_s == null ? '' : f.marcando_s, 7)}${pad(f.duracion_s == null ? '' : f.duracion_s, 6)}${pad(f.vox_codigo || '', 5)}${pad(f.vox_call_id || '', 34)}${f.empresa || ''}`);
+      if (args.csv) {
+        const cols = ['started_utc', 'ended_utc', 'telefono', 'tipo', 'vox_estado', 'vox_codigo', 'vox_motivo', 'vox_colgo', 'vox_tono', 'marcando_s', 'duracion_s', 'vox_intentos', 'vox_call_id', 'uuid', 'empresa', 'contacto', 'resultado', 'usuario'];
+        const esc = v => (v == null ? '' : /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v));
+        require('fs').writeFileSync(String(args.csv), [cols.join(','), ...filas.map(f => cols.map(c => esc(f[c])).join(','))].join('\n'));
+        console.log(`\n  CSV: ${args.csv} (${filas.length} filas)`);
       }
     } else if (cmd === 'listas') {
       const Li = require('./listas');

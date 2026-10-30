@@ -327,6 +327,15 @@ const MIGRACIONES = [
   `ALTER TABLE ${T.leads} ADD COLUMN IF NOT EXISTS brevo_at TIMESTAMPTZ`,
   `ALTER TABLE ${T.leads} ADD COLUMN IF NOT EXISTS brevo_error TEXT`,
   `ALTER TABLE ${T.leads} ADD COLUMN IF NOT EXISTS brevo_intento_at TIMESTAMPTZ`,
+
+  // ---- M12 · Qué pasó mientras timbraba -----------------------------------------------------
+  // Para mostrarle al operador (Voximplant) las llamadas que no entran sin pedir logs del navegador:
+  // vox_tono: operador (early media real) | local (el escenario puso timbre porque no llegaba nada) |
+  // ninguno; vox_colgo: quién cerró la llamada (angie | prospecto | operador | escenario);
+  // marcando_s: segundos entre marcar y colgar cuando no contestaron.
+  `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS vox_tono TEXT`,
+  `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS vox_colgo TEXT`,
+  `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS marcando_s INT`,
 ];
 
 async function initSchema(db, log = console) {

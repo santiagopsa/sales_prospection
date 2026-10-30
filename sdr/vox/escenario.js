@@ -11,10 +11,19 @@
 // 503 congestión…), se vuelve a marcar hasta LLAMADA_REINTENTOS veces. Al rendirse, Angie OYE el
 // motivo (voz) y el navegador lo recibe como mensaje para mostrarlo y dejarlo reportar.
 //
-// Mensajes al navegador (call.sendMessage, JSON): { fase, intento, codigo, motivo, estado }
+// Tono mientras timbra: el operador manda su propio tono (early media) y Angie lo oye tal cual. Si
+// pasan `tonoLocalTrasS` segundos marcando sin que llegue nada (fijos 601: a veces el operador no manda
+// tono), el escenario le pone a Angie un tono de timbre local para que sepa que la llamada sí salió y
+// no cuelgue creyendo que murió. Se apaga apenas llega el tono real, contestan o falla.
+//
+// En el webhook va además quién colgó (angie | prospecto | operador | escenario), qué tono hubo
+// (operador | local | ninguno) y cuántos segundos estuvo marcando si no contestaron: con eso se le
+// muestra a Voximplant exactamente qué pasó sin pedir logs del navegador.
+//
+// Mensajes al navegador (call.sendMessage, JSON): { fase, intento, codigo, motivo, estado, tono }
 //   fase: marcando | timbrando | reintentando | contestada | fallida
 
-function generarEscenario({ callerId, webhookUrl, secreto, aviso, voz, avisoATodos, reintentos = 2, codigosReintento = [404, 408, 500, 502, 503, 504], pausaReintentoS = 2, mensajes = {} }) {
+function generarEscenario({ callerId, webhookUrl, secreto, aviso, voz, avisoATodos, reintentos = 2, codigosReintento = [404, 408, 500, 502, 503, 504], pausaReintentoS = 2, mensajes = {}, tonoLocalTrasS = 2, tonoLocalPais = 'US' }) {
   const j = v => JSON.stringify(v);
   const M = Object.assign({
     marcando: 'Marcando',
@@ -36,6 +45,8 @@ const AVISO_A_TODOS = ${j(!!avisoATodos)};
 const REINTENTOS = ${j(Number(reintentos) || 0)};
 const CODIGOS_REINTENTO = ${j(codigosReintento)};
 const PAUSA_REINTENTO_MS = ${j(Math.round((Number(pausaReintentoS) || 0) * 1000))};
+const TONO_LOCAL_TRAS_MS = ${j(Math.round((Number(tonoLocalTrasS) || 0) * 1000))};
+const TONO_LOCAL_PAIS = ${j(tonoLocalPais || 'US')};
 const MENSAJES = ${j(M)};
 
 function voz() {
@@ -63,21 +74,31 @@ VoxEngine.addEventListener(AppEvents.CallAlerting, function (e) {
   const numero = (e.destination || '').replace(/[^0-9+]/g, '');
   const estado = { uuid: datos.uuid || null, lead_id: datos.lead_id || null, telefono: numero,
     started_at: new Date().toISOString(), answered_at: null, ended_at: null, estado: 'iniciando', codigo: null, motivo: null,
-    intentos: 0, record_url: null, vox_call_id: null };
+    intentos: 0, record_url: null, vox_call_id: null, tono: 'ninguno', colgo: null, marcando_s: null, marcando_desde: null };
   let prospecto = null, recorder = null, cerrado = false, grabacionLista = false, esperandoGrabacion = false, angieLista = false;
+  let tonoLocal = false, temporizadorTono = null;
+
+  function apagarTonoLocal() {
+    if (temporizadorTono) { clearTimeout(temporizadorTono); temporizadorTono = null; }
+    if (tonoLocal) { tonoLocal = false; try { angie.stopPlayback(); } catch (err) {} }
+  }
 
   function avisar(fase, extra) {
-    const m = { fase: fase, intento: estado.intentos, codigo: estado.codigo, motivo: estado.motivo, estado: estado.estado };
+    const m = { fase: fase, intento: estado.intentos, codigo: estado.codigo, motivo: estado.motivo, estado: estado.estado, tono: estado.tono };
     if (extra) for (const k in extra) m[k] = extra[k];
     try { angie.sendMessage(JSON.stringify(m)); } catch (err) {}
   }
 
-  function terminar(motivo) {
+  function terminar(motivo, quien) {
     if (cerrado) return;
     cerrado = true;
+    apagarTonoLocal();
     estado.ended_at = new Date().toISOString();
     if (estado.answered_at) estado.duracion_s = Math.round((Date.parse(estado.ended_at) - Date.parse(estado.answered_at)) / 1000);
-    if (!estado.estado || estado.estado === 'iniciando' || estado.estado === 'marcando') estado.estado = motivo;
+    else if (estado.marcando_desde) estado.marcando_s = Math.round((Date.parse(estado.ended_at) - Date.parse(estado.marcando_desde)) / 1000);
+    if (!estado.colgo) estado.colgo = quien || 'escenario';
+    delete estado.marcando_desde;
+    if (!estado.estado || estado.estado === 'iniciando' || estado.estado === 'marcando' || estado.estado === 'timbrando') estado.estado = motivo;
     try { angie.hangup(); } catch (err) {}
     try { if (prospecto) prospecto.hangup(); } catch (err) {}
     // La URL de la grabación llega en RecorderStopped, unos segundos después de colgar.
@@ -98,9 +119,10 @@ VoxEngine.addEventListener(AppEvents.CallAlerting, function (e) {
 
   // Le dice a Angie qué pasó (voz) y cuelga cuando termina de decirlo.
   function despedir(texto, motivo) {
+    apagarTonoLocal();
     avisar('fallida');
     let colgado = false;
-    const colgar = function () { if (colgado) return; colgado = true; terminar(motivo); };
+    const colgar = function () { if (colgado) return; colgado = true; terminar(motivo, 'operador'); };
     try {
       angie.addEventListener(CallEvents.PlaybackFinished, colgar);
       angie.say(texto, voz());
@@ -113,21 +135,39 @@ VoxEngine.addEventListener(AppEvents.CallAlerting, function (e) {
   function marcar() {
     estado.intentos++;
     estado.estado = 'marcando';
+    if (!estado.marcando_desde) estado.marcando_desde = new Date().toISOString();
     avisar('marcando');
     prospecto = VoxEngine.callPSTN(numero, CALLER_ID);
     estado.vox_call_id = prospecto.id();
     const esteIntento = prospecto;
 
+    // Si el operador no manda tono en TONO_LOCAL_TRAS_MS, Angie oye un timbre local: la llamada sí salió.
+    apagarTonoLocal();
+    if (TONO_LOCAL_TRAS_MS > 0) {
+      temporizadorTono = setTimeout(function () {
+        temporizadorTono = null;
+        if (cerrado || esteIntento !== prospecto || estado.estado !== 'marcando') return;
+        tonoLocal = true;
+        estado.tono = 'local';
+        estado.estado = 'timbrando';
+        try { angie.playProgressTone(TONO_LOCAL_PAIS); } catch (err) { tonoLocal = false; }
+        avisar('timbrando');
+      }, TONO_LOCAL_TRAS_MS);
+    }
+
     // Tono real del operador (early media) hacia Angie mientras timbra.
     esteIntento.addEventListener(CallEvents.AudioStarted, function () {
       if (cerrado || esteIntento !== prospecto) return;
+      apagarTonoLocal();
       estado.estado = 'timbrando';
+      estado.tono = 'operador';
       try { esteIntento.sendMediaTo(angie); } catch (err) {}
       avisar('timbrando');
     });
 
     esteIntento.addEventListener(CallEvents.Connected, function () {
       if (cerrado) return;
+      apagarTonoLocal();
       estado.answered_at = new Date().toISOString();
       estado.estado = 'contestada';
       avisar('contestada');
@@ -148,6 +188,7 @@ VoxEngine.addEventListener(AppEvents.CallAlerting, function (e) {
 
     esteIntento.addEventListener(CallEvents.Failed, function (ev) {
       if (cerrado || esteIntento !== prospecto) return;
+      apagarTonoLocal();
       const tipo = clasificar(ev.code, ev.reason);
       estado.estado = tipo;
       estado.codigo = String(ev.code);
@@ -163,7 +204,7 @@ VoxEngine.addEventListener(AppEvents.CallAlerting, function (e) {
       despedir(MENSAJES[tipo] || MENSAJES.fallo_central, tipo);
     });
 
-    esteIntento.addEventListener(CallEvents.Disconnected, function () { if (esteIntento === prospecto) terminar('colgada'); });
+    esteIntento.addEventListener(CallEvents.Disconnected, function () { if (esteIntento === prospecto) terminar('colgada', 'prospecto'); });
   }
 
   // Teclado: Angie marca opciones del conmutador (IVR, extensiones) durante la llamada. El navegador
@@ -182,8 +223,11 @@ VoxEngine.addEventListener(AppEvents.CallAlerting, function (e) {
     try { angie.say(MENSAJES.marcando, voz()); } catch (err) {}
     marcar();
   });
-  angie.addEventListener(CallEvents.Disconnected, function () { if (!estado.answered_at && estado.estado !== 'numero_invalido' && estado.estado !== 'fallo_central') estado.estado = 'cancelada'; terminar('cancelada'); });
-  angie.addEventListener(CallEvents.Failed, function () { terminar('cancelada'); });
+  // Angie colgó (o se le cayó la conexión) antes de que contestaran: "cancelada", y queda quién y
+  // a los cuántos segundos de marcar, para distinguir "colgó a los 4 s porque oía silencio" de
+  // "esperó 30 s de timbre".
+  angie.addEventListener(CallEvents.Disconnected, function () { if (!estado.answered_at && estado.estado !== 'numero_invalido' && estado.estado !== 'fallo_central') estado.estado = 'cancelada'; terminar('cancelada', 'angie'); });
+  angie.addEventListener(CallEvents.Failed, function () { terminar('cancelada', 'angie'); });
   // Se contesta el tramo de Angie de una vez: así oye el tono del operador y los avisos.
   angie.answer();
 });

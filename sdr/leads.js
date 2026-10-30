@@ -269,6 +269,30 @@ async function fallosDeMarcacion(db, { limite = 200 } = {}) {
   return r.rows;
 }
 
+// Registro de llamadas por Voximplant para mostrarle al operador qué pasó: ID de sesión, horas, quién
+// colgó, qué tono hubo y cuántos segundos estuvo marcando. `tipo`: fijo (+5760…), cel (+573…), todas.
+async function registroLlamadas(db, { desde, hasta, tipo = 'todas', limite = 500 } = {}) {
+  const ms = col => `(EXTRACT(EPOCH FROM ${col}) * 1000)::float8`;
+  const cond = [`k.origen = 'voximplant'`], params = [];
+  if (desde) { params.push(new Date(desde).toISOString()); cond.push(`COALESCE(k.started_at, k.created_at) >= $${params.length}`); }
+  if (hasta) { params.push(new Date(new Date(hasta).getTime() + (/^\d{4}-\d{2}-\d{2}$/.test(String(hasta)) ? 86400000 : 0)).toISOString()); cond.push(`COALESCE(k.started_at, k.created_at) < $${params.length}`); }
+  if (tipo === 'fijo') cond.push(`k.telefono LIKE '+5760%'`);
+  else if (tipo === 'cel') cond.push(`k.telefono LIKE '+573%'`);
+  params.push(Math.min(Number(limite) || 500, 5000));
+  const r = await db.query(
+    `SELECT k.id, k.uuid, k.vox_call_id, k.lead_id, l.empresa, l.contacto, k.telefono,
+            ${ms('COALESCE(k.started_at, k.created_at)')} AS started_ms, ${ms('k.answered_at')} AS answered_ms, ${ms('k.ended_at')} AS ended_ms,
+            k.duracion_s, k.vox_estado, k.vox_codigo, k.vox_motivo, k.vox_intentos, k.vox_tono, k.vox_colgo,
+            COALESCE(k.marcando_s, CASE WHEN k.answered_at IS NULL AND k.ended_at IS NOT NULL AND k.started_at IS NOT NULL THEN EXTRACT(EPOCH FROM (k.ended_at - k.started_at))::int END) AS marcando_s,
+            t.resultado, t.usuario, k.reporte
+     FROM ${T.calls} k JOIN ${T.leads} l ON l.id = k.lead_id
+     LEFT JOIN ${T.touches} t ON t.id = k.touch_id
+     WHERE ${cond.join(' AND ')}
+     ORDER BY COALESCE(k.started_at, k.created_at) DESC LIMIT $${params.length}`, params);
+  return r.rows.map(x => ({ ...x, tipo: /^\+5760/.test(x.telefono || '') ? 'fijo' : /^\+573/.test(x.telefono || '') ? 'cel' : 'otro',
+    started_utc: x.started_ms ? new Date(x.started_ms).toISOString() : null, ended_utc: x.ended_ms ? new Date(x.ended_ms).toISOString() : null }));
+}
+
 // Reporte de Angie sobre un intento fallido ("desde el celular sí entra"). Llega por uuid porque el
 // webhook puede no haber creado la fila todavía.
 async function reportarLlamada(db, { uuid, leadId, telefono, codigo, estado, nota, usuario }) {
@@ -289,7 +313,7 @@ async function revisarFallo(db, id, revisado = true) {
   return { ok: true };
 }
 
-Object.assign(module.exports, { editarLead, fallosDeMarcacion, reportarLlamada, revisarFallo });
+Object.assign(module.exports, { editarLead, fallosDeMarcacion, reportarLlamada, revisarFallo, registroLlamadas });
 
 // Buscador: empresa, contacto, cargo, correo o teléfono, sin acentos ni mayúsculas. Un teléfono se
 // busca por sus dígitos ("313 470" encuentra +573134705454, también en el segundo teléfono). Con varias

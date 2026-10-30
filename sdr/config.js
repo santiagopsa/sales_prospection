@@ -434,6 +434,14 @@ module.exports = {
   LLAMADA_REINTENTAR_CODIGOS: [404, 408, 500, 502, 503, 504],
   // Qué mueve: segundos de pausa entre un intento y el siguiente.
   LLAMADA_PAUSA_REINTENTO_S: 2,
+  // Qué mueve: si a los N segundos de marcar el operador no ha mandado tono de timbre (pasa con fijos
+  // 601: la llamada sale pero Angie oye silencio y cuelga creyendo que no salió), el escenario le pone
+  // un timbre local hasta que llegue el tono real, contesten o falle. 0 = nunca (solo el tono del
+  // operador). LLAMADA_TONO_LOCAL_PAIS: de qué país suena el timbre local (código del VoxEngine; 'US'
+  // es el clásico). Hay que volver a subir el escenario: node sdr/cli.js vox:setup
+  // Ver el efecto: node sdr/cli.js llamadas --desde 2026-10-27 --fijos  (columnas tono, colgó, segundos marcando)
+  LLAMADA_TONO_LOCAL_TRAS_S: 2,
+  LLAMADA_TONO_LOCAL_PAIS: 'US',
   // Qué mueve: lo que Angie OYE (voz) en cada situación; el navegador además lo muestra en texto.
   MENSAJES_LLAMADA: {
     marcando: 'Marcando',

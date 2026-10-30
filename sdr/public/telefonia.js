@@ -121,24 +121,32 @@
       llamadaActual = call;
       // El tramo de Angie se contesta de una vez (para que oiga el tono real y los avisos); lo que
       // pasa con el prospecto llega por mensajes del escenario.
-      let contesto = false, vox = { estado: null, codigo: null, motivo: null, intento: 0 };
-      call.addEventListener(V.CallEvents.Connected, () => { anotar('Connected (tramo de Angie)'); estado('Marcando a ' + numero + '…'); });
+      let contesto = false, vox = { estado: null, codigo: null, motivo: null, intento: 0, tono: null };
+      // Mientras no contesten, el texto lleva los segundos que lleva marcando: así Angie ve que la
+      // llamada sigue viva aunque oiga silencio (fijos sin tono del operador) y no cuelga a los 4 s.
+      const t0 = Date.now(); let base = 'Marcando a ' + numero + '…';
+      const conSegundos = () => { const s = Math.round((Date.now() - t0) / 1000); return s >= 3 ? base + ' ' + s + ' s' : base; };
+      const poner = txt => { base = txt; estado(conSegundos()); };
+      const tic = setInterval(() => { if (terminado || contesto) return clearInterval(tic); estado(conSegundos()); }, 1000);
+      call.addEventListener(V.CallEvents.Connected, () => { anotar('Connected (tramo de Angie)'); poner('Marcando a ' + numero + '…'); });
       call.addEventListener(V.CallEvents.ProgressToneStart, () => { anotar('ProgressToneStart'); });
       call.addEventListener(V.CallEvents.MessageReceived, ev => {
         let m = null; try { m = JSON.parse(ev.text); } catch (_) { return; }
         anotar('escenario: ' + ev.text);
-        vox = { estado: m.estado || vox.estado, codigo: m.codigo || vox.codigo, motivo: m.motivo || vox.motivo, intento: m.intento || vox.intento };
-        if (m.fase === 'marcando') estado(m.intento > 1 ? 'Marcando de nuevo (intento ' + m.intento + ')…' : 'Marcando a ' + numero + '…');
-        else if (m.fase === 'timbrando') estado('Timbrando…');
-        else if (m.fase === 'reintentando') estado('No entró (' + (m.codigo || '') + '). Reintentando…');
-        else if (m.fase === 'contestada') { contesto = true; estado('En llamada'); }
-        else if (m.fase === 'fallida') estado(motivoLegible(vox));
+        vox = { estado: m.estado || vox.estado, codigo: m.codigo || vox.codigo, motivo: m.motivo || vox.motivo, intento: m.intento || vox.intento, tono: m.tono || vox.tono };
+        if (m.fase === 'marcando') poner(m.intento > 1 ? 'Marcando de nuevo (intento ' + m.intento + ')…' : 'Marcando a ' + numero + '…');
+        else if (m.fase === 'timbrando') poner(m.tono === 'local' ? 'Timbrando (el operador no manda tono; el timbre que oyes es nuestro)…' : 'Timbrando…');
+        else if (m.fase === 'reintentando') poner('No entró (' + (m.codigo || '') + '). Reintentando…');
+        else if (m.fase === 'contestada') { contesto = true; clearInterval(tic); estado('En llamada'); }
+        else if (m.fase === 'fallida') { clearInterval(tic); estado(motivoLegible(vox)); }
       });
       call.addEventListener(V.CallEvents.Disconnected, ev => {
-        anotar('Disconnected ' + JSON.stringify(ev && ev.headers || {}));
-        fin({ contesto, estadoVox: vox.estado, codigo: vox.codigo, motivo: vox.motivo, intentos: vox.intento, motivoLegible: contesto ? null : motivoLegible(vox) });
+        clearInterval(tic);
+        anotar('Disconnected ' + JSON.stringify(ev && ev.headers || {}) + ' tono=' + vox.tono + ' tras ' + Math.round((Date.now() - t0) / 1000) + ' s');
+        fin({ contesto, estadoVox: vox.estado, codigo: vox.codigo, motivo: vox.motivo, intentos: vox.intento, tono: vox.tono, motivoLegible: contesto ? null : motivoLegible(vox) });
       });
       call.addEventListener(V.CallEvents.Failed, ev => {
+        clearInterval(tic);
         anotar('Failed code=' + ev.code + ' reason=' + ev.reason);
         // 486 ocupado, 480/487 no contesta: son resultados normales, no errores.
         if ([480, 486, 487, 603].includes(ev.code)) return fin({ contesto: false, codigo: ev.code, motivo: ev.reason });

@@ -227,6 +227,8 @@ function rutas({ db, config, anthropic = null }) {
     ['post', '/api/leads/:id/editar', async ({ params, body }) => { sinDb(); const b = body || {}; return L.editarLead(db, config, params.id, b, require('./resultados').usuarioValido(config, b.usuario)); }],
     // Fallos de marcación: lo que el operador no cursó, el reporte de Angie y la revisión de Santiago.
     ['get', '/api/llamadas/fallidas', async () => { sinDb(); return L.fallosDeMarcacion(db); }],
+    // Registro para el operador: ?desde=2026-10-27&hasta=2026-10-29&tipo=fijo|cel|todas (fechas Bogotá o ISO)
+    ['get', '/api/llamadas/registro', async ({ query }) => { sinDb(); return L.registroLlamadas(db, { desde: query.desde, hasta: query.hasta, tipo: query.tipo || 'todas', limite: query.limite }); }],
     ['post', '/api/llamadas/reportar', async ({ body }) => { sinDb(); const b = body || {}; return L.reportarLlamada(db, { uuid: b.uuid, leadId: b.lead_id, telefono: b.telefono, codigo: b.codigo, estado: b.estado, nota: b.nota, usuario: require('./resultados').usuarioValido(config, b.usuario) }); }],
     ['post', '/api/llamadas/:id/revisar', async ({ params, body }) => { sinDb(); return L.revisarFallo(db, params.id, (body || {}).revisado !== false); }],
     ['post', '/api/marcar', async ({ body }) => { sinDb(); const b = body || {}; return L.leadParaMarcar(db, config, { telefono: b.telefono, empresa: b.empresa, contacto: b.contacto, leadId: b.lead_id || null, usuario: require('./resultados').usuarioValido(config, b.usuario) }); }],

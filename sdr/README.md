@@ -68,6 +68,23 @@ marcar**, **Desde el celular sí entra: reportar** (queda en *Pipeline → Fallo
 para revisar la ruta con Voximplant) o **Número malo: sacar de la cola**. Un fallo del operador no abre el
 diálogo de resultado: no es una marcación. Un 480/487 (timbró y no contestaron) o 486 (ocupado) sí lo abre.
 
+**Fijos que "no salen": tono local y quién colgó.** El tono de timbre que oye Angie es el del operador (early
+media). Con fijos 601 a veces el operador no manda tono: la llamada sale, pero Angie oye silencio, cree que
+murió y cuelga a los pocos segundos; para Voximplant eso es "cancelada por el usuario" (oct-2026: 2 de 39
+fijos conectaron). Por eso, si a los `LLAMADA_TONO_LOCAL_TRAS_S` segundos (2) de marcar no ha llegado tono,
+el escenario le pone a Angie un timbre local (`LLAMADA_TONO_LOCAL_PAIS`) y la franja dice "Timbrando (el
+operador no manda tono; el timbre que oyes es nuestro)"; el texto además cuenta los segundos que lleva
+marcando. El timbre local se apaga al llegar el tono real, al contestar o al fallar; con 0 no se usa.
+Cambiarlo exige volver a subir el escenario (`node sdr/cli.js vox:setup`). En cada llamada queda además
+**quién colgó** (`vox_colgo`: angie, prospecto, operador, escenario), **qué tono hubo** (`vox_tono`:
+operador, local, ninguno) y **cuántos segundos estuvo marcando** si no contestaron (`marcando_s`).
+
+```
+node sdr/cli.js llamadas --desde 2026-10-27 --fijos --csv fijos.csv   # registro para el operador: hora UTC, número,
+                                                                       # estado, quién colgó, tono, segundos, ID de sesión
+GET /sdr/api/llamadas/registro?desde=2026-10-27&hasta=2026-10-29&tipo=fijo    # lo mismo en JSON
+```
+
 **Deal en el Sandler.** Al agendar una reunión, el lead crea un deal (`canal_adquisicion = sdr_interno`) con la
 ficha de Angie. En el Sandler, el detalle de ese deal muestra **Tomar este deal y hacer el demo**: la ejecutiva
 entra al asistente con la ficha prellenada y, al guardar, se actualiza ese mismo deal (no se crea otro).
