@@ -39,7 +39,7 @@ async function fusionarLeads(db, config, { destinoId, origenId, usuario = null, 
     await c.query(`UPDATE ${T.calendly} SET lead_id = $1 WHERE lead_id = $2`, [destinoId, origenId]);
     await c.query(`UPDATE ${T.lista_negra} SET lead_id = $1 WHERE lead_id = $2`, [destinoId, origenId]);
     // Listas: el destino queda en las listas de los dos.
-    await c.query(`INSERT INTO ${T.lista_leads} (import_id, lead_id, fila) SELECT import_id, $1, fila FROM ${T.lista_leads} WHERE lead_id = $2 ON CONFLICT DO NOTHING`, [destinoId, origenId]);
+    await c.query(`INSERT INTO ${T.lista_leads} (import_id, lead_id, fila, origen, agregado_at) SELECT import_id, $1, fila, origen, agregado_at FROM ${T.lista_leads} WHERE lead_id = $2 ON CONFLICT DO NOTHING`, [destinoId, origenId]);
 
     // 3 · Datos combinados
     const telefonos = [...new Set([d.telefono, d.telefono_alt, o.telefono, o.telefono_alt].filter(Boolean))];

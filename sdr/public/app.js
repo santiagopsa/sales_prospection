@@ -1818,6 +1818,7 @@
         <div class="faltan"><b>${x.por_tocar}</b><span>faltan</span></div>
         <div class="rinde">${chipCalidad(c, { conTasas: false })}
           <div class="suave pequeno">${x.tocados} tocados · ${x.conversaciones} ${x.conversaciones === 1 ? 'conversación' : 'conversaciones'} · <b>${x.reuniones}</b> ${x.reuniones === 1 ? 'reunión' : 'reuniones'}${c.nota && c.nota !== 'pronto' ? ` · <b>${porc(c.tasa_reunion)}</b>` : ''}</div>
+          ${x.agregados ? `<div class="suave pequeno" title="Contactos que buscaste de empresas de esta lista: cuentan en sus %">＋ ${plural(x.agregados.total, 'contacto sumado', 'contactos sumados')} de sus empresas${x.agregados.reuniones ? ` · ${plural(x.agregados.reuniones, 'reunión', 'reuniones')}` : ''}</div>` : ''}
           ${c.resumen ? `<div class="suave pequeno porque">${esc(c.resumen)}</div>` : ''}
         </div>
       </div>
@@ -1854,6 +1855,7 @@
           <div class="faltan"><b>${d.por_tocar}</b><span>faltan</span></div>
           <div class="rinde">${chipCalidad(d.calidad)}
             <div class="suave pequeno" style="margin-top:4px"><b>${d.tocados}</b> tocados · ${d.conversaciones} ${d.conversaciones === 1 ? 'conversación' : 'conversaciones'} · <b>${d.reuniones}</b> ${d.reuniones === 1 ? 'reunión' : 'reuniones'} · ${d.descartados} descartados${d.en_pausa ? ` · ${d.en_pausa} en pausa` : ''}${d.tocados_hoy ? ` · ${d.tocados_hoy} hoy` : ''}</div>
+            ${d.agregados ? `<div class="suave pequeno">Incluye ${plural(d.agregados.total, 'contacto', 'contactos')} que sumaste de sus empresas (＋): ${d.agregados.tocados} tocados, ${d.agregados.conversaciones} conv., ${d.agregados.reuniones} reun.</div>` : ''}
           </div>
         </div>
         ${porQueLista(d.calidad)}
@@ -1870,7 +1872,7 @@
           const hecho = !['por_tocar', 'en_curso'].includes(x.estado) || x.tocado_hoy;
           return `<li class="${hecho ? 'hecho' : ''}">
             <span class="chip ${e[1]}">${x.tocado_hoy && !['reunion', 'descartado'].includes(x.estado) ? 'Hoy ✓' : e[0]}</span>
-            <div class="q"><a href="#/lead/${x.id}"><b>${esc(x.empresa)}</b></a><span class="suave">${esc([x.contacto, x.cargo].filter(Boolean).join(' · ') || '—')}${x.ultimo_ms ? ' · ' + esc(meta.resultadoLabel[x.ultimo_resultado] || x.ultimo_resultado || '') + ' ' + fecha(x.ultimo_ms) : ''}</span></div>
+            <div class="q"><a href="#/lead/${x.id}"><b>${x.sumado ? '<span class="chip sumado" title="Contacto que sumaste de esta empresa: cuenta en los % de la lista">＋</span> ' : ''}${esc(x.empresa)}</b></a><span class="suave">${esc([x.contacto, x.cargo].filter(Boolean).join(' · ') || '—')}${x.ultimo_ms ? ' · ' + esc(meta.resultadoLabel[x.ultimo_resultado] || x.ultimo_resultado || '') + ' ' + fecha(x.ultimo_ms) : ''}</span></div>
             ${x.telefono && !hecho ? `<a class="btn chico" data-trabajar href="${hrefLead(x)}" title="Llamar a ${esc(telVisible(x.telefono))}">📞</a>` : ''}
           </li>`;
         }).join('')}</ul>`;
@@ -1961,11 +1963,13 @@
       const d = Object.fromEntries(new FormData($f));
       if (!d.telefono.trim()) return;
       if (elegido && elegido.tipo === 'contacto') d.lead_id = elegido.lead.id;
+      // La lista que está trabajando: un contacto nuevo de una de sus empresas suma a ella.
+      if (listaActiva()) d.lista_id = listaActiva();
       try {
         const r = await api('marcar', { method: 'POST', body: d });
         if (r.conectado === 'contacto') avisar(`Número agregado a ${elegido ? elegido.lead.contacto || 'ese contacto' : 'ese contacto'} de ${r.empresa}${r.principal ? '' : ' (segundo teléfono)'}.`);
         else if (r.existente) avisar(`Ese número ya es de ${r.empresa} (${etiqueta(meta.etapas, r.etapa)}).`);
-        else if (r.empresa_existente) avisar(`Contacto nuevo en ${r.empresa_existente} (ya tenía ${plural(r.otros_contactos, 'contacto', 'contactos')}).`);
+        else if (r.empresa_existente) avisar(`Contacto nuevo en ${r.empresa_existente} (ya tenía ${plural(r.otros_contactos, 'contacto', 'contactos')})${r.lista ? ` · suma a la lista ${r.lista.nombre}` : ''}.`);
         // Si el número quedó como segundo teléfono, se llama a ese.
         location.hash = `#/lead/${r.lead_id}${llamar ? (r.conectado === 'contacto' && !r.principal ? '?llamar=alt' : '?llamar=1') : ''}`;
       } catch (e) { document.getElementById('marcar-error').innerHTML = pintarError(e); }

@@ -202,6 +202,7 @@ function iniciar(db, config, env = process.env, log = console) {
       }
       // Reciclaje: una pasada al día (sdr/reciclaje.js).
       await require('../reciclaje').jobDiario(db, config, { log }).catch(e => log.error('[sdr/reciclaje]', e.message));
+      await require('../listas').jobAsociar(db, config, { log }).catch(e => log.error('[sdr/listas]', e.message));
       // Contactos de Angie en Brevo: los leads nuevos o cambiados, de a BREVO.contactos.por_tanda.
       const bc = await require('../brevo_contactos').correrPendientes(db, config, env, { log });
       if (bc.hechos || bc.errores) log.log(`[sdr/brevo] contactos: ${bc.hechos} sincronizados, ${bc.errores} con error`);

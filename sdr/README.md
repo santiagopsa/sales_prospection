@@ -405,6 +405,32 @@ Los contactos que ya estaban en la app también quedan en la lista, sin duplicar
   del archivo, luego en curso) y "▶ Trabajar esta lista": desde ahí el botón "Siguiente de la lista" de
   la ficha sigue dentro de esa lista hasta "salir". También se cambia la prioridad o se cierra la lista.
 
+### Contactos de la misma empresa suman a la lista
+
+Trabajando una lista, Angie ve una empresa y busca a otra persona de esa empresa (la del archivo no
+contesta, no es decisora…). Cuando la marca en **Marcar** escribiendo la empresa, el contacto nuevo se
+conecta con la empresa existente y además **suma a la lista** de donde salió la empresa: sus toques,
+conversaciones y reuniones cuentan en los % de esa lista (`lista_leads.origen = 'misma_empresa'`, M13).
+A qué lista: la que Angie está trabajando en Marcar si trajo esa empresa; si no, la más reciente que la
+trajo en su archivo, si tiene menos de `LISTAS.misma_empresa.ventana_dias` (60). La empresa se compara
+normalizada (sin tildes, mayúsculas ni S.A.S./Ltda.), igual que la lista negra. Solo se suman leads que no
+estén ya en otra lista y solo listas donde la empresa vino en el archivo.
+
+- En la tarjeta de la lista: "＋ N contactos sumados de sus empresas · M reuniones"; en el detalle, los
+  sumados llevan ＋ y en el **Por qué** sale su propia línea ("Angie sumó 4 contactos de las mismas
+  empresas: … 2 reuniones (40 % de las reuniones de la lista): la empresa era buena aunque el contacto del
+  archivo no").
+- La **composición** del por qué (cargos, celulares, tamaño, números) se mide solo con el archivo: es lo
+  que la lista trajo. `en_composicion: true` los mete también. `sumar: false` apaga todo.
+- Los que Angie hizo antes de esto se suman solos al arrancar y una vez al día (leads sin lista cuya
+  empresa vino en una lista creada antes que ellos, dentro de la ventana).
+
+```
+node sdr/cli.js listas --asociar            # qué contactos ya hechos se sumarían y a qué lista
+node sdr/cli.js listas --asociar --aplicar
+node sdr/cli.js listas --lista 6 --set LISTAS.misma_empresa.sumar=false   # la lista sin los sumados
+```
+
 ### Calidad de cada lista: cuánto rinde y por qué
 
 La idea es que al ver una lista buena se sepa qué repetir al pedir la siguiente, y al ver una floja

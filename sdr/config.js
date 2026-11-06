@@ -97,11 +97,24 @@ module.exports = {
   //   Umbrales de partida (27-oct, 379 tocados): lista #1 Apollo 11 % reunión / 32 % conversación;
   //   promedio 7 % / 24 %; lista #6 2 % / 12 %.
   // Ver el efecto: node sdr/cli.js listas --set LISTAS.calificacion.reunion.buena=0.1
+  // Qué mueve (misma_empresa): cuando Angie marca desde Marcar un contacto NUEVO de una empresa que
+  //   vino en una lista (busca a otra persona de esa empresa porque la del archivo no sirvió), ese
+  //   contacto suma a la lista: sus toques, conversaciones y reuniones cuentan en los % de la lista.
+  //   sumar: false = no se asocia (la lista mide solo lo que trajo el archivo).
+  //   ventana_dias: se asocia a la lista más reciente que trajo la empresa, si tiene menos de estos
+  //     días cuando Angie suma el contacto (si está trabajando esa lista en Marcar, se asocia a esa
+  //     aunque sea más vieja). Una empresa de una lista de hace 6 meses ya no es mérito de esa lista.
+  //   en_composicion: false = la composición del "por qué" (cargos, celulares, tamaño, números) se
+  //     mide solo con los contactos del archivo, que es lo que la lista trajo; los sumados cuentan en
+  //     los resultados y salen en su propia línea. true = todo junto.
+  // Ver el efecto: node sdr/cli.js listas --asociar   (qué contactos ya hechos se sumarían; --aplicar lo hace)
+  //                node sdr/cli.js listas --lista 6 --set LISTAS.misma_empresa.sumar=false
   LISTAS: {
     dias_caliente: 14,
     puntos: 100,
     origenes: ['Luisa', 'Apollo', 'Santiago', 'Otro'],
     alta_por_defecto: ['Luisa'],
+    misma_empresa: { sumar: true, ventana_dias: 60, en_composicion: false },
     calificacion: {
       minimo_tocados: 15,
       reunion: { buena: 0.08, regular: 0.04 },

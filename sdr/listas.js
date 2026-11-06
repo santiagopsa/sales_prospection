@@ -54,7 +54,7 @@ const HISTORIA = conv => `LEFT JOIN LATERAL (SELECT
       BOOL_OR(k.answered_at IS NOT NULL) AS contesto,
       BOOL_OR(k.vox_estado = 'numero_invalido') AS invalido
     FROM ${T.calls} k WHERE k.lead_id = l.id AND k.created_at >= i.created_at) kk ON true`;
-const FILA_CALIDAD = `l.cargo, l.telefono, l.extra->>'empleados' AS empleados, l.razon_descarte,
+const FILA_CALIDAD = `ll.origen, l.cargo, l.telefono, l.extra->>'empleados' AS empleados, l.razon_descarte,
             (u.created_at IS NOT NULL) AS tocado, COALESCE(h.conversacion, false) AS conversacion,
             (COALESCE(h.reunion, false) OR l.etapa IN ('reunion_agendada', 'reunion_realizada', 'calificado')) AS reunion,
             COALESCE(h.llamado, false) AS llamado,
@@ -62,11 +62,37 @@ const FILA_CALIDAD = `l.cargo, l.telefono, l.extra->>'empleados' AS empleados, l
             COALESCE(kk.invalido, false) AS numero_invalido`;
 const CONV = JSON.stringify(D.RESULTADOS_CON_CONVERSACION);
 
+function reglasMisma(config) {
+  const m = ((config || {}).LISTAS || {}).misma_empresa || {};
+  return { sumar: m.sumar !== false, ventanaDias: m.ventana_dias == null ? 60 : Number(m.ventana_dias) || 0, enComposicion: !!m.en_composicion };
+}
+
+// Perfil de la lista: resultados con TODOS sus contactos (los del archivo y los que Angie sumó de
+// las mismas empresas); composición (cargos, teléfonos, tamaño, números) solo con los del archivo,
+// salvo LISTAS.misma_empresa.en_composicion. Con sumar=false los sumados no cuentan en nada.
+function perfilLista(config, filas) {
+  const r = reglasMisma(config);
+  const esSumado = f => f.origen === 'misma_empresa';
+  const usadas = r.sumar ? filas : filas.filter(f => !esSumado(f));
+  const todo = Calidad.perfilar(usadas, config);
+  const sumados = usadas.filter(esSumado);
+  if (sumados.length && !r.enComposicion) {
+    const arch = Calidad.perfilar(usadas.filter(f => !esSumado(f)), config);
+    Object.assign(todo, { total: arch.total, cargo: arch.cargo, telefono: arch.telefono, tamano: arch.tamano, numeros: arch.numeros,
+      tasa_numeros_vivos: arch.tasa_numeros_vivos, tasa_numeros_malos: arch.tasa_numeros_malos });
+  }
+  if (sumados.length) {
+    const s = Calidad.perfilar(sumados, config);
+    todo.agregados = { total: s.total, tocados: s.tocados, conversaciones: s.conversaciones, reuniones: s.reuniones };
+  }
+  return todo;
+}
+
 // Resultados y calificación de una lista a partir de sus filas (ver sdr/calidad_lista.js).
 function calificarFilas(config, filas, promedio) {
-  const perfil = Calidad.perfilar(filas, config);
+  const perfil = perfilLista(config, filas);
   const calidad = Calidad.calificar(perfil, config, { promedio });
-  return { tocados: perfil.tocados, conversaciones: perfil.conversaciones, reuniones: perfil.reuniones, calidad, perfil: { cargo: perfil.cargo, telefono: perfil.telefono, tamano: perfil.tamano, numeros: perfil.numeros, descartes: perfil.descartes } };
+  return { tocados: perfil.tocados, conversaciones: perfil.conversaciones, reuniones: perfil.reuniones, agregados: perfil.agregados || null, calidad, perfil: { cargo: perfil.cargo, telefono: perfil.telefono, tamano: perfil.tamano, numeros: perfil.numeros, descartes: perfil.descartes } };
 }
 
 // Listas activas: las de los últimos 60 días y las de prioridad alta abiertas. Calientes primero.
@@ -85,7 +111,7 @@ async function listar(db, config, { ahora = new Date() } = {}) {
      JOIN ${T.leads} l ON l.id = ll.lead_id
      ${ULTIMO_TOQUE}
      CROSS JOIN LATERAL (SELECT ${ESTADO_SQL} AS estado, u.created_at AS ultimo) e
-     WHERE i.created_at >= $1 OR (i.prioridad = 'alta' AND i.cerrada_at IS NULL)
+     WHERE (i.created_at >= $1 OR (i.prioridad = 'alta' AND i.cerrada_at IS NULL))${reglasMisma(config).sumar ? '' : ` AND ll.origen = 'archivo'`}
      GROUP BY i.id
      ORDER BY i.created_at DESC
      LIMIT 40`,
@@ -99,11 +125,11 @@ async function listar(db, config, { ahora = new Date() } = {}) {
      JOIN ${T.leads} l ON l.id = ll.lead_id
      ${ULTIMO_TOQUE}
      ${HISTORIA('$2')}
-     WHERE i.id IN (SELECT jsonb_array_elements_text($1::jsonb)::int)`,
+     WHERE i.id IN (SELECT jsonb_array_elements_text($1::jsonb)::int)${reglasMisma(config).sumar ? '' : ` AND ll.origen = 'archivo'`}`,
     [JSON.stringify(r.rows.map(x => x.id)), CONV]);
   const porLista = new Map();
   for (const x of f.rows) { if (!porLista.has(x.import_id)) porLista.set(x.import_id, []); porLista.get(x.import_id).push(x); }
-  const perfiles = r.rows.map(x => Calidad.perfilar(porLista.get(x.id) || [], config));
+  const perfiles = r.rows.map(x => perfilLista(config, porLista.get(x.id) || []));
   const promedio = Calidad.promedioDe(perfiles);
   const listas = r.rows.map(x => ({ ...decorar(config, x, ahora), ...calificarFilas(config, porLista.get(x.id) || [], promedio) }));
   return Object.assign(listas.sort((a, b) => (b.caliente - a.caliente) || (!!a.cerrada_ms - !!b.cerrada_ms) || b.created_ms - a.created_ms), { promedio });
@@ -125,7 +151,7 @@ async function detalle(db, config, id, { ahora = new Date(), conPromedio = true 
   if (!i) throw error(404, 'Lista no encontrada');
   const hoy = tiempo.instante(tiempo.fechaBogota(ahora), 0).getTime();
   const r = await db.query(
-    `SELECT l.id, l.empresa, l.contacto, l.email, l.etapa, ll.fila, ${FILA_CALIDAD},
+    `SELECT l.id, l.empresa, l.contacto, l.email, l.etapa, ll.fila, ${ms('ll.agregado_at')} AS agregado_ms, ${FILA_CALIDAD},
             ${ESTADO_SQL} AS estado, ${ms('u.created_at')} AS ultimo_ms, u.canal AS ultimo_canal, u.resultado AS ultimo_resultado,
             (SELECT ${ms('MIN(t.due_at)')} FROM ${T.tasks} t WHERE t.lead_id = l.id AND t.estado = 'pendiente' AND t.tipo = 'secuencia') AS proximo_ms
      FROM ${T.imports} i
@@ -133,7 +159,7 @@ async function detalle(db, config, id, { ahora = new Date(), conPromedio = true 
      JOIN ${T.leads} l ON l.id = ll.lead_id
      ${ULTIMO_TOQUE}
      ${HISTORIA('$2')}
-     WHERE i.id = $1`, [id, CONV]);
+     WHERE i.id = $1${reglasMisma(config).sumar ? '' : ` AND ll.origen = 'archivo'`}`, [id, CONV]);
   const orden = { por_tocar: 0, en_curso: 1, reunion: 2, pausa: 3, descartado: 4 };
   const leads = r.rows.map(x => ({ ...x, tocado_hoy: x.ultimo_ms != null && x.ultimo_ms >= hoy }))
     .sort((a, b) => orden[a.estado] - orden[b.estado]
@@ -146,7 +172,7 @@ async function detalle(db, config, id, { ahora = new Date(), conPromedio = true 
     total: leads.length, por_tocar: cuenta('por_tocar'), en_curso: cuenta('en_curso'),
     descartados: cuenta('descartado'), en_pausa: cuenta('pausa'), tocados_hoy: leads.filter(x => x.tocado_hoy).length,
     ...calificarFilas(config, leads, promedio),
-    leads: leads.map(({ empleados, razon_descarte, tocado, conversacion, reunion, llamado, numero_vivo, numero_invalido, ...x }) => ({ ...x, razon_descarte, conversacion, reunion, numero_vivo, numero_invalido })),
+    leads: leads.map(({ empleados, razon_descarte, tocado, conversacion, reunion, llamado, numero_vivo, numero_invalido, origen, ...x }) => ({ ...x, razon_descarte, conversacion, reunion, numero_vivo, numero_invalido, sumado: origen === 'misma_empresa' })),
   };
 }
 
@@ -189,4 +215,79 @@ async function calientesPorLead(db, config, leadIds, { ahora = new Date() } = {}
   return out;
 }
 
-module.exports = { listar, detalle, actualizar, siguienteDe, calientesPorLead, caliente, promedioListas };
+// ---- Contactos de la misma empresa ---------------------------------------------------------
+// Angie, trabajando una lista, ve una empresa y busca a otra persona de esa empresa. Cuando la marca
+// desde Marcar (contacto nuevo que se conecta con la empresa existente), el contacto suma a la lista
+// de donde salió la empresa: la que ella está trabajando si trajo esa empresa; si no, la más reciente
+// que la trajo dentro de LISTAS.misma_empresa.ventana_dias. Solo cuentan las listas donde la empresa
+// vino en el archivo (no las que a su vez la recibieron por esta vía) y solo leads que no estén ya en
+// alguna lista. `idsEmpresa`: los leads de la misma empresa (los encuentra leadParaMarcar).
+async function asociarPorEmpresa(db, config, leadId, idsEmpresa, { listaPreferida = null, ahora = new Date() } = {}) {
+  const r = reglasMisma(config);
+  if (!r.sumar || !idsEmpresa || !idsEmpresa.length) return null;
+  const ya = await db.query(`SELECT 1 FROM ${T.lista_leads} WHERE lead_id = $1 LIMIT 1`, [leadId]);
+  if (ya.rows.length) return null;
+  const q = await db.query(
+    `SELECT DISTINCT i.id, COALESCE(i.nombre, i.archivo) AS nombre, i.created_at
+     FROM ${T.lista_leads} ll JOIN ${T.imports} i ON i.id = ll.import_id
+     WHERE ll.origen = 'archivo' AND ll.lead_id IN (SELECT jsonb_array_elements_text($1::jsonb)::int) AND i.created_at <= $2
+     ORDER BY i.created_at DESC`, [JSON.stringify(idsEmpresa.map(Number)), ahora.toISOString()]);
+  const enVentana = x => !r.ventanaDias || (ahora.getTime() - new Date(x.created_at).getTime()) <= r.ventanaDias * DIA;
+  const elegida = q.rows.find(x => listaPreferida != null && String(x.id) === String(listaPreferida)) || q.rows.find(enVentana);
+  if (!elegida) return null;
+  await db.query(`INSERT INTO ${T.lista_leads} (import_id, lead_id, origen, agregado_at) VALUES ($1, $2, 'misma_empresa', $3) ON CONFLICT DO NOTHING`, [elegida.id, leadId, ahora.toISOString()]);
+  return { id: elegida.id, nombre: elegida.nombre || `Carga #${elegida.id}` };
+}
+
+// Los que ya se hicieron antes de existir esto (y cualquiera que se haya escapado: un contacto creado
+// a mano y luego corregido de empresa): leads que no están en ninguna lista, cuya empresa (normalizada
+// como en la lista negra) vino en el archivo de una lista creada antes que el lead y dentro de la
+// ventana. Idempotente. `simular: true` cuenta sin cambiar nada.
+async function asociarHistoricos(db, config, { simular = false } = {}) {
+  const r = reglasMisma(config);
+  const out = { asociados: 0, simulado: simular, detalle: [] };
+  if (!r.sumar) return out;
+  const LN = require('./listanegra');
+  const sueltos = (await db.query(
+    `SELECT l.id, l.empresa, l.contacto, l.created_at FROM ${T.leads} l
+     WHERE l.empresa IS NOT NULL AND l.empresa <> 'Sin empresa'
+       AND NOT EXISTS (SELECT 1 FROM ${T.lista_leads} ll WHERE ll.lead_id = l.id)`)).rows;
+  if (!sueltos.length) return out;
+  const enListas = (await db.query(
+    `SELECT ll.import_id, COALESCE(i.nombre, i.archivo) AS nombre, i.created_at, l.empresa
+     FROM ${T.lista_leads} ll JOIN ${T.imports} i ON i.id = ll.import_id JOIN ${T.leads} l ON l.id = ll.lead_id
+     WHERE ll.origen = 'archivo'`)).rows;
+  const porEmpresa = new Map();
+  for (const x of enListas) {
+    const k = LN.normalizarEmpresa(x.empresa); if (!k) continue;
+    if (!porEmpresa.has(k)) porEmpresa.set(k, new Map());
+    porEmpresa.get(k).set(x.import_id, x);
+  }
+  for (const l of sueltos) {
+    const k = LN.normalizarEmpresa(l.empresa);
+    const listas = k && porEmpresa.get(k);
+    if (!listas) continue;
+    const creado = new Date(l.created_at).getTime();
+    const cand = [...listas.values()]
+      .filter(x => new Date(x.created_at).getTime() <= creado && (!r.ventanaDias || creado - new Date(x.created_at).getTime() <= r.ventanaDias * DIA))
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+    if (!cand) continue;
+    out.asociados++;
+    if (out.detalle.length < 50) out.detalle.push({ lead_id: l.id, empresa: l.empresa, contacto: l.contacto, lista_id: cand.import_id, lista: cand.nombre });
+    if (!simular) await db.query(`INSERT INTO ${T.lista_leads} (import_id, lead_id, origen, agregado_at) VALUES ($1, $2, 'misma_empresa', $3) ON CONFLICT DO NOTHING`, [cand.import_id, l.id, new Date(l.created_at).toISOString()]);
+  }
+  return out;
+}
+
+// Una vez al día (y al arrancar), junto con el reciclaje.
+let ultimaAsociacion = null;
+async function jobAsociar(db, config, { ahora = new Date(), log = console } = {}) {
+  const hoy = tiempo.fechaBogota(ahora);
+  if (ultimaAsociacion === hoy) return null;
+  ultimaAsociacion = hoy;
+  const r = await asociarHistoricos(db, config);
+  if (r.asociados) log.log(`[sdr/listas] ${r.asociados} contactos de la misma empresa sumados a su lista`);
+  return r;
+}
+
+module.exports = { listar, detalle, actualizar, siguienteDe, calientesPorLead, caliente, promedioListas, asociarPorEmpresa, asociarHistoricos, jobAsociar, reglasMisma, _reiniciar: () => { ultimaAsociacion = null; } };

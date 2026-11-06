@@ -336,6 +336,13 @@ const MIGRACIONES = [
   `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS vox_tono TEXT`,
   `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS vox_colgo TEXT`,
   `ALTER TABLE ${T.calls} ADD COLUMN IF NOT EXISTS marcando_s INT`,
+
+  // ---- M13 · Contactos de la misma empresa suman a la lista ----------------------------------
+  // Angie, trabajando una lista, busca otros contactos de la misma empresa y los marca desde Marcar.
+  // Esos leads entran a lista_leads de la lista de donde salió la empresa con origen 'misma_empresa'
+  // (los del archivo quedan 'archivo'); agregado_at: cuándo se sumaron. Ver sdr/listas.js.
+  `ALTER TABLE ${T.lista_leads} ADD COLUMN IF NOT EXISTS origen TEXT NOT NULL DEFAULT 'archivo'`,
+  `ALTER TABLE ${T.lista_leads} ADD COLUMN IF NOT EXISTS agregado_at TIMESTAMPTZ`,
 ];
 
 async function initSchema(db, log = console) {

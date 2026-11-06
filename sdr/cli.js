@@ -9,6 +9,7 @@
 //   node sdr/cli.js pruebas                                     pruebas gratis: cuáles pasan a cotización y a cliente, y lo que Wei tiene en prueba
 //   node sdr/cli.js llamadas [--desde 2026-10-27] [--hasta 2026-10-29] [--fijos|--celulares] [--csv archivo]  registro de llamadas por Voximplant (ID de sesión, quién colgó, tono, segundos marcando) para el operador
 //   node sdr/cli.js listas [--lista ID]                        calidad de cada lista: faltan, tocados, conversaciones, reuniones, nota y por qué (reglas LISTAS.calificacion)
+//   node sdr/cli.js listas --asociar [--aplicar]                contactos ya hechos de empresas de una lista que sumarían a esa lista (LISTAS.misma_empresa)
 //   node sdr/cli.js reciclaje [--aplicar]                       qué saldría de la cola hoy (secuencias vencidas, huérfanos, sin teléfono); --aplicar lo hace
 //   node sdr/cli.js brevo-contactos [--sincronizar N]             contactos de Angie en Brevo: estado, errores; --sincronizar manda N leads ya
 //   node sdr/cli.js prueba <deal_id>                            la ficha de una prueba: champion, criterio, fechas, números, página y decisión (reglas PRUEBA)
@@ -205,12 +206,17 @@ async function main() {
       }
     } else if (cmd === 'listas') {
       const Li = require('./listas');
-      if (args.lista) {
+      if (args.asociar) {
+        const r = await Li.asociarHistoricos(db, config, { simular: !args.aplicar });
+        console.log(`\nContactos de la misma empresa ${r.simulado ? 'que se sumarían (simulación; --aplicar para hacerlo)' : 'sumados'}: ${r.asociados} · reglas: ${JSON.stringify(config.LISTAS.misma_empresa)}`);
+        for (const d of r.detalle) console.log(`  #${d.lead_id} ${d.empresa}${d.contacto ? ' · ' + d.contacto : ''} → lista #${d.lista_id} ${d.lista}`);
+      } else if (args.lista) {
         const d = await Li.detalle(db, config, args.lista);
         const c = d.calidad;
         console.log(`\n#${d.id} ${d.nombre}${d.origen ? ' · ' + d.origen : ''} · ${d.total} contactos · faltan ${d.por_tocar} · ${c.etiqueta} (${Math.round(c.tasa_reunion * 100)} % reunión, ${Math.round(c.tasa_conversacion * 100)} % conversación sobre ${c.tocados} tocados)`);
         console.log(`  ${c.resumen}`);
         for (const r of c.razones) console.log(`  ${r.signo} ${r.texto}`);
+        if (d.agregados) console.log(`  incluye ${d.agregados.total} contactos que Angie sumó de las mismas empresas: ${d.agregados.tocados} tocados, ${d.agregados.conversaciones} conversaciones, ${d.agregados.reuniones} reuniones`);
         console.log(`  cargos: ${JSON.stringify(d.perfil.cargo)} · teléfonos: ${JSON.stringify(d.perfil.telefono)} · números: ${JSON.stringify(d.perfil.numeros)} · tamaño: ${JSON.stringify(d.perfil.tamano)} · descartes: ${JSON.stringify(d.perfil.descartes)}`);
       } else {
         const ls = await Li.listar(db, config);

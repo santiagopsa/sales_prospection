@@ -128,6 +128,13 @@ function calificar(perfil, config, { promedio = null } = {}) {
     }
   }
 
+  // --- Contactos que Angie sumó de las mismas empresas ---
+  const ag = p.agregados;
+  if (ag && ag.total) {
+    const parte = p.reuniones && ag.reuniones ? ` (${porc(ag.reuniones / p.reuniones)} de las reuniones de la lista)` : '';
+    add(ag.reuniones ? '+' : '·', `Angie sumó ${ag.total} ${ag.total === 1 ? 'contacto' : 'contactos'} de las mismas empresas: ${ag.tocados} tocados, ${ag.conversaciones} ${ag.conversaciones === 1 ? 'conversación' : 'conversaciones'}, ${ag.reuniones} ${ag.reuniones === 1 ? 'reunión' : 'reuniones'}${parte}${ag.reuniones ? ': la empresa era buena aunque el contacto del archivo no' : ''}`);
+  }
+
   // --- Composición: lo que la lista traía ---
   const n = p.total || 1;
   const th = (p.cargo.decisor_th + p.cargo.seleccion + p.cargo.otro_th) / n;

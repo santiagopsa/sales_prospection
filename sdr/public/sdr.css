@@ -474,3 +474,4 @@ a.chip.fuego:hover { text-decoration: none; background: #ffe4cc; }
 .bd-cuerpo .compromisos-bloque .compromiso { background: var(--fondo); }
 .en-espera { font-size: 12px; margin-top: 10px; }
 @media (max-width: 700px) { .bloque-dia > summary { grid-template-columns: 14px 1fr; gap: 4px 10px; } .bloque-dia > summary .bd-nombre, .bloque-dia > summary .bd-resumen { grid-column: 2; text-align: left; } }
+.chip.sumado { background: #e0f2fe; color: #0369a1; font-size: 11px; padding: 0 6px; }

@@ -131,7 +131,7 @@ async function buscarEmpresas(db, q, { limite = 8 } = {}) {
 //   3. la empresa ya existe (mismo nombre normalizado) → si el contacto coincide por nombre, se le agrega
 //      el número; si no, se crea un contacto nuevo EN ESA empresa (mismo nombre y datos de empresa);
 //   4. si no, lead nuevo. Todo lo nuevo sale con la secuencia por defecto.
-async function leadParaMarcar(db, config, { telefono, empresa, contacto, leadId, usuario = null, ahora = new Date() }) {
+async function leadParaMarcar(db, config, { telefono, empresa, contacto, leadId, listaId = null, usuario = null, ahora = new Date() }) {
   const { normalizarTelefono } = require('./normalizar');
   const { planificar } = require('./secuencia');
   const LN = require('./listanegra');
@@ -171,6 +171,7 @@ async function leadParaMarcar(db, config, { telefono, empresa, contacto, leadId,
       if (igual) return agregarNumero((await db.query(`SELECT id, empresa, contacto, telefono, telefono_alt, etapa FROM ${T.leads} WHERE id = $1`, [igual.id])).rows[0]);
       base = (await db.query(`SELECT empresa, ciudad, extra FROM ${T.leads} WHERE id = $1`, [misma.contactos[0].id])).rows[0];
       base.otros = misma.contactos.length;
+      base.ids = misma.contactos.map(x => x.id);
     }
   }
   const extra = base && base.extra ? Object.fromEntries(Object.entries(base.extra).filter(([k]) => EXTRA_EMPRESA.includes(k))) : null;
@@ -188,7 +189,13 @@ async function leadParaMarcar(db, config, { telefono, empresa, contacto, leadId,
     [base ? base.empresa : (nombreEmpresa || 'Sin empresa'), String(contacto || '').trim() || null, tel.e164, String(telefono).trim(),
      JSON.stringify(plan.map(p => ({ paso: p.paso, canal: p.canal, due_at: p.due_at.toISOString() }))),
      base ? base.ciudad : null, extra && Object.keys(extra).length ? JSON.stringify(extra) : null]);
-  return { lead_id: r.rows[0].id, existente: false, telefono: tel.e164, ...(base ? { empresa_existente: base.empresa, otros_contactos: base.otros } : {}) };
+  // Contacto nuevo de una empresa que vino en una lista: suma a esa lista (sdr/listas.js).
+  let lista = null;
+  if (base) {
+    try { lista = await require('./listas').asociarPorEmpresa(db, config, r.rows[0].id, base.ids, { listaPreferida: listaId, ahora }); }
+    catch (e) { console.error('[sdr/marcar] no se pudo sumar a la lista:', e.message); }
+  }
+  return { lead_id: r.rows[0].id, existente: false, telefono: tel.e164, ...(base ? { empresa_existente: base.empresa, otros_contactos: base.otros } : {}), ...(lista ? { lista } : {}) };
 }
 
 module.exports.leadParaMarcar = leadParaMarcar;

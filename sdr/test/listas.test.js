@@ -87,3 +87,83 @@ test('listas priorizadas', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async 
   await assert.rejects(Li.actualizar(db, base, luisa.import_id, { prioridad: 'urgente' }), /alta o normal/);
   await db.end();
 });
+
+// Contactos que Angie suma de una empresa de la lista (Marcar → empresa existente): cuentan en los %
+// de la lista, en su propia línea del por qué, sin cambiar la composición del archivo.
+test('listas: contactos de la misma empresa suman a la lista', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async () => {
+  const { conectar } = require('../db');
+  const { initSchema } = require('../schema');
+  const { importar } = require('../importar');
+  const { registrarToque } = require('../resultados');
+  const L = require('../leads');
+  const Li = require('../listas');
+  const base = require('../config');
+  const db = conectar(url);
+  process.on('exit', () => { try { db.end(); } catch (_) {} });
+  await db.query('DROP SCHEMA IF EXISTS sdr CASCADE');
+  await initSchema(db, { log() {}, error: console.error });
+  const d0 = new Date('2026-10-05T14:00:00Z');
+  const vieja = await importar(db, base, { archivo: 'vieja.csv', contenido: 'empresa,contacto,cargo,telefono\nAcme S.A.S.,Ana,Gerente de Talento Humano,3007000001', simular: false, lista: { nombre: 'Vieja' }, ahora: new Date('2026-06-01T14:00:00Z') });
+  const lista = await importar(db, base, { archivo: 'nueva.csv', contenido: 'empresa,contacto,cargo,telefono\nAcme SAS,Bea,Analista de selección,3007000002\nBeta Ltda,Cai,Jefe de Selección,3007000003', simular: false, lista: { nombre: 'Nueva' }, ahora: d0 });
+  const otra = await importar(db, base, { archivo: 'otra.csv', contenido: 'empresa,contacto,cargo,telefono\nBeta,Dan,Director de Talento,3007000004', simular: false, lista: { nombre: 'Otra' }, ahora: new Date('2026-10-10T14:00:00Z') });
+
+  // Angie marca a otra persona de Acme (escribe el nombre distinto): suma a la lista más reciente con Acme.
+  const t1 = new Date('2026-10-20T15:00:00Z');
+  const m = await L.leadParaMarcar(db, base, { telefono: '3007000010', empresa: 'ACME sas', contacto: 'Eva Jefe TH', ahora: t1 });
+  assert.strictEqual(m.empresa_existente, 'Acme SAS');
+  assert.deepStrictEqual(m.lista, { id: lista.import_id, nombre: 'Nueva' });
+  const fila = (await db.query(`SELECT origen, agregado_at FROM sdr.lista_leads WHERE lead_id = $1`, [m.lead_id])).rows;
+  assert.deepStrictEqual(fila.map(x => x.origen), ['misma_empresa']);
+  // Si está trabajando otra lista que también trajo la empresa, va a esa (aunque sea más vieja y fuera de la ventana).
+  const m2 = await L.leadParaMarcar(db, base, { telefono: '3007000011', empresa: 'Acme', contacto: 'Fer', listaId: vieja.import_id, ahora: t1 });
+  assert.strictEqual(m2.lista.id, vieja.import_id);
+  // Beta está en dos listas: sin lista activa, la más reciente (Otra).
+  const m3 = await L.leadParaMarcar(db, base, { telefono: '3007000012', empresa: 'Beta', contacto: 'Gus', ahora: t1 });
+  assert.strictEqual(m3.lista.id, otra.import_id);
+  // Empresa que no vino en ninguna lista: nada.
+  const m4 = await L.leadParaMarcar(db, base, { telefono: '3007000013', empresa: 'Sola SA', contacto: 'Hugo', ahora: t1 });
+  assert.strictEqual(m4.lista, undefined);
+  const m5 = await L.leadParaMarcar(db, base, { telefono: '3007000014', empresa: 'Sola', contacto: 'Iris', ahora: t1 });
+  assert.strictEqual(m5.lista, undefined, 'la empresa existe pero no vino en el archivo de una lista');
+  // Fuera de la ventana y sin lista activa: no suma (Vieja tiene 4+ meses; Acme también está en Nueva, así que probamos con otra empresa).
+  await importar(db, base, { archivo: 'antigua.csv', contenido: 'empresa,contacto,telefono\nGama,Juan,3007000005', simular: false, lista: { nombre: 'Antigua' }, ahora: new Date('2026-05-01T14:00:00Z') });
+  const m6 = await L.leadParaMarcar(db, base, { telefono: '3007000015', empresa: 'Gama', contacto: 'Kim', ahora: t1 });
+  assert.strictEqual(m6.lista, undefined);
+
+  // Eva conversa y agenda; Bea (archivo) no contesta.
+  const bea = (await db.query(`SELECT id FROM sdr.leads WHERE contacto='Bea'`)).rows[0].id;
+  await registrarToque(db, base, { leadId: bea, canal: 'llamada', resultado: 'no_contesto', ahora: new Date('2026-10-20T14:00:00Z') });
+  await registrarToque(db, base, { leadId: m.lead_id, canal: 'llamada', resultado: 'reunion_agendada', ahora: new Date('2026-10-20T15:10:00Z') });
+  const laxo = { ...base, LISTAS: { ...base.LISTAS, calificacion: { ...base.LISTAS.calificacion, minimo_tocados: 1 } } };
+  const det = await Li.detalle(db, laxo, lista.import_id, { ahora: new Date('2026-10-21T14:00:00Z') });
+  assert.deepStrictEqual([det.total, det.tocados, det.reuniones], [3, 2, 1]);
+  assert.deepStrictEqual(det.agregados, { total: 1, tocados: 1, conversaciones: 1, reuniones: 1 });
+  assert.strictEqual(det.leads.find(x => x.id === m.lead_id).sumado, true);
+  assert.strictEqual(det.leads.find(x => x.id === bea).sumado, false);
+  assert.ok(det.calidad.razones.some(r => r.signo === '+' && /Angie sumó 1 contacto de las mismas empresas: 1 tocados, 1 conversación, 1 reunión \(100 % de las reuniones de la lista\)/.test(r.texto)), JSON.stringify(det.calidad.razones));
+  // Composición = solo el archivo: 2 contactos (Bea reclutadora, Cai jefe); Eva no cambia los cargos.
+  assert.strictEqual(det.perfil.cargo.seleccion + det.perfil.cargo.decisor_th + det.perfil.cargo.otro_th + det.perfil.cargo.fuera + det.perfil.cargo.sin_cargo, 2);
+  const ls = await Li.listar(db, laxo, { ahora: new Date('2026-10-21T14:00:00Z') });
+  assert.deepStrictEqual(ls.find(x => x.id === lista.import_id).agregados, det.agregados);
+  // Huecos: en_composicion suma a Eva a la composición; sumar=false la saca de todo.
+  const enComp = { ...laxo, LISTAS: { ...laxo.LISTAS, misma_empresa: { ...laxo.LISTAS.misma_empresa, en_composicion: true } } };
+  const d2 = await Li.detalle(db, enComp, lista.import_id, { ahora: new Date('2026-10-21T14:00:00Z') });
+  assert.strictEqual(Object.values(d2.perfil.cargo).reduce((a, b) => a + b, 0), 3);
+  const sinSumar = { ...laxo, LISTAS: { ...laxo.LISTAS, misma_empresa: { ...laxo.LISTAS.misma_empresa, sumar: false } } };
+  const d3 = await Li.detalle(db, sinSumar, lista.import_id, { ahora: new Date('2026-10-21T14:00:00Z') });
+  assert.deepStrictEqual([d3.total, d3.tocados, d3.reuniones, d3.agregados], [2, 1, 0, null]);
+
+  // Históricos: un lead de Beta creado antes de esto (sin lista) se suma a la lista más reciente
+  // anterior a él; uno creado antes de cualquier lista con su empresa, no. Idempotente.
+  await db.query(`INSERT INTO sdr.leads (empresa, contacto, telefono, fuente, created_at) VALUES ('Beta S.A.', 'Lia', '+573007000020', 'marcacion directa', '2026-10-08T14:00:00Z'), ('Beta', 'Max', '+573007000021', 'marcacion directa', '2026-10-01T14:00:00Z')`);
+  const sim = await Li.asociarHistoricos(db, base, { simular: true });
+  assert.deepStrictEqual(sim.detalle.map(x => [x.contacto, x.lista]), [['Lia', 'Nueva']]);
+  assert.strictEqual((await db.query(`SELECT COUNT(*)::int AS n FROM sdr.lista_leads ll JOIN sdr.leads l ON l.id = ll.lead_id WHERE l.contacto = 'Lia'`)).rows[0].n, 0, 'simular no cambia nada');
+  const ap = await Li.asociarHistoricos(db, base);
+  assert.strictEqual(ap.asociados, 1);
+  assert.strictEqual((await Li.asociarHistoricos(db, base)).asociados, 0);
+  Li._reiniciar();
+  assert.ok(await Li.jobAsociar(db, base, { log: { log() {} } }));
+  assert.strictEqual(await Li.jobAsociar(db, base, { log: { log() {} } }), null);
+  await db.end();
+});
