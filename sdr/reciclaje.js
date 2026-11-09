@@ -51,20 +51,23 @@ async function correr(db, config, { ahora = new Date(), simular = false } = {}) 
   // 2 · Huérfanos con historia: nada pendiente, ya tocados, sin pausa (incluye los que quedaron sin
   //     nada por el paso 1).
   const h = await db.query(
-    `SELECT l.id, l.etapa, l.empresa FROM ${T.leads} l
+    `SELECT l.id, l.etapa, l.empresa,
+            EXISTS (SELECT 1 FROM ${T.touches} x WHERE x.lead_id = l.id AND x.resultado IN ('conversacion', 'pide_info', 'reunion_agendada')) AS hablo
+     FROM ${T.leads} l
      WHERE l.etapa IN (SELECT jsonb_array_elements_text($1::jsonb)) AND l.pausado_hasta IS NULL
        AND EXISTS (SELECT 1 FROM ${T.touches} x WHERE x.lead_id = l.id AND x.canal <> 'ejecutiva')
        AND NOT EXISTS (SELECT 1 FROM ${T.tasks} t WHERE t.lead_id = l.id AND t.estado = 'pendiente'${simular && r.vencidaDias ? ` AND NOT (t.tipo = 'secuencia' AND t.due_at < $2)` : ''})`,
     simular && r.vencidaDias ? [etapas, new Date(ahora.getTime() - r.vencidaDias * 86400000).toISOString()] : [etapas]);
   for (const l of h.rows) {
-    if (l.etapa === 'conversacion') {
+    // Con alguien que ya conversó con Angie no se descarta "sin respuesta": pausa (sin_avance).
+    if (l.etapa === 'conversacion' || l.hablo) {
       out.huerfanos_pausados++;
       if (!simular) await R.pausarPorReciclaje(db, config, l.id, { meses: r.pausaMeses, ahora, nota: 'Conversaciones sin avance y sin próximo toque (reciclaje)' });
     } else if (r.agotarDescarta) {
       out.huerfanos_descartados++; out.agotados++;
       if (!simular) await db.query(`UPDATE ${T.leads} SET etapa = 'descartado', etapa_at = NOW(), updated_at = NOW(), razon_descarte = 'sin_respuesta' WHERE id = $1`, [l.id]);
     }
-    if (out.detalle.length < 30) out.detalle.push({ lead_id: l.id, empresa: l.empresa, etapa: l.etapa, accion: l.etapa === 'conversacion' ? 'pausa' : (r.agotarDescarta ? 'descartar' : 'nada') });
+    if (out.detalle.length < 30) out.detalle.push({ lead_id: l.id, empresa: l.empresa, etapa: l.etapa, accion: (l.etapa === 'conversacion' || l.hablo) ? 'pausa' : (r.agotarDescarta ? 'descartar' : 'nada') });
   }
 
   // 3 · Sin teléfono y sin toques: fuera de la cola.

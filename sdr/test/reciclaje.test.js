@@ -91,5 +91,30 @@ test('reciclaje', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async (t) => {
     assert.strictEqual(l.etapa, 'descartado'); assert.strictEqual(l.razon_descarte, 'sin_respuesta');
   });
 
+  await t.test('quien ya conversó no se descarta por no contestar: reintentos y luego pausa', async () => {
+    await importar(db, base, { archivo: 'c.csv', contenido: 'empresa,contacto,telefono\nHablo,Lu,3007770099', simular: false, ahora: lunes });
+    const hablo = await id('Hablo');
+    // Conversa ("estoy en reunión, llámame a la 1") y a la 1 no contesta: antes quedaba descartado.
+    await registrarToque(db, base, { leadId: hablo, canal: 'llamada', resultado: 'conversacion', ahora: new Date('2026-11-03T16:00:00Z') });
+    let r = await registrarToque(db, base, { leadId: hablo, canal: 'llamada', resultado: 'no_contesto', ahora: new Date('2026-11-03T18:00:00Z') });
+    assert.notStrictEqual((await lead('Hablo')).etapa, 'descartado');
+    assert.ok(r.proxima, 'tiene próximo toque');
+    assert.ok(r.avisos.some(a => /Ya habían conversado: no se descarta/.test(a)), JSON.stringify(r.avisos));
+    r = await registrarToque(db, base, { leadId: hablo, canal: 'llamada', resultado: 'no_contesto', ahora: new Date('2026-11-04T14:00:00Z') });
+    assert.ok(r.avisos.some(a => /intento 2 de 3/.test(a)), JSON.stringify(r.avisos));
+    r = await registrarToque(db, base, { leadId: hablo, canal: 'llamada', resultado: 'no_contesto', ahora: new Date('2026-11-05T14:00:00Z') });
+    const l = await lead('Hablo');
+    assert.strictEqual(l.razon_descarte, 'sin_avance'); assert.ok(l.pausado_hasta, 'en pausa, no descartado');
+    assert.notStrictEqual(l.etapa, 'descartado');
+    assert.ok(r.avisos.some(a => /3 intentos sin respuesta después de la conversación/.test(a)));
+    // El hueco: 1 intento → a la primera falta sale en pausa.
+    await importar(db, base, { archivo: 'd.csv', contenido: 'empresa,contacto,telefono\nHablo2,Mo,3007770098', simular: false, ahora: lunes });
+    const h2 = await id('Hablo2');
+    const uno = { ...base, TRAS_CONVERSACION: { ...base.TRAS_CONVERSACION, intentos_sin_respuesta: 1 } };
+    await registrarToque(db, uno, { leadId: h2, canal: 'llamada', resultado: 'conversacion', ahora: new Date('2026-11-03T16:00:00Z') });
+    await registrarToque(db, uno, { leadId: h2, canal: 'llamada', resultado: 'no_contesto', ahora: new Date('2026-11-03T18:00:00Z') });
+    assert.strictEqual((await lead('Hablo2')).razon_descarte, 'sin_avance');
+  });
+
   await db.end();
 });

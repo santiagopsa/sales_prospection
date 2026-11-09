@@ -398,7 +398,30 @@ async function registrarToque(db, config, {
         avisos.push(`Aceptó la conexión: el mensaje de LinkedIn queda programado para ${new Date(t.due_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'short' }) === new Date(ahora).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'short' }) ? 'hoy' : 'el ' + new Date(t.due_at).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'short', day: 'numeric', month: 'short' })}.`);
       }
       proxima = pendientes[0] || null;
-      if (!proxima && config.AL_AGOTAR_SECUENCIA === 'descartar') {
+      // Si ya hubo conversación, que no conteste ahora no es "sin respuesta": se le vuelve a buscar
+      // (TRAS_CONVERSACION.intentos_sin_respuesta intentos desde la última conversación) y, si sigue
+      // sin aparecer, sale en pausa por sin_avance (RECICLAJE.pausa_meses), nunca descartado.
+      const conv = !proxima ? await conversacionesPrevias(c, leadId, toque.id) : 0;
+      if (!proxima && conv > 0) {
+        const tc = config.TRAS_CONVERSACION || {};
+        const max = tc.intentos_sin_respuesta == null ? 3 : Number(tc.intentos_sin_respuesta) || 0;
+        const desde = await c.query(
+          `SELECT COUNT(*)::int AS n FROM ${T.touches} WHERE lead_id = $1 AND canal <> 'ejecutiva'
+             AND created_at > COALESCE((SELECT MAX(created_at) FROM ${T.touches} WHERE lead_id = $1 AND id <> $2 AND resultado IN (SELECT jsonb_array_elements_text($3::jsonb))), 'epoch')`,
+          [leadId, toque.id, JSON.stringify(D.RESULTADOS_CON_CONVERSACION)]);
+        const intentos = desde.rows[0].n;
+        if (intentos < max) {
+          const dias = tc.dias_reintento == null ? 1 : Number(tc.dias_reintento);
+          proxima = await programar(c, config, leadId, tc.canal || 'llamada', dias, ahora);
+          avisos.push(`Ya habían conversado: no se descarta. Se le vuelve a buscar ${dias ? 'en ' + dias + (dias === 1 ? ' día' : ' días') : 'hoy'} (intento ${intentos} de ${max} sin respuesta desde la última conversación).`);
+        } else {
+          const rc = config.RECICLAJE || {};
+          const leadAhora = await leerLead(c, leadId);
+          const sc = await sacarDeCola(c, config, leadAhora, { razon: 'sin_avance', meses: Number(rc.pausa_meses) || 3, nota, usuario, ahora });
+          proxima = sc.proxima; pausadoHasta = sc.pausado_hasta;
+          avisos.push(`${max} intentos sin respuesta después de la conversación: sale en pausa hasta ${new Date(sc.pausado_hasta).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: 'numeric', month: 'short', year: 'numeric' })} (sin avance), no descartado.`);
+        }
+      } else if (!proxima && config.AL_AGOTAR_SECUENCIA === 'descartar') {
         await cambiarEtapa(c, leadId, 'descartado', { razon_descarte: 'sin_respuesta' });
         avisos.push('Se agotó la secuencia sin conversación: el lead pasó a descartado (sin respuesta).');
       } else if (!proxima) {

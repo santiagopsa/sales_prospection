@@ -322,7 +322,11 @@ module.exports = {
   // reunión se hace el siguiente toque, y por qué canal. Reemplaza lo que dijera la secuencia:
   // después de hablar con alguien, el ritmo lo pone la conversación, no la lista.
   // Ver el efecto: node sdr/cli.js resultado conversacion --etapa contactado
-  TRAS_CONVERSACION: { canal: 'llamada', dias: 3 },
+  //   intentos_sin_respuesta: si alguien que YA conversó con Angie no contesta los toques siguientes,
+  //     cuántos intentos se hacen desde la última conversación antes de sacarlo en pausa (sin_avance,
+  //     RECICLAJE.pausa_meses). Nunca se descarta como "sin respuesta": dijo "llámame a la 1" y no
+  //     contestó a la 1 no es lo mismo que nunca haber contestado. dias_reintento: cada cuánto (0 = hoy).
+  TRAS_CONVERSACION: { canal: 'llamada', dias: 3, intentos_sin_respuesta: 3, dias_reintento: 1 },
 
   // Qué mueve: qué pasa cuando el prospecto dice "mándame la información" (resultado pide_info).
   // Casi siempre es la forma educada de colgar, así que se trata como objeción, no como interés:
