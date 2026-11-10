@@ -10,7 +10,7 @@
 //   node sdr/cli.js llamadas [--desde 2026-10-27] [--hasta 2026-10-29] [--fijos|--celulares] [--csv archivo]  registro de llamadas por Voximplant (ID de sesión, quién colgó, tono, segundos marcando) para el operador
 //   node sdr/cli.js listas [--lista ID]                        calidad de cada lista: faltan, tocados, conversaciones, reuniones, nota y por qué (reglas LISTAS.calificacion)
 //   node sdr/cli.js listas --asociar [--aplicar]                contactos ya hechos de empresas de una lista que sumarían a esa lista (LISTAS.misma_empresa)
-//   node sdr/cli.js reciclaje [--aplicar]                       qué saldría de la cola hoy (secuencias vencidas, huérfanos, sin teléfono); --aplicar lo hace
+//   node sdr/cli.js reciclaje [--aplicar]                       qué saldría de la cola hoy (secuencias vencidas, huérfanos, sin datos de contacto) y qué se rescata; --aplicar lo hace
 //   node sdr/cli.js brevo-contactos [--sincronizar N]             contactos de Angie en Brevo: estado, errores; --sincronizar manda N leads ya
 //   node sdr/cli.js prueba <deal_id>                            la ficha de una prueba: champion, criterio, fechas, números, página y decisión (reglas PRUEBA)
 //   node sdr/cli.js invitados <lead_id>                         reunión del lead: formulario de Calendly, invitados y si aceptaron (Google)
@@ -233,7 +233,7 @@ async function main() {
     } else if (cmd === 'reciclaje') {
       const r = await require('./reciclaje').correr(db, config, { simular: !args.aplicar });
       console.log(`\nReciclaje ${r.simulado ? '(simulación, nada cambió; --aplicar para hacerlo)' : 'aplicado'} · reglas: ${JSON.stringify(config.RECICLAJE)} · AL_AGOTAR_SECUENCIA=${config.AL_AGOTAR_SECUENCIA}`);
-      console.log(`  ${r.secuencias_omitidas} toques de secuencia vencidos (${r.leads_con_secuencia_omitida} leads) · ${r.huerfanos_pausados} en conversación sin próximo toque → pausa · ${r.huerfanos_descartados} sin respuesta → descartados · ${r.sin_telefono} sin teléfono → datos_malos`);
+      console.log(`  ${r.secuencias_omitidas} toques de secuencia vencidos (${r.leads_con_secuencia_omitida} leads) · ${r.huerfanos_pausados} en conversación sin próximo toque → pausa · ${r.huerfanos_descartados} sin respuesta → descartados · ${r.sin_contacto} sin teléfono, correo ni LinkedIn → sin_contacto · ${r.rescatados} sin teléfono descartados por la regla vieja → de vuelta a la cola`);
       for (const d of r.detalle) console.log(`    #${d.lead_id} ${d.empresa} (${d.etapa}) → ${d.accion}`);
     } else if (cmd === 'brevo-contactos') {
       const BC = require('./brevo_contactos');

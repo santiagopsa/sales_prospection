@@ -380,15 +380,22 @@ module.exports = {
   //   secuencia_vencida_dias: un toque de secuencia atrasado más de esto ya no vale: se omite. Si al
   //     lead no le queda nada y ya se le marcó, se agota (AL_AGOTAR_SECUENCIA). Los leads a los que
   //     nunca se ha llamado no se tocan: son el pozo, no reciclaje.
-  //   sin_telefono: true = un lead sin teléfono y sin toques sale de la cola como datos_malos (no se
-  //     puede llamar; sigue en Brevo para correo).
+  //   sin_contacto: true = un lead sin toques que no tiene NADA para trabajarlo (ni teléfono, ni
+  //     correo, ni LinkedIn) sale de la cola (razón sin_contacto). Uno sin teléfono pero con correo o
+  //     LinkedIn se queda: Angie le busca el número o lo trabaja por esos canales.
+  //   rescatar_dias: los leads que la regla vieja (hasta nov-2026 descartaba todo lo que no tenía
+  //     teléfono, como "número o correo equivocado") sacó sin haberlos tocado nunca y que sí tienen
+  //     correo o LinkedIn, vuelven a la cola con su secuencia desde hoy si llegaron hace menos de
+  //     estos días. null = ninguno; un número grande = todos (también las bases viejas de solo correo).
   // Ver el efecto: node sdr/cli.js reciclaje            (qué haría hoy, sin cambiar nada)
   //                node sdr/cli.js reciclaje --aplicar
+  //                node sdr/cli.js reciclaje --set RECICLAJE.rescatar_dias=90
   RECICLAJE: {
     conversaciones_max: 2,
     pausa_meses: 3,
     secuencia_vencida_dias: 7,
-    sin_telefono: true,
+    sin_contacto: true,
+    rescatar_dias: 30,
   },
 
   // Qué mueve: un compromiso con fecha (seguimiento, enviar algo, otra tarea) manda sobre la

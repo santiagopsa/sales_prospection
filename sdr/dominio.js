@@ -66,10 +66,10 @@ const RESPUESTAS_OTRO_CANAL = ['conversacion', 'pide_info', 'reunion_agendada', 
 // Razones para sacar un lead de la cola. Con una razón "no ahora" (sin presupuesto, ya tiene
 // proveedor…) el lead se puede PAUSAR en vez de descartar: vuelve solo a la cola meses después
 // (REINTENTO_POR_RAZON en config). Las definitivas nunca ofrecen reintento.
-const RAZONES_DESCARTE = ['no_interesa', 'sin_necesidad', 'sin_presupuesto', 'ya_tiene_proveedor', 'no_es_decisor', 'no_contactar', 'datos_malos', 'sin_respuesta', 'sin_avance', 'lista_negra', 'otro'];
+const RAZONES_DESCARTE = ['no_interesa', 'sin_necesidad', 'sin_presupuesto', 'ya_tiene_proveedor', 'no_es_decisor', 'no_contactar', 'datos_malos', 'sin_respuesta', 'sin_avance', 'lista_negra', 'sin_contacto', 'otro'];
 // Razones que pone la app sola (no salen en el diálogo de descarte).
-const RAZONES_AUTOMATICAS = ['sin_respuesta', 'sin_avance', 'lista_negra'];
-const RAZONES_DEFINITIVAS = ['no_contactar', 'datos_malos', 'sin_respuesta', 'lista_negra'];
+const RAZONES_AUTOMATICAS = ['sin_respuesta', 'sin_avance', 'lista_negra', 'sin_contacto'];
+const RAZONES_DEFINITIVAS = ['no_contactar', 'datos_malos', 'sin_respuesta', 'lista_negra', 'sin_contacto'];
 
 const RAZON_LABEL = {
   no_interesa: 'No le interesa',
@@ -82,6 +82,7 @@ const RAZON_LABEL = {
   sin_respuesta: 'Nunca respondió',
   sin_avance: 'Conversaciones sin avance (pausa automática)',
   lista_negra: 'En lista negra (empresa o contacto vetado)',
+  sin_contacto: 'Sin teléfono, correo ni LinkedIn',
   otro: 'Otro',
 };
 

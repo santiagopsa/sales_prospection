@@ -57,15 +57,18 @@ test('reciclaje', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async (t) => {
     // Tres: en conversación con seguimiento programado para el 2026-10-28 (3 días hábiles después del 23).
     // Pozo: nunca tocado, con la secuencia del 19-oct vencida: no se toca.
     const ahora = new Date('2026-11-20T14:00:00Z');   // un mes después: todo vencido
+    // Un lead sin nada para trabajarlo (sin teléfono, correo ni LinkedIn) sí sale; SinTel tiene correo: se queda.
+    await db.query(`INSERT INTO sdr.leads (empresa, contacto, fuente) VALUES ('Nada', 'Ñu', 'prueba')`);
     const sim = await Rc.correr(db, base, { ahora, simular: true });
-    assert.strictEqual(sim.sin_telefono, 1, 'SinTel');
+    assert.strictEqual(sim.sin_contacto, 1, 'solo Nada');
     assert.ok(sim.secuencias_omitidas >= 1, 'el seguimiento vencido de Tres (y los de Dos)');
     assert.strictEqual(sim.huerfanos_pausados, 1, 'Tres queda sin nada → pausa (simulación cuenta igual)');
     assert.strictEqual((await lead('SinTel')).etapa, 'nuevo', 'simular no cambia nada');
     const r = await Rc.correr(db, base, { ahora });
-    assert.strictEqual(r.sin_telefono, 1);
-    assert.deepStrictEqual([(await lead('SinTel')).etapa, (await lead('SinTel')).razon_descarte], ['descartado', 'datos_malos']);
-    assert.deepStrictEqual(await pendientes('SinTel'), []);
+    assert.strictEqual(r.sin_contacto, 1);
+    assert.deepStrictEqual([(await lead('Nada')).etapa, (await lead('Nada')).razon_descarte], ['descartado', 'sin_contacto']);
+    assert.strictEqual((await lead('SinTel')).etapa, 'nuevo', 'sin teléfono pero con correo: se queda en la cola');
+    assert.ok((await pendientes('SinTel')).length > 0);
     const tres = await lead('Tres');
     assert.strictEqual(tres.etapa, 'conversacion'); assert.strictEqual(tres.razon_descarte, 'sin_avance'); assert.ok(tres.pausado_hasta);
     assert.strictEqual((await db.query(`SELECT COUNT(*)::int AS n FROM sdr.touches WHERE lead_id=$1 AND canal='ejecutiva' AND resultado='pausado'`, [await id('Tres')])).rows[0].n, 1, 'rastro en el historial');
@@ -75,7 +78,7 @@ test('reciclaje', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async (t) => {
     assert.ok((await pendientes('Dos')).some(x => x.tipo === 'seguimiento'));
     // Idempotente y una vez al día.
     const r2 = await Rc.correr(db, base, { ahora });
-    assert.deepStrictEqual([r2.secuencias_omitidas, r2.huerfanos_pausados, r2.sin_telefono], [0, 0, 0]);
+    assert.deepStrictEqual([r2.secuencias_omitidas, r2.huerfanos_pausados, r2.sin_contacto], [0, 0, 0]);
     Rc._reiniciar();
     assert.ok(await Rc.jobDiario(db, base, { ahora, log: { log() {}, error() {} } }));
     assert.strictEqual(await Rc.jobDiario(db, base, { ahora, log: { log() {}, error() {} } }), null);
@@ -89,6 +92,29 @@ test('reciclaje', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async (t) => {
     for (let i = 0; i < n; i++) r = await registrarToque(db, base, { leadId: pozo, canal: base.SECUENCIA_POR_DEFECTO[i].canal, resultado: 'no_contesto', ahora: lunes });
     const l = await lead('Pozo');
     assert.strictEqual(l.etapa, 'descartado'); assert.strictEqual(l.razon_descarte, 'sin_respuesta');
+  });
+
+  await t.test('rescate: los que la regla vieja descartó por no tener teléfono vuelven a la cola', async () => {
+    const ahora = new Date('2026-11-10T14:00:00Z');
+    await db.query(`INSERT INTO sdr.leads (empresa, contacto, email, etapa, razon_descarte, fuente, created_at) VALUES
+      ('Oxo', 'Javier', 'j@oxo.co', 'descartado', 'datos_malos', 'prueba', '2026-11-05T14:00:00Z'),
+      ('Vieja Base', 'Ana', 'a@vieja.co', 'descartado', 'datos_malos', 'prueba', '2026-09-01T14:00:00Z'),
+      ('Tocada', 'Bea', 'b@tocada.co', 'descartado', 'datos_malos', 'prueba', '2026-11-05T14:00:00Z')`);
+    await db.query(`INSERT INTO sdr.touches (lead_id, canal, resultado, created_at) SELECT id, 'correo', 'correo', '2026-11-06T14:00:00Z' FROM sdr.leads WHERE empresa = 'Tocada'`);
+    const sim = await Rc.correr(db, base, { ahora, simular: true });
+    assert.strictEqual(sim.rescatados, 1, 'solo Oxo: Vieja Base está fuera de rescatar_dias y Tocada ya tuvo un toque');
+    assert.strictEqual((await lead('Oxo')).etapa, 'descartado', 'simular no cambia nada');
+    const r = await Rc.correr(db, base, { ahora });
+    assert.strictEqual(r.rescatados, 1);
+    const oxo = await lead('Oxo');
+    assert.deepStrictEqual([oxo.etapa, oxo.razon_descarte], ['nuevo', null]);
+    const p = await pendientes('Oxo');
+    assert.strictEqual(p.length, base.SECUENCIA_POR_DEFECTO.length, 'secuencia completa desde hoy');
+    assert.strictEqual((await Rc.correr(db, base, { ahora })).rescatados, 0, 'idempotente');
+    // El hueco: con una ventana grande entra también la base vieja.
+    const amplio = { ...base, RECICLAJE: { ...base.RECICLAJE, rescatar_dias: 365 } };
+    assert.strictEqual((await Rc.correr(db, amplio, { ahora, simular: true })).rescatados, 1);
+    assert.strictEqual((await Rc.correr(db, { ...base, RECICLAJE: { ...base.RECICLAJE, rescatar_dias: null } }, { ahora, simular: true })).rescatados, 0);
   });
 
   await t.test('quien ya conversó no se descarta por no contestar: reintentos y luego pausa', async () => {

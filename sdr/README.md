@@ -544,7 +544,12 @@ en `config.js` y `sdr/reciclaje.js` sacan de la cola lo que ya no va a dar más:
   omite, solo en leads ya tocados; a los que nunca se ha llamado no se les toca nada (son el pozo). Si al
   lead no le queda nada, se agota: `AL_AGOTAR_SECUENCIA` ahora es `descartar` (sin_respuesta).
 - **Huérfanos con historia**: en conversación → pausa `sin_avance`; en nuevo/contactado → descartado.
-- **Sin teléfono** y sin toques → `datos_malos` (no se puede llamar; siguen en Brevo para correo).
+- **Sin nada para contactarlo** (sin teléfono, sin correo y sin LinkedIn) y sin toques → `sin_contacto`.
+  Un lead sin teléfono pero con correo o LinkedIn **se queda** en la cola: Angie le busca el número o lo
+  trabaja por correo y LinkedIn (`RECICLAJE.sin_contacto`). Hasta nov-2026 la regla descartaba todo lo
+  que no tenía teléfono como "número o correo equivocado", incluso listas recién cargadas; los que sacó
+  así sin tocarlos nunca y que llegaron hace menos de `RECICLAJE.rescatar_dias` (30) vuelven solos a la
+  cola con su secuencia desde hoy (`node sdr/cli.js reciclaje` muestra cuántos).
 
 Corre al arrancar y una vez al día. `node sdr/cli.js reciclaje` muestra qué haría hoy sin cambiar nada;
 `--aplicar` lo hace. Un lead descartado o en pausa se puede reactivar desde su ficha.
