@@ -395,7 +395,7 @@ module.exports = {
     pausa_meses: 3,
     secuencia_vencida_dias: 7,
     sin_contacto: true,
-    rescatar_dias: 30,
+    rescatar_dias: 90,
   },
 
   // Qué mueve: un compromiso con fecha (seguimiento, enviar algo, otra tarea) manda sobre la

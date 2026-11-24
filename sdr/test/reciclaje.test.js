@@ -101,16 +101,17 @@ test('reciclaje', { skip: !url && 'sin SDR_TEST_DATABASE_URL' }, async (t) => {
       ('Vieja Base', 'Ana', 'a@vieja.co', 'descartado', 'datos_malos', 'prueba', '2026-09-01T14:00:00Z'),
       ('Tocada', 'Bea', 'b@tocada.co', 'descartado', 'datos_malos', 'prueba', '2026-11-05T14:00:00Z')`);
     await db.query(`INSERT INTO sdr.touches (lead_id, canal, resultado, created_at) SELECT id, 'correo', 'correo', '2026-11-06T14:00:00Z' FROM sdr.leads WHERE empresa = 'Tocada'`);
-    const sim = await Rc.correr(db, base, { ahora, simular: true });
+    const corto = { ...base, RECICLAJE: { ...base.RECICLAJE, rescatar_dias: 30 } }; // la ventana fija: la prueba no depende del hueco de config
+    const sim = await Rc.correr(db, corto, { ahora, simular: true });
     assert.strictEqual(sim.rescatados, 1, 'solo Oxo: Vieja Base está fuera de rescatar_dias y Tocada ya tuvo un toque');
     assert.strictEqual((await lead('Oxo')).etapa, 'descartado', 'simular no cambia nada');
-    const r = await Rc.correr(db, base, { ahora });
+    const r = await Rc.correr(db, corto, { ahora });
     assert.strictEqual(r.rescatados, 1);
     const oxo = await lead('Oxo');
     assert.deepStrictEqual([oxo.etapa, oxo.razon_descarte], ['nuevo', null]);
     const p = await pendientes('Oxo');
     assert.strictEqual(p.length, base.SECUENCIA_POR_DEFECTO.length, 'secuencia completa desde hoy');
-    assert.strictEqual((await Rc.correr(db, base, { ahora })).rescatados, 0, 'idempotente');
+    assert.strictEqual((await Rc.correr(db, corto, { ahora })).rescatados, 0, 'idempotente');
     // El hueco: con una ventana grande entra también la base vieja.
     const amplio = { ...base, RECICLAJE: { ...base.RECICLAJE, rescatar_dias: 365 } };
     assert.strictEqual((await Rc.correr(db, amplio, { ahora, simular: true })).rescatados, 1);
